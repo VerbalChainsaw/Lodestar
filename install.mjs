@@ -2,11 +2,12 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+import { atomicWriteFile } from "./lib/atomic-file.mjs";
 import {
   optionValue,
   optionValues,
@@ -223,6 +224,76 @@ function pathConfigured(binDirectory, {
     .some((entry) => normalize(entry) === wanted);
 }
 
+function cmdQuoted(value) {
+  return `"${String(value).replaceAll("%", "%%")}"`;
+}
+
+export async function installWindowsCompatibilityShims({
+  npmPrefix,
+  packageRoot,
+  bins,
+  pathApi = path.win32,
+  fsApi,
+} = {}) {
+  if (!npmPrefix || !packageRoot || !bins || typeof bins !== "object") {
+    throw new LodestarError(
+      "installer-shim-input-invalid",
+      "Windows compatibility shims require a prefix, package root, and bin map",
+    );
+  }
+  const compatibilityBin = pathApi.join(npmPrefix, "bin");
+  try {
+    await (fsApi?.mkdir ?? mkdir)(compatibilityBin, { recursive: true });
+    const installedRoot = pathApi.resolve(packageRoot);
+    const written = [];
+    for (const [command, relativeTarget] of Object.entries(bins).sort(
+      ([left], [right]) => left.localeCompare(right),
+    )) {
+      if (
+        !/^[a-zA-Z0-9._-]+$/.test(command)
+        || typeof relativeTarget !== "string"
+        || relativeTarget.length === 0
+      ) {
+        throw new LodestarError(
+          "installer-package-bin-invalid",
+          "Installed package contains an unsafe command mapping",
+          { detail: { command, target: relativeTarget ?? null } },
+        );
+      }
+      const target = pathApi.resolve(packageRoot, relativeTarget);
+      const relative = pathApi.relative(installedRoot, target);
+      if (
+        relative === ".."
+        || relative.startsWith(`..${pathApi.sep}`)
+        || pathApi.isAbsolute(relative)
+      ) {
+        throw new LodestarError(
+          "installer-package-bin-invalid",
+          "Installed package command escapes its package root",
+          { detail: { command, target: relativeTarget } },
+        );
+      }
+      await (fsApi?.access ?? access)(target);
+      const shim = pathApi.join(compatibilityBin, `${command}.cmd`);
+      await atomicWriteFile(
+        shim,
+        `@ECHO off\r\nnode ${cmdQuoted(target)} %*\r\n`,
+        { ...(fsApi ? { fsApi } : {}) },
+      );
+      written.push(shim);
+    }
+    return { bin: compatibilityBin, shims: written };
+  } catch (error) {
+    if (error instanceof LodestarError) throw error;
+    throw wrapError(
+      error,
+      "installer-compatibility-shim-failed",
+      "Unable to install Windows compatibility command shims",
+      { bin: compatibilityBin },
+    );
+  }
+}
+
 export async function installLodestar(
   args,
   {
@@ -348,6 +419,7 @@ export async function installLodestar(
       { entrypoint: installedMain },
     );
   }
+  let installedBins;
   try {
     const installedPackage = JSON.parse(await readFile(
       pathApi.join(npmRoot, metadata.name, "package.json"),
@@ -356,6 +428,9 @@ export async function installLodestar(
     if (
       installedPackage.name !== PACKAGE_NAME
       || typeof installedPackage.version !== "string"
+      || !installedPackage.bin
+      || typeof installedPackage.bin !== "object"
+      || Array.isArray(installedPackage.bin)
     ) {
       throw new Error("installed package identity is invalid");
     }
@@ -363,6 +438,7 @@ export async function installLodestar(
       name: installedPackage.name,
       version: installedPackage.version,
     };
+    installedBins = installedPackage.bin;
   } catch (error) {
     throw wrapError(
       error,
@@ -372,6 +448,14 @@ export async function installLodestar(
     );
   }
 
+  const compatibility = platform === "win32"
+    ? await installWindowsCompatibilityShims({
+      npmPrefix,
+      packageRoot: pathApi.join(npmRoot, metadata.name),
+      bins: installedBins,
+      pathApi,
+    })
+    : null;
   const commonArguments = [
     ...(stateHome ? ["--home", stateHome] : []),
   ];
@@ -399,9 +483,24 @@ export async function installLodestar(
     }), "Codex adapter installation");
   }
 
-  const binDirectory = platform === "win32"
+  const standardBin = platform === "win32"
     ? npmPrefix
     : pathApi.join(npmPrefix, "bin");
+  const standardConfigured = pathConfigured(standardBin, {
+    env,
+    platform,
+    pathApi,
+  });
+  const compatibilityConfigured = compatibility
+    ? pathConfigured(compatibility.bin, {
+      env,
+      platform,
+      pathApi,
+    })
+    : false;
+  const binDirectory = standardConfigured || !compatibilityConfigured
+    ? standardBin
+    : compatibility.bin;
   const result = {
     ok: true,
     package: {
@@ -411,11 +510,8 @@ export async function installLodestar(
     },
     prefix: npmPrefix,
     bin: binDirectory,
-    path_configured: pathConfigured(binDirectory, {
-      env,
-      platform,
-      pathApi,
-    }),
+    compatibility_bin: compatibility?.bin ?? null,
+    path_configured: standardConfigured || compatibilityConfigured,
     initialized: legacyHome ? null : stateResult,
     migration: legacyHome ? stateResult : null,
     codex,

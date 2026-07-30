@@ -15,6 +15,7 @@ import test from "node:test";
 
 import {
   installLodestar,
+  installWindowsCompatibilityShims,
   resolveNpmInvocation,
 } from "../install.mjs";
 
@@ -117,6 +118,36 @@ test("installer rejects unsupported Node and unknown arguments", async () => {
   );
 });
 
+test("Windows compatibility shims replace a stale prefix-bin command", async () => {
+  await withTemp("lodestar-installer-shim-", async (root) => {
+    const prefix = path.join(root, "prefix");
+    const installed = path.join(root, "package");
+    const target = path.join(installed, "agentctx.mjs");
+    await mkdir(path.join(prefix, "bin"), { recursive: true });
+    await mkdir(installed);
+    await writeFile(target, "#!/usr/bin/env node\n");
+    await writeFile(
+      path.join(prefix, "bin", "agentctx.cmd"),
+      "@ECHO off\r\nnode C:\\legacy\\agentctx.mjs %*\r\n",
+    );
+
+    const result = await installWindowsCompatibilityShims({
+      npmPrefix: prefix,
+      packageRoot: installed,
+      bins: { agentctx: "./agentctx.mjs" },
+      pathApi: path,
+    });
+
+    assert.equal(result.bin, path.join(prefix, "bin"));
+    assert.deepEqual(result.shims, [
+      path.join(prefix, "bin", "agentctx.cmd"),
+    ]);
+    const shim = await readFile(result.shims[0], "utf8");
+    assert.doesNotMatch(shim, /legacy/);
+    assert.match(shim, /package[\\/]agentctx\.mjs/);
+  });
+});
+
 test("installer performs an isolated package, state, and Codex installation", async () => {
   await withTemp("lodestar-installer-e2e-", async (root) => {
     const prefix = path.join(root, "prefix");
@@ -139,7 +170,7 @@ test("installer performs an isolated package, state, and Codex installation", as
     assert.equal(stderr, "");
     const result = JSON.parse(stdout);
     assert.equal(result.ok, true);
-    assert.equal(result.package.version, "0.4.0");
+    assert.equal(result.package.version, "0.4.1");
     assert.equal(result.initialized.created, true);
     assert.equal(result.codex.ok, true);
     assert.match(
@@ -155,6 +186,16 @@ test("installer performs an isolated package, state, and Codex installation", as
       "lodestar-agent-context",
       "agentctx.mjs",
     );
+    if (process.platform === "win32") {
+      assert.equal(
+        result.compatibility_bin,
+        path.join(prefix, "bin"),
+      );
+      assert.match(
+        await readFile(path.join(prefix, "bin", "agentctx.cmd"), "utf8"),
+        /lodestar-agent-context[\\/]agentctx\.mjs/,
+      );
+    }
     const doctor = await execFileAsync(process.execPath, [
       installedMain,
       "doctor",

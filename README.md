@@ -74,7 +74,7 @@ instruction block. Useful options are:
 The direct npm path remains supported:
 
 ```text
-npm install -g ./lodestar-agent-context-0.4.0.tgz
+npm install -g ./lodestar-agent-context-0.4.1.tgz
 agentctx init
 agentctx doctor
 ```
