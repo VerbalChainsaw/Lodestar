@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  access,
   mkdir,
   readFile,
   writeFile,
@@ -184,6 +185,37 @@ test("doctor reports missing roots and broken links without crashing", async () 
     assert.ok(result.issues.some(({ code }) => code === "missing-root"));
     assert.ok(result.issues.some(({ code }) => code === "broken-link"));
     assert.ok(result.issues.some(({ code }) => code === "broken-route"));
+  });
+});
+
+test("doctor translates cataloged Windows roots under WSL", async () => {
+  await withStoreFixture(paritySource, async ({ home, generation, source }) => {
+    const windowsRoot = String.raw`C:\Users\Alex\Project`;
+    const translatedRoot = "/mnt/c/Users/Alex/Project";
+    source.catalog.projects[0].roots = [windowsRoot];
+    await writeFile(
+      path.join(generation.root, "catalog.json"),
+      JSON.stringify(source.catalog),
+    );
+    const accesses = [];
+    const store = await ContextStore.open({
+      home,
+      cwd: source.root,
+      project: "p:demo",
+      platform: "linux",
+      env: { WSL_DISTRO_NAME: "Ubuntu" },
+      release: "6.8.0-microsoft-standard-WSL2",
+      fsApi: {
+        access: async (target) => {
+          if (target === translatedRoot) accesses.push(target);
+          else await access(target);
+        },
+      },
+    });
+
+    const result = await store.doctor();
+    assert.equal(result.ok, true);
+    assert.deepEqual(accesses, [translatedRoot]);
   });
 });
 

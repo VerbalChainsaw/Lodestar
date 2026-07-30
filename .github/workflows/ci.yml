@@ -26,7 +26,7 @@ jobs:
       - run: node install.mjs --dry-run --skip-codex
       - run: npm pack --dry-run
       - run: npm pack
-      - run: node install.mjs --package ./lodestar-agent-context-0.4.1.tgz --prefix .installer-smoke --home .installer-state --skip-codex
-      - run: npm install --prefix .package-smoke ./lodestar-agent-context-0.4.1.tgz
+      - run: node install.mjs --package ./lodestar-agent-context-0.4.2.tgz --prefix .installer-smoke --home .installer-state --skip-codex
+      - run: npm install --prefix .package-smoke ./lodestar-agent-context-0.4.2.tgz
       - run: npm --prefix .package-smoke exec -- agentctx init --home ../.package-smoke-state
       - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state
