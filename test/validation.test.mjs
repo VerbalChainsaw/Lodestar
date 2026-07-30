@@ -92,19 +92,24 @@ test("confines project-relative locators without requiring the target to exist",
 });
 
 test("permits explicit external locators", () => {
-  assert.doesNotThrow(() => validateGraph({
-    catalog: {
-      v: 1,
-      projects: [{ id: "p:sample", roots: ["/projects/sample"] }],
-    },
-    records: [record({
-      kind: "index",
-      locators: [{
-        type: "external-file",
-        path: path.resolve("/shared/standards.md"),
-      }],
-    })],
-  }));
+  for (const externalPath of [
+    path.resolve("/shared/standards.md"),
+    String.raw`C:\Shared\standards.md`,
+  ]) {
+    assert.doesNotThrow(() => validateGraph({
+      catalog: {
+        v: 1,
+        projects: [{ id: "p:sample", roots: ["/projects/sample"] }],
+      },
+      records: [record({
+        kind: "index",
+        locators: [{
+          type: "external-file",
+          path: externalPath,
+        }],
+      })],
+    }));
+  }
 });
 
 test("canonical JSON recursively orders object keys and preserves arrays", () => {

@@ -148,6 +148,29 @@ test("project resolution recognizes differently-cased paths only when physically
   assert.equal(result.project.id, "p:demo");
 });
 
+test("project resolution translates cataloged Windows roots under WSL", async () => {
+  const root = "/mnt/c/Users/Alex/Project";
+  const cwd = `${root}/src`;
+  const fsApi = {
+    realpath: async (value) => value,
+  };
+  const result = await resolveProjectAt({
+    catalog: {
+      projects: [{
+        id: "p:demo",
+        roots: [String.raw`C:\Users\Alex\Project`],
+      }],
+    },
+    cwd,
+    fsApi,
+    platform: "linux",
+    env: { WSL_DISTRO_NAME: "Ubuntu" },
+    release: "6.8.0-microsoft-standard-WSL2",
+  });
+  assert.equal(result.project.id, "p:demo");
+  assert.equal(result.root, root);
+});
+
 test("get uses the route index and opens exactly one owning shard", async () => {
   await withStoreFixture(sourceWithProjects, async ({ home, source }) => {
     const reads = [];

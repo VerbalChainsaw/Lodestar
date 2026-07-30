@@ -24,6 +24,7 @@ const VALUE_OPTIONS = Object.freeze([
   "--package",
   "--prefix",
   "--home",
+  "--legacy-home",
   "--codex-home",
 ]);
 
@@ -254,6 +255,7 @@ export async function installLodestar(
   );
   const prefix = nativePath(optionValue(args, "--prefix"));
   const stateHome = nativePath(optionValue(args, "--home"));
+  const legacyHome = nativePath(optionValue(args, "--legacy-home"));
   const codexHomes = optionValues(args, "--codex-home").map(nativePath);
   const skipCodex = args.includes("--skip-codex");
   const dryRun = args.includes("--dry-run");
@@ -290,6 +292,7 @@ export async function installLodestar(
     package_version: metadata.version,
     prefix: prefix ?? null,
     state_home: stateHome ?? null,
+    legacy_home: legacyHome ?? null,
     codex_homes: codexHomes,
     install_codex: !skipCodex,
     npm: {
@@ -372,15 +375,16 @@ export async function installLodestar(
   const commonArguments = [
     ...(stateHome ? ["--home", stateHome] : []),
   ];
-  const initialized = parseProcessJson(runProcess(process.execPath, [
+  const stateResult = parseProcessJson(runProcess(process.execPath, [
     installedMain,
-    "init",
+    legacyHome ? "migrate-legacy" : "init",
     ...commonArguments,
+    ...(legacyHome ? ["--from", legacyHome] : []),
   ], {
     cwd: packageRoot,
     spawn,
     env,
-  }), "state initialization");
+  }), legacyHome ? "legacy state migration" : "state initialization");
   let codex = null;
   if (!skipCodex) {
     codex = parseProcessJson(runProcess(process.execPath, [
@@ -412,7 +416,8 @@ export async function installLodestar(
       platform,
       pathApi,
     }),
-    initialized,
+    initialized: legacyHome ? null : stateResult,
+    migration: legacyHome ? stateResult : null,
     codex,
   };
   stdout(JSON.stringify(result));

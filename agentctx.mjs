@@ -23,6 +23,7 @@ import {
   installCodex,
 } from "./tools/install-codex.mjs";
 import { inventoryCodex } from "./tools/inventory-codex.mjs";
+import { migrateLegacyStore } from "./tools/migrate-legacy.mjs";
 import { migrateRegistry } from "./tools/migrate-projects.mjs";
 import { profileProjects } from "./tools/profile-projects.mjs";
 import { refreshProjects } from "./tools/refresh-projects.mjs";
@@ -43,6 +44,7 @@ const COMMANDS = Object.freeze([
   "rollback",
   "inventory-codex",
   "migrate-projects",
+  "migrate-legacy",
   "profile-projects",
   "refresh",
 ]);
@@ -167,6 +169,15 @@ export async function run(
         home: stateHome,
         sourcePath: nativePath(optionValue(args, "--from", null)),
         force: args.includes("--force"),
+      });
+      stdout(JSON.stringify(result));
+      return 0;
+    }
+    if (command === "migrate-legacy") {
+      result = await migrateLegacyStore({
+        home: stateHome,
+        sourceHome: nativePath(optionValue(args, "--from", null)),
+        dryRun: args.includes("--dry-run"),
       });
       stdout(JSON.stringify(result));
       return 0;

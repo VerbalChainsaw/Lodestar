@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Local deterministic context and project discovery for coding agents",
   "type": "module",
   "bin": {
@@ -8,6 +8,7 @@
     "lodestar-install": "./install.mjs",
     "agentctx-install-codex": "./tools/install-codex.mjs",
     "agentctx-inventory-codex": "./tools/inventory-codex.mjs",
+    "agentctx-migrate-legacy": "./tools/migrate-legacy.mjs",
     "agentctx-migrate-projects": "./tools/migrate-projects.mjs",
     "agentctx-profile-projects": "./tools/profile-projects.mjs",
     "agentctx-rollback-codex": "./tools/rollback-codex.mjs"

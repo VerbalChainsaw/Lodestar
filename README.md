@@ -17,6 +17,7 @@ The primary CLI exposes the context store and the restored portable operations:
 agentctx init
 agentctx start|get|find|resolve|project|put|doctor|coverage|ask
 agentctx inventory-codex --root <explicit-root>
+agentctx migrate-legacy --from <legacy-home>
 agentctx migrate-projects --from <registry.json>
 agentctx profile-projects
 agentctx refresh [--discover --root <explicit-root> --yes]
@@ -64,6 +65,7 @@ instruction block. Useful options are:
 --package <checkout-or-tarball>
 --prefix <npm-prefix>
 --home <lodestar-state-home>
+--legacy-home <legacy-flat-store>
 --codex-home <codex-home>
 --skip-codex
 --dry-run
@@ -72,10 +74,21 @@ instruction block. Useful options are:
 The direct npm path remains supported:
 
 ```text
-npm install -g ./lodestar-agent-context-0.3.0.tgz
+npm install -g ./lodestar-agent-context-0.4.0.tgz
 agentctx init
 agentctx doctor
 ```
+
+Existing flat-layout Lodestar stores can be upgraded without modifying the
+source store:
+
+```text
+agentctx migrate-legacy --from <legacy-home> --home <new-lodestar-home>
+```
+
+The migration validates and normalizes the complete graph, builds every index
+inside a sibling transaction, and promotes the new home only after it is fully
+readable. The installer accepts the same source through `--legacy-home`.
 
 Windows paths passed to a WSL process, such as
 `C:\Users\name\project`, are translated to their `/mnt/c/...` native form.
