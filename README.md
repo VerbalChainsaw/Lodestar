@@ -85,7 +85,7 @@ failures instead of harmless alternate paths or absent build outputs.
 
 | Gate | Verified result |
 | --- | ---: |
-| Linux/WSL test suite | **203/203 passed** |
+| Linux/WSL test suite | **204/204 passed** |
 | Canonical deep doctor | **0 errors · 0 warnings · 0 blockers** |
 | Real startup packet | **4,879 / 5,120 bytes** |
 | Runtime dependencies | **0** |
@@ -289,7 +289,7 @@ Release evidence and local/native test totals are recorded in
 [docs/benchmarks.md](docs/benchmarks.md). The release workflow will not publish
 until Windows, Ubuntu, and macOS checks pass on the exact tagged commit.
 
-Current local evidence is 203/203 WSL/Linux tests, zero canonical deep-doctor
+Current local evidence is 204/204 WSL/Linux tests, zero canonical deep-doctor
 issues, a complete isolated packed lifecycle, and passing 10, 100, and
 500-project gates. Every published tag independently earns its native Windows
 and hosted lifecycle result.

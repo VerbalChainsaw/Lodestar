@@ -30,7 +30,10 @@ All notable changes to Lodestar are documented here.
   after overlap validation.
 - Make release publication explicitly depend on pinned CodeQL analysis in the
   same tagged workflow instead of relying on a separately triggered check.
-- Close the local release gate with 203/203 tests, zero canonical deep-doctor
+- Let healthy, heartbeating writers serialize for up to 15 seconds before
+  reporting contention, avoiding false lock failures during slower Windows
+  refresh transactions.
+- Close the local release gate with 204/204 tests, zero canonical deep-doctor
   issues, a 70.1% smaller real startup packet, and positive deterministic
   elapsed-time payback at 10, 100, and 500-project scale.
 
