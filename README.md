@@ -23,6 +23,18 @@
   <img alt="Zero runtime dependencies" src="https://img.shields.io/badge/runtime_dependencies-0-d6a84b">
 </p>
 
+> [!IMPORTANT]
+> **Lodestar v0.7.0 is live — less payload, less wandering, measured
+> payback, and zero local noise.**
+>
+> The real 71-project startup packet is **70.1% smaller**, standard-profile
+> routing inspects **90.63% fewer files**, and the complete release passed
+> **204/204 tests** with **zero runtime dependencies**.
+>
+> **[Download v0.7.0](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.7.0)**
+> · [See everything that shipped](docs/releases/v0.7.0.md)
+> · [Review the benchmark evidence](docs/benchmarks.md)
+
 <p align="center">
   <img
     src="https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-hero.png"
@@ -31,7 +43,7 @@
   >
 </p>
 
-## v0.7.0 is live
+## What shipped in v0.7.0
 
 **Less payload. Less wandering. Measured payback. Zero local noise.**
 
