@@ -1,0 +1,32 @@
+name: cross-platform
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - run: node install.mjs --dry-run --skip-codex
+      - run: npm pack --dry-run
+      - run: npm pack
+      - run: node install.mjs --package ./lodestar-agent-context-0.3.0.tgz --prefix .installer-smoke --home .installer-state --skip-codex
+      - run: npm install --prefix .package-smoke ./lodestar-agent-context-0.3.0.tgz
+      - run: npm --prefix .package-smoke exec -- agentctx init --home ../.package-smoke-state
+      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state

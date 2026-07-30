@@ -1,0 +1,1 @@
+{"v":1,"id":"g:bootstrap","kind":"rule","priority":1000,"required":true,"scope":["global"],"action":["startup:agentctx.start","lookup:agentctx.get|agentctx.resolve>agentctx.find>repo.targeted>repo.broad"],"links":[]}
