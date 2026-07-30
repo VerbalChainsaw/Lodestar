@@ -191,6 +191,8 @@ test("coverage and ask return deterministic project context", async () => {
     const store = await ContextStore.open({ home, cwd: source.root });
     const coverage = await store.coverage({ project: "demo_app" });
     assert.equal(coverage.complete, 1);
+    assert.equal(coverage.ready, 1);
+    assert.equal(coverage.projects[0].readiness, "ready");
     assert.deepEqual(coverage.projects[0].missing, []);
 
     const answer = await store.ask("project.commands", "p:demo");
@@ -199,6 +201,79 @@ test("coverage and ask return deterministic project context", async () => {
       "p:demo:commands",
       "p:demo:profile",
     ]);
+  });
+});
+
+test("coverage distinguishes stale, unverified, incomplete, and blocked context", async () => {
+  await withStoreFixture(async (home) => {
+    const source = await paritySource(home);
+    source.projectRecords["p:demo"] = [record("p:demo:managed", {
+      ownership: "generated",
+      covers: coverageCategories,
+      verified: { at: "2026-01-01T00:00:00.000Z" },
+    })];
+    return source;
+  }, async ({ home, source }) => {
+    const store = await ContextStore.open({ home, cwd: source.root });
+    const stale = await store.coverage({
+      project: "p:demo",
+      maxAgeDays: 30,
+      now: () => new Date("2026-07-30T00:00:00.000Z"),
+    });
+    assert.equal(stale.projects[0].readiness, "stale");
+    assert.deepEqual(stale.projects[0].stale, coverageCategories);
+  });
+
+  await withStoreFixture(async (home) => {
+    const source = await paritySource(home);
+    source.projectRecords["p:demo"] = [record("p:demo:managed", {
+      ownership: "imported",
+      covers: coverageCategories,
+    })];
+    return source;
+  }, async ({ home, source }) => {
+    const store = await ContextStore.open({ home, cwd: source.root });
+    const unverified = await store.coverage({
+      project: "p:demo",
+      now: () => new Date("2026-07-30T00:00:00.000Z"),
+    });
+    assert.equal(unverified.projects[0].readiness, "stale");
+    assert.deepEqual(
+      unverified.projects[0].unverified,
+      coverageCategories,
+    );
+  });
+
+  await withStoreFixture(async (home) => {
+    const source = await paritySource(home);
+    source.projectRecords["p:demo"] = [];
+    return source;
+  }, async ({ home, source }) => {
+    const store = await ContextStore.open({ home, cwd: source.root });
+    const incomplete = await store.coverage({ project: "p:demo" });
+    assert.equal(incomplete.projects[0].readiness, "incomplete");
+    assert.ok(incomplete.projects[0].missing.includes("commands"));
+
+    store.catalog.projects[0].status = "blocked-missing-root";
+    const blocked = await store.coverage({ project: "p:demo" });
+    assert.equal(blocked.projects[0].readiness, "blocked");
+  });
+});
+
+test("doctor warns about readiness without declaring the store corrupt", async () => {
+  await withStoreFixture(async (home) => {
+    const source = await paritySource(home);
+    source.projectRecords["p:demo"] = [];
+    return source;
+  }, async ({ home, source }) => {
+    const result = await (await ContextStore.open({
+      home,
+      cwd: source.root,
+    })).doctor();
+    assert.equal(result.ok, true);
+    assert.ok(
+      result.issues.some(({ code }) => code === "project-context-incomplete"),
+    );
   });
 });
 
@@ -298,6 +373,34 @@ test("CLI exposes put, doctor, coverage, and ask as JSON commands", async () => 
       (await invoke("ask", "project.path", "p:demo")).value.roots,
       [source.root],
     );
+  });
+});
+
+test("CLI coverage can enforce project readiness", async () => {
+  await withStoreFixture(async (home) => {
+    const source = await paritySource(home);
+    source.projectRecords["p:demo"] = [];
+    return source;
+  }, async ({ home, source }) => {
+    const output = [];
+    const code = await run([
+      "coverage",
+      "--project",
+      "p:demo",
+      "--require-ready",
+      "--max-age-days",
+      "14",
+      "--home",
+      home,
+      "--cwd",
+      source.root,
+    ], {
+      stdout: (line) => output.push(JSON.parse(line)),
+      stderr: () => {},
+    });
+    assert.equal(code, 1);
+    assert.equal(output[0].max_age_days, 14);
+    assert.equal(output[0].projects[0].readiness, "incomplete");
   });
 });
 

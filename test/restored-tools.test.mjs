@@ -358,6 +358,12 @@ test("registry migration imports universal paths through a new generation", asyn
         path: projectRoot,
         aliases: ["demo"],
         test_cmd: "node --test",
+        description: "A bounded project registry fixture",
+        status: "active",
+        activity_summary: "changed today",
+        entry_points: ["src/index.mjs"],
+        endpoints: ["http://localhost:3000"],
+        memory_anchors: ["decisions/demo.md"],
       }],
     }));
 
@@ -370,9 +376,201 @@ test("registry migration imports universal paths through a new generation", asyn
     const store = await ContextStore.open({ home, cwd: projectRoot });
     assert.equal(store.project.id, "p:00000000-0000-4000-8000-000000000001");
     assert.equal(store.project.commands.test, "node --test");
+    const portfolio = await store.get(`${store.project.id}:portfolio`);
+    assert.equal(portfolio.summary, "A bounded project registry fixture");
+    assert.deepEqual(portfolio.links, [
+      `${store.project.id}:portfolio:operations`,
+      `${store.project.id}:portfolio:memory`,
+    ]);
+    const operations = await store.get(
+      `${store.project.id}:portfolio:operations`,
+    );
+    assert.deepEqual(operations.entrypoints, ["src/index.mjs"]);
+    assert.deepEqual(operations.endpoints, ["http://localhost:3000"]);
+    assert.deepEqual(
+      (await store.get(`${store.project.id}:portfolio:memory`))
+        .facts.memory_anchors,
+      ["decisions/demo.md"],
+    );
+    const startup = await store.start();
+    assert.ok(startup.available.some(({ id }) => id === portfolio.id));
+    assert.equal(
+      startup.available.some(({ id }) => id === operations.id),
+      false,
+    );
     assert.equal(result.imported, 1);
+    assert.equal(result.added, 1);
     assert.match(await readFile(path.join(home, "events.jsonl"), "utf8"),
       /"op":"migrate-registry"/);
+  });
+});
+
+test("registry migration previews, merges idempotently, and preserves records", async () => {
+  await withTemp("lodestar-migrate-merge-", async (root) => {
+    const home = path.join(root, "state");
+    const projectRoot = path.join(root, "demo");
+    const registry = path.join(root, "projects.json");
+    await mkdir(projectRoot);
+    await initializeStateHome({ destination: home });
+    const registryProject = {
+      name: "Demo App",
+      path: projectRoot,
+      aliases: ["demo"],
+      description: "First description",
+      test_cmd: "node --test",
+    };
+    await writeFile(registry, JSON.stringify({ projects: [registryProject] }));
+    const options = {
+      home,
+      sourcePath: registry,
+      idFactory: () => "00000000-0000-4000-8000-000000000002",
+      now: () => new Date("2026-07-29T12:00:00.000Z"),
+    };
+
+    const preview = await migrateRegistry({ ...options, dryRun: true });
+    assert.equal(preview.changed, true);
+    assert.equal(preview.added, 1);
+    const first = await migrateRegistry(options);
+    const store = await ContextStore.open({ home, cwd: projectRoot });
+    const projectId = store.project.id;
+    await store.put({
+      v: 1,
+      id: `${projectId}:curated`,
+      kind: "decision",
+      priority: 900,
+      scope: [`project:${projectId}`],
+      links: [],
+      summary: "Never replace this record",
+    });
+    const generationAfterPut = (await ContextStore.open({
+      home,
+      cwd: projectRoot,
+    })).generation.id;
+
+    const second = await migrateRegistry({
+      ...options,
+      now: () => new Date("2026-07-30T12:00:00.000Z"),
+    });
+    assert.equal(second.changed, false);
+    assert.equal(second.unchanged, 1);
+    assert.equal(second.generation, generationAfterPut);
+    assert.notEqual(first.generation, second.generation);
+
+    registryProject.description = "Updated description";
+    registryProject.build_cmd = "node build.mjs";
+    await writeFile(registry, JSON.stringify({ projects: [registryProject] }));
+    const updated = await migrateRegistry({
+      ...options,
+      now: () => new Date("2026-07-30T12:00:00.000Z"),
+    });
+    assert.equal(updated.updated, 1);
+    const reopened = await ContextStore.open({ home, cwd: projectRoot });
+    assert.equal(reopened.project.id, projectId);
+    assert.equal(
+      (await reopened.get(`${projectId}:portfolio`)).summary,
+      "Updated description",
+    );
+    assert.equal(
+      (await reopened.get(`${projectId}:portfolio:operations`)).commands.build,
+      "node build.mjs",
+    );
+    assert.equal(
+      (await reopened.get(`${projectId}:curated`)).summary,
+      "Never replace this record",
+    );
+  });
+});
+
+test("registry migration fails closed on unsupported fields and ambiguity", async () => {
+  await withTemp("lodestar-migrate-invalid-", async (root) => {
+    const home = path.join(root, "state");
+    const firstRoot = path.join(root, "first");
+    const secondRoot = path.join(root, "second");
+    const registry = path.join(root, "projects.json");
+    await Promise.all([
+      mkdir(firstRoot),
+      mkdir(secondRoot),
+      initializeStateHome({ destination: home }),
+    ]);
+    await writeFile(registry, JSON.stringify({
+      projects: [{
+        name: "Unsafe",
+        path: firstRoot,
+        secret_blob: "must not disappear silently",
+      }],
+    }));
+    await assert.rejects(
+      migrateRegistry({ home, sourcePath: registry }),
+      { code: "registry-fields-unsupported" },
+    );
+
+    await writeFile(registry, JSON.stringify({
+      projects: [
+        { name: "First", path: firstRoot, aliases: ["shared"] },
+        { name: "Second", path: secondRoot, aliases: ["shared"] },
+      ],
+    }));
+    await migrateRegistry({
+      home,
+      sourcePath: registry,
+      idFactory: (() => {
+        let value = 0;
+        return () => `00000000-0000-4000-8000-${String(++value).padStart(12, "0")}`;
+      })(),
+    });
+    await writeFile(registry, JSON.stringify({
+      projects: [{
+        name: "Third",
+        aliases: ["shared"],
+        path: path.join(root, "third"),
+      }],
+    }));
+    await assert.rejects(
+      migrateRegistry({ home, sourcePath: registry }),
+      {
+        code: "registry-project-ambiguous",
+      },
+    );
+  });
+});
+
+test("registry migration retains deliberate force replacement", async () => {
+  await withTemp("lodestar-migrate-force-", async (root) => {
+    const home = path.join(root, "state");
+    const firstRoot = path.join(root, "first");
+    const secondRoot = path.join(root, "second");
+    const registry = path.join(root, "projects.json");
+    await Promise.all([
+      mkdir(firstRoot),
+      mkdir(secondRoot),
+      initializeStateHome({ destination: home }),
+    ]);
+    await writeFile(registry, JSON.stringify({
+      projects: [{ name: "First", path: firstRoot }],
+    }));
+    await migrateRegistry({
+      home,
+      sourcePath: registry,
+      idFactory: () => "00000000-0000-4000-8000-000000000003",
+    });
+    await writeFile(registry, JSON.stringify({
+      projects: [{ name: "Second", path: secondRoot }],
+    }));
+    const result = await migrateRegistry({
+      home,
+      sourcePath: registry,
+      force: true,
+      idFactory: () => "00000000-0000-4000-8000-000000000004",
+    });
+    assert.deepEqual(result.removed, [
+      "p:00000000-0000-4000-8000-000000000003",
+    ]);
+    const store = await ContextStore.open({ home, cwd: secondRoot });
+    assert.equal(store.project.name, "Second");
+    await assert.rejects(
+      store.get("p:00000000-0000-4000-8000-000000000003"),
+      { code: "record-not-found" },
+    );
   });
 });
 
@@ -387,12 +585,20 @@ test("native project paths remain portable and translate only under WSL", () => 
     "D:/Work/Demo",
   );
   assert.equal(
+    normalizeProjectRoot("/mnt/d/Work/Demo", {
+      platform: "linux",
+      env: { WSL_DISTRO_NAME: "Example" },
+      release: "6.8.0-microsoft-standard",
+    }),
+    "D:/Work/Demo",
+  );
+  assert.equal(
     normalizeProjectRoot(windowsRoot, {
       platform: "linux",
       env: { WSL_DISTRO_NAME: "Example" },
       release: "6.8.0-microsoft-standard",
     }),
-    "/mnt/d/Work/Demo",
+    "D:/Work/Demo",
   );
   assert.equal(
     nativePath(windowsRoot, {

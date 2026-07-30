@@ -4,6 +4,25 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
+## 0.5.0 - 2026-07-30
+
+- Make the default project-registry migration a lossless, previewable merge
+  instead of refusing populated stores or requiring destructive replacement.
+- Preserve immutable Lodestar project IDs across repeat imports while failing
+  closed on ambiguous identity matches.
+- Store descriptions, lifecycle facts, commands, entrypoints, endpoints, and
+  memory anchors in bounded linked portfolio records, with only one compact
+  card added to startup.
+- Reject unsupported registry fields instead of silently dropping data.
+- Make unchanged repeat imports true no-ops that do not create a generation or
+  audit event, while retaining the legacy `--force` replacement path.
+- Add freshness-aware project readiness with `ready`, `incomplete`, `stale`,
+  and `blocked` states plus `coverage --require-ready` for automation.
+- Surface incomplete, stale, and unverified project context through `doctor`
+  as actionable maintenance warnings.
+- Add an implementation decision record and real-registry, idempotence,
+  preservation, error-path, readiness, and package regression coverage.
+
 - Build a full product front page around Lodestar's theory, origin, operating
   role, engineering depth, agent workflow, and public release path.
 - Add a standalone transparent Lodestar product mark and a panoramic linked-

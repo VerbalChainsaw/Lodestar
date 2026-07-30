@@ -78,7 +78,10 @@ const OPTIONS_BY_COMMAND = Object.freeze({
     values: [...COMMON_READ_OPTIONS, "--repair-current"],
     booleans: ["--repair-lock", "--force"],
   },
-  coverage: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
+  coverage: {
+    values: [...COMMON_READ_OPTIONS, "--max-age-days"],
+    booleans: [...JSON_OUTPUT, "--require-ready"],
+  },
   ask: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
   "install-codex": {
     values: ["--home", "--codex-home"],
@@ -98,7 +101,7 @@ const OPTIONS_BY_COMMAND = Object.freeze({
   },
   "migrate-projects": {
     values: ["--home", "--from"],
-    booleans: ["--force"],
+    booleans: ["--force", "--dry-run"],
   },
   "migrate-legacy": {
     values: ["--home", "--from"],
@@ -262,6 +265,7 @@ export async function run(
         home: stateHome,
         sourcePath: nativePath(optionValue(args, "--from", null)),
         force: args.includes("--force"),
+        dryRun: args.includes("--dry-run"),
       });
       stdout(JSON.stringify(result));
       return 0;
@@ -372,14 +376,23 @@ export async function run(
         takeOwnership: args.includes("--take-ownership"),
       });
     } else if (command === "coverage") {
+      const maxAgeDays = Number(optionValue(args, "--max-age-days", 30));
       result = await store.coverage({
         project: optionValue(args, "--project", null),
+        maxAgeDays,
       });
     } else if (command === "ask") {
       const askProject = positional[1] ?? project;
       result = await store.ask(positional[0], askProject);
     }
     stdout(JSON.stringify(result));
+    if (
+      command === "coverage"
+      && args.includes("--require-ready")
+      && result.ready !== result.reachable
+    ) {
+      return 1;
+    }
     return 0;
   } catch (error) {
     const failure = errorResult(error);

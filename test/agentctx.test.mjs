@@ -39,6 +39,9 @@ async function filesBelow(root) {
 test("package is private-state-free and its lift benchmark is runnable", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "lodestar-pack-"));
   try {
+    const packageVersion = JSON.parse(
+      await readFile(path.join(packageRoot, "package.json"), "utf8"),
+    ).version;
     const [npm, npmArgs] = npmInvocation([
       "pack",
       "--json",
@@ -90,6 +93,19 @@ test("package is private-state-free and its lift benchmark is runnable", async (
         path.relative(unpacked, file) === path.join("docs", "performance.md")),
       true,
       "packed performance suite is missing its methodology",
+    );
+    assert.equal(
+      packedFiles.some((file) =>
+        path.relative(unpacked, file) === path.join("docs", "benchmarks.md")),
+      true,
+      "packed package is missing its measured benchmark results",
+    );
+    assert.equal(
+      packedFiles.some((file) =>
+        path.relative(unpacked, file)
+          === path.join("docs", "releases", `v${packageVersion}.md`)),
+      true,
+      "packed package is missing its release notes",
     );
     const { stdout: benchmarkJson } = await execFileAsync(process.execPath, [
       path.join(unpacked, "tools", "benchmark-lift.mjs"),

@@ -79,11 +79,41 @@ Installed packages also expose the public `lodestar-benchmark` and `lodestar-per
 
 At the time of this snapshot:
 
-- WSL/Linux: 139/139 tests pass.
-- Native Windows: 138 tests pass with one expected platform-specific symlink skip.
+- WSL/Linux: 158/158 tests pass.
+- Native Windows runs the same suite with one expected platform-specific
+  symlink skip.
 - Real tarball installation and npm binary execution pass.
 - JSON consumers and structured invalid-option behavior pass.
 - Hosted Windows, Ubuntu, and macOS CI pass.
+
+## v0.5 project-readiness regression snapshot
+
+The v0.5 implementation was measured before and after the registry-merge and
+readiness changes on the same WSL machine, Node.js v22.22.3, 100-project
+fixture, 10 warmups, and 75 timed samples:
+
+| Operation | Before p50 | After p50 |
+| --- | ---: | ---: |
+| Fresh-store startup | 11.007 ms | 9.782 ms |
+| Warm startup | 0.041 ms | 0.046 ms |
+| Exact `get` | 0.011 ms | 0.010 ms |
+| Linked `resolve` | 0.060 ms | 0.059 ms |
+| Indexed `find` | 0.553 ms | 0.509 ms |
+| 16 parallel exact reads | 0.154 ms | 0.149 ms |
+
+The material-lift fixture still passed all correctness, determinism, scope, and
+transfer gates: 4/4 answers on both paths, 64 versus 6 files, 1 MiB versus
+24,923 bytes, no broad search, zero cross-project records, and a 37.32% median
+elapsed-time improvement in that run.
+
+The actual 67-project registry preview also completed without mutation in a
+318.941 ms p50 over 10 warm samples on the same WSL filesystem. Registry import
+is an administrative full-store transaction, not part of agent startup.
+
+The quick tiny-repository fixture remains an honest losing case on elapsed
+time: broad inspection can be faster when only eight 1 KiB documents exist.
+Lodestar still wins that fixture on scope, determinism, file count, and bytes,
+but its material speed advantage begins as repository ambiguity and scale grow.
 
 ## What these results prove
 

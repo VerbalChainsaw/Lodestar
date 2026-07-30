@@ -158,7 +158,7 @@ can share the same canonical store.
 | Canonical storage | Versioned JSON/JSONL records, stable IDs, deterministic routes, and search indexes |
 | Transaction safety | Immutable generations, atomic promotion, audited writes, and rollback on failure |
 | Concurrency | Multi-reader/single-writer operation with PID, host, nonce, heartbeat, and stale-lock handling |
-| Project intelligence | Bounded discovery, generated-versus-curated ownership, profiling, refresh, and coverage |
+| Project intelligence | Lossless registry consolidation, bounded discovery, profiling, refresh, readiness, and coverage |
 | Scope and privacy | Canonical path confinement, cross-project authorization, locator health, and no source ingestion |
 | Agent integration | Managed Codex bootstrap blocks with byte-preserving updates, backups, and manifest rollback |
 | Portability | Native Windows, WSL, Linux, and macOS behavior from one zero-dependency Node.js package |
@@ -212,7 +212,7 @@ The MVP is gated by more than command-level correctness:
 - hosted Windows, Ubuntu, and macOS CI;
 - package-content, license, and release-metadata checks.
 
-Lodestar passes 152 tests under WSL/Linux and the full native Windows
+Lodestar passes 158 tests under WSL/Linux and the full native Windows
 suite with one expected platform-specific symlink skip. The published release
 is built from the same commit exercised by the cross-platform workflow.
 
@@ -278,7 +278,7 @@ remain authoritative in their repositories; Lodestar stores compact operational
 knowledge and precise routes to them.
 
 The current finished package is
-[Lodestar v0.4.4](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.4.4),
+[Lodestar v0.5.0](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.5.0),
 released under the MIT License and tested on Windows, WSL/Linux, and macOS.
 
 ## Requirements and platform support
@@ -291,12 +291,12 @@ The same package and store format are used on every supported platform.
 
 ## Quick start
 
-Download `lodestar-agent-context-0.4.4.tgz` and `SHA256SUMS.txt` from the
-[v0.4.4 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.4.4),
+Download `lodestar-agent-context-0.5.0.tgz` and `SHA256SUMS.txt` from the
+[v0.5.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.5.0),
 verify the checksum, and install:
 
 ```sh
-npm install --global ./lodestar-agent-context-0.4.4.tgz
+npm install --global ./lodestar-agent-context-0.5.0.tgz
 agentctx init
 agentctx doctor
 agentctx start --cwd /path/to/project
@@ -375,14 +375,14 @@ scope.
 | `agentctx find <query> --cwd <path>` | Search structured fields in global/current-project scope. |
 | `agentctx project [selector]` | Return the current project or a matching project card. |
 | `agentctx put --json '<record>'` | Validate and transactionally write one curated record. Use `--file <path>` or stdin instead; generated records require `--take-ownership`. |
-| `agentctx doctor` | Validate pointers, generations, graph, every index, scopes, roots, locators, locks, startup budgets, and write semantics. |
-| `agentctx coverage [--project <id>]` | Report structured-context coverage. |
+| `agentctx doctor` | Validate pointers, generations, graph, every index, scopes, roots, locators, locks, startup budgets, write semantics, and project readiness. |
+| `agentctx coverage [--project <id>]` | Report completeness and freshness. Add `--max-age-days <n>` and `--require-ready` for a CI gate. |
 | `agentctx ask <intent> <project>` | Query a project context using a recognized intent. |
 | `agentctx profile-projects [--project <id>]` | Refresh bounded generated project metadata without overwriting curated records. Add `--dry-run` for a non-mutating preview. |
 | `agentctx refresh` | Profile projects; equivalent to `profile-projects`. Supports `--dry-run`. |
 | `agentctx refresh --discover --root <path> --yes` | Discover and add projects under explicit roots after confirmation. |
 | `agentctx migrate-legacy --from <path>` | Import a legacy flat Lodestar store without changing the source. |
-| `agentctx migrate-projects --from <registry.json>` | Import an explicit project registry. |
+| `agentctx migrate-projects --from <registry.json>` | Preview with `--dry-run`, then losslessly merge a bounded project registry. `--force` retains deliberate full replacement. |
 | `agentctx inventory-codex --root <path>` | Inventory hashes and metadata under explicit roots; never file contents. |
 | `agentctx install-codex [--codex-home <path>]` | Install or update only Lodestar's marked Codex instruction block. |
 | `agentctx rollback [--manifest <path>] [--force]` | Restore managed Codex files from an installation manifest. |
@@ -500,6 +500,37 @@ Migration validates and normalizes the complete graph, builds every index in a
 sibling transaction, and promotes the generation only after it is readable.
 The guided installer accepts the same source with `--legacy-home`.
 
+Consolidate an existing project list into Lodestar without creating a second
+runtime authority:
+
+```sh
+agentctx migrate-projects \
+  --from /path/to/projects.json \
+  --home /path/to/.lodestar \
+  --dry-run
+agentctx migrate-projects \
+  --from /path/to/projects.json \
+  --home /path/to/.lodestar
+agentctx profile-projects --home /path/to/.lodestar
+agentctx coverage --home /path/to/.lodestar --require-ready
+```
+
+The default path merges by prior registry identity, exact project name, and
+normalized roots. It preserves existing Lodestar IDs and unrelated curated or
+generated records. Repeat imports with unchanged input are no-ops. Descriptions,
+activity, commands, entrypoints, endpoints, and memory anchors become bounded
+linked portfolio records; only the portfolio card is startup-visible.
+
+Unknown project fields fail with `registry-fields-unsupported` so information
+is never discarded silently. Add a bounded adapter for the field, then retry.
+The external registry is a migration or refresh source, not a database
+Lodestar consults at runtime.
+
+`coverage` reports the ten context categories plus freshness for generated and
+imported records. `doctor` warns when reachable projects are incomplete, stale,
+or unverified. Refresh generated context and curate real knowledge gaps before
+using `--require-ready` as a release gate.
+
 ## Codex integration and rollback
 
 `agentctx install-codex` modifies only the marked Lodestar block in the active
@@ -600,7 +631,7 @@ the test suite, packs the npm tarball, writes `SHA256SUMS.txt`, and publishes
 both assets to a GitHub release.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and
-[docs/releases/v0.4.4.md](docs/releases/v0.4.4.md) for this release's notes.
+[docs/releases/v0.5.0.md](docs/releases/v0.5.0.md) for this release's notes.
 
 ## License
 
