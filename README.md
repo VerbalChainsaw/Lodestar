@@ -31,6 +31,24 @@
   >
 </p>
 
+## Measured impact
+
+Lodestar is designed to reduce environmental work around coding-agent reasoning while preserving correctness. Current cross-platform benchmark results:
+
+| Metric | Result |
+| --- | ---: |
+| Correct answers preserved | **4/4 → 4/4** |
+| Files inspected | **64 → 6** |
+| Repository bytes inspected | **97–98% reduction** |
+| Broad repository search | **Eliminated** |
+| Cross-project leakage | **0** |
+| Warm startup | **0.037–0.048 ms** |
+| Exact retrieval | **0.010–0.013 ms** |
+| Indexed search | **0.483–0.737 ms** |
+| Tested scale | **10, 100, and 500 projects** |
+
+The benchmark suite measures retrieval efficiency, determinism, project isolation, and runtime overhead. It does **not** claim universal improvement in LLM reasoning quality. See the full [benchmark results](docs/benchmarks.md), [performance methodology](docs/performance.md), and [paired evaluation design](docs/evaluation.md).
+
 ## Context is not a prompt. It is an operating layer.
 
 Coding agents often begin every session as strangers. They search for
