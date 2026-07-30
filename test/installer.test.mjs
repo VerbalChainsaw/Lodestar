@@ -219,7 +219,7 @@ test("installer restores the previous package when post-install setup fails", as
       "lodestar-agent-context",
       "package.json",
     ), "utf8"));
-    assert.equal(installed.version, "0.4.3");
+    assert.equal(installed.version, (await packageMetadata(packageRoot)).version);
   });
 });
 
@@ -245,7 +245,10 @@ test("installer performs an isolated package, state, and Codex installation", as
     assert.equal(stderr, "");
     const result = JSON.parse(stdout);
     assert.equal(result.ok, true);
-    assert.equal(result.package.version, "0.4.3");
+    assert.equal(
+      result.package.version,
+      (await packageMetadata(packageRoot)).version,
+    );
     assert.equal(result.initialized.created, true);
     assert.equal(result.codex.ok, true);
     assert.match(

@@ -4,6 +4,8 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
+## 0.4.4 - 2026-07-29
+
 - Make exact `get`/`resolve` retrieval precede scoped `find` in the installed
   Codex contract.
 - Make `put` share the audited rollback transaction, preserve locator health,
@@ -18,6 +20,8 @@ All notable changes to Lodestar are documented here.
 - Validate tarball identity before npm, suppress lifecycle scripts, use the
   validated Node executable in Windows shims, and restore the previous package
   when post-install setup fails.
+- Make package-install smoke checks derive the tarball name from package
+  metadata so release version bumps cannot leave CI wired to an older artifact.
 
 ## 0.4.3 - 2026-07-29
 

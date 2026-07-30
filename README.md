@@ -19,12 +19,12 @@ The same package and store format are used on every supported platform.
 
 ## Quick start
 
-Download `lodestar-agent-context-0.4.3.tgz` and `SHA256SUMS.txt` from the
-[v0.4.3 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.4.3),
+Download `lodestar-agent-context-0.4.4.tgz` and `SHA256SUMS.txt` from the
+[v0.4.4 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.4.4),
 verify the checksum, and install:
 
 ```sh
-npm install --global ./lodestar-agent-context-0.4.3.tgz
+npm install --global ./lodestar-agent-context-0.4.4.tgz
 agentctx init
 agentctx doctor
 agentctx start --cwd /path/to/project
@@ -328,7 +328,7 @@ the test suite, packs the npm tarball, writes `SHA256SUMS.txt`, and publishes
 both assets to a GitHub release.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and
-[docs/releases/v0.4.3.md](docs/releases/v0.4.3.md) for this release's notes.
+[docs/releases/v0.4.4.md](docs/releases/v0.4.4.md) for this release's notes.
 
 ## License
 

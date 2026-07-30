@@ -33,7 +33,9 @@ test("versioned docs and package smoke checks match the package version", async 
   assert.match(releaseNotes, new RegExp(`Lodestar v${version.replaceAll(".", "\\.")}`));
   assert.match(readme, new RegExp(tarball.replaceAll(".", "\\.")));
   assert.doesNotMatch(readme, /\bunlicensed\b/i);
-  assert.match(ci, new RegExp(tarball.replaceAll(".", "\\.")));
+  assert.match(ci, /PACKAGE=lodestar-agent-context-\$version\.tgz/);
+  assert.match(ci, /"\.\/\$\{\{ env\.PACKAGE \}\}"/);
+  assert.doesNotMatch(ci, /lodestar-agent-context-\d+\.\d+\.\d+\.tgz/);
   assert.match(releaseWorkflow, /sha256sum/);
   assert.match(releaseWorkflow, /gh release create/);
 });

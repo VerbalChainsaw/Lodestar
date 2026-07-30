@@ -26,7 +26,12 @@ jobs:
       - run: node install.mjs --dry-run --skip-codex
       - run: npm pack --dry-run
       - run: npm pack
-      - run: node install.mjs --package ./lodestar-agent-context-0.4.3.tgz --prefix .installer-smoke --home .installer-state --skip-codex
-      - run: npm install --prefix .package-smoke ./lodestar-agent-context-0.4.3.tgz
+      - name: Resolve package artifact
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
+      - run: node install.mjs --package "./${{ env.PACKAGE }}" --prefix .installer-smoke --home .installer-state --skip-codex
+      - run: npm install --prefix .package-smoke "./${{ env.PACKAGE }}"
       - run: npm --prefix .package-smoke exec -- agentctx init --home ../.package-smoke-state
       - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state

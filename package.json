@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Local deterministic context and project discovery for coding agents",
   "type": "module",
   "bin": {
