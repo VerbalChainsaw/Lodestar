@@ -74,7 +74,7 @@ test("doctor fails closed when a required search index is missing", async () => 
     });
     assert.equal(exit, 1);
     assert.equal(stdout[0].ok, false);
-    assert.equal(stdout[0].runtime.package_version, "0.6.1");
+    assert.equal(stdout[0].runtime.package_version, "0.7.0");
     assert.equal(stdout[0].runtime.node_version, process.versions.node);
     assert.deepEqual(stderr, []);
   });
