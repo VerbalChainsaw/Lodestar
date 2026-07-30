@@ -36,7 +36,7 @@ async function filesBelow(root) {
   return paths;
 }
 
-test("package contains no private state", async () => {
+test("package is private-state-free and its lift benchmark is runnable", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "lodestar-pack-"));
   try {
     const [npm, npmArgs] = npmInvocation([
@@ -79,6 +79,25 @@ test("package contains no private state", async () => {
         `packed content contains forbidden marker: ${marker}`,
       );
     }
+    assert.equal(
+      packedFiles.some((file) =>
+        path.relative(unpacked, file) === path.join("docs", "evaluation.md")),
+      true,
+      "packed benchmark is missing its methodology",
+    );
+    const { stdout: benchmarkJson } = await execFileAsync(process.execPath, [
+      path.join(unpacked, "tools", "benchmark-lift.mjs"),
+      "--json",
+      "--runs",
+      "1",
+      "--projects",
+      "10",
+      "--documents",
+      "8",
+      "--document-bytes",
+      "1024",
+    ]);
+    assert.equal(JSON.parse(benchmarkJson).passed, true);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

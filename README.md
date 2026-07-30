@@ -185,16 +185,24 @@ The MVP is gated by more than command-level correctness:
 
 - deterministic startup and retrieval output;
 - strict record-count, byte, depth, and scope limits;
-- a 100-project material-lift fixture;
+- a paired 100-project
+  [material-lift benchmark](docs/evaluation.md) against broad repository
+  discovery;
 - private-engine behavioral parity tests;
 - real tarball installation and rollback tests;
 - native Windows and WSL execution;
 - hosted Windows, Ubuntu, and macOS CI;
 - package-content, license, and release-metadata checks.
 
-Lodestar v0.4.4 passes 131 tests under WSL/Linux and the full native Windows
+Lodestar passes 135 tests under WSL/Linux and the full native Windows
 suite with one expected platform-specific symlink skip. The published release
 is built from the same commit exercised by the cross-platform workflow.
+
+Run the comparison yourself:
+
+```bash
+npm run benchmark:lift
+```
 
 ## Local by design
 

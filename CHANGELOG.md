@@ -8,6 +8,9 @@ All notable changes to Lodestar are documented here.
   role, engineering depth, agent workflow, and public release path.
 - Add a standalone transparent Lodestar product mark and a panoramic linked-
   context hero illustration.
+- Add a paired, machine-readable material-lift benchmark that compares broad
+  repository discovery with real Lodestar `start` plus linked `resolve`,
+  documents its claim boundary, and runs from the packed Windows/WSL package.
 
 ## 0.4.4 - 2026-07-29
 

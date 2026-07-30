@@ -22,12 +22,14 @@
     "tools/",
     "schema/",
     "templates/",
+    "docs/evaluation.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
     "test": "node --test",
+    "benchmark:lift": "node tools/benchmark-lift.mjs",
     "doctor": "node agentctx.mjs doctor",
     "install:codex": "node agentctx.mjs install-codex",
     "inventory:codex": "node agentctx.mjs inventory-codex",
