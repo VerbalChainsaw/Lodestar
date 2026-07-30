@@ -187,7 +187,7 @@ test("catalog project limit matches the supported 500-project scale", () => {
 test("snapshot verifies, restores to a new home, and detects tampering", async () => {
   await temporary(async (root) => {
     const home = path.join(root, "store");
-    const snapshot = path.join(root, "snapshot");
+    const snapshot = path.join(root, "missing-parent", "snapshot");
     const restored = path.join(root, "restored");
     await initializeStateHome({ destination: home });
     const created = await createSnapshot({ home, destination: snapshot });

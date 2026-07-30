@@ -4,6 +4,8 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
+## 0.7.0 - 2026-07-30
+
 - Reduce the hard startup packet ceiling from 16 KiB to 5 KiB by keeping
   required records complete and emitting compact optional routing cards.
 - Add startup-payload and observed-value fields to the paired retrieval
@@ -17,6 +19,20 @@ All notable changes to Lodestar are documented here.
   protocol compliance.
 - Tell managed Codex agents to consume required startup records directly
   instead of paying for a redundant exact read of already-loaded context.
+- Inspect retained generations with bounded concurrency while preserving
+  deterministic doctor output.
+- Report a missing project root only when every cataloged alternate is
+  unreachable.
+- Keep generated profiler locators confined to existing, correctly rebased
+  project files instead of warning about absent build outputs.
+- Make standalone profiler help side-effect free, honor standalone dry runs,
+  reject malformed options, and create missing snapshot destination parents
+  after overlap validation.
+- Make release publication explicitly depend on pinned CodeQL analysis in the
+  same tagged workflow instead of relying on a separately triggered check.
+- Close the local release gate with 203/203 tests, zero canonical deep-doctor
+  issues, a 70.1% smaller real startup packet, and positive deterministic
+  elapsed-time payback at 10, 100, and 500-project scale.
 
 ## 0.6.1 - 2026-07-30
 

@@ -44,7 +44,7 @@ import { profileProjects } from "./tools/profile-projects.mjs";
 import { refreshProjects } from "./tools/refresh-projects.mjs";
 import { rollbackCodex } from "./tools/rollback-codex.mjs";
 
-export const AGENTCTX_VERSION = "0.6.1";
+export const AGENTCTX_VERSION = "0.7.0";
 
 const COMMAND_HELP = Object.freeze({
   start: {
