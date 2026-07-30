@@ -1,28 +1,119 @@
-# Lodestar
+<p align="center">
+  <img
+    src="https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-mark.png"
+    alt="Lodestar product mark"
+    width="168"
+  >
+</p>
 
-> Give coding agents a map before they search.
+<h1 align="center">Lodestar</h1>
 
-[![Latest release](https://img.shields.io/github/v/release/VerbalChainsaw/Lodestar)](https://github.com/VerbalChainsaw/Lodestar/releases/latest)
-[![Cross-platform CI](https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml/badge.svg)](https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml)
-[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <strong>The deterministic context plane for coding agents.</strong>
+  <br>
+  One port for identity, rules, repository knowledge, and the exact route to
+  whatever comes next.
+</p>
 
-Coding agents often begin every session blind. They search the repository for
-instructions, reread large documents, guess which files matter, and rediscover
-commands and decisions the last agent already found. That costs time, tokens,
-and trust.
+<p align="center">
+  <a href="https://github.com/VerbalChainsaw/Lodestar/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/VerbalChainsaw/Lodestar"></a>
+  <a href="https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml"><img alt="Cross-platform CI" src="https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Local first" src="https://img.shields.io/badge/context-local--first-55c2ff">
+  <img alt="Zero runtime dependencies" src="https://img.shields.io/badge/runtime_dependencies-0-d6a84b">
+</p>
 
-Lodestar gives an agent one small, deterministic first place to look. It keeps
-global rules, project identity, commands, constraints, decisions, known
-answers, and documentation routes in a local linked context store. The agent
-loads only the startup context it needs, follows exact links for more, and
-searches the repository only when the context store reports a miss.
+<p align="center">
+  <img
+    src="https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-hero.png"
+    alt="A fixed star routing a linked network of repository knowledge"
+    width="100%"
+  >
+</p>
 
-## Why it exists
+## Context is not a prompt. It is an operating layer.
 
-The useful knowledge about a codebase is usually scattered across instruction
-files, READMEs, plans, configuration, source, and past sessions. General search
-can eventually find much of it, but an agent should not have to sweep an entire
-drive to answer questions like:
+Coding agents often begin every session as strangers. They search for
+instructions, reopen the same large documents, guess which files matter, and
+rediscover commands and decisions that another agent already found. The model
+may be intelligent, but the environment keeps making it start from zero.
+
+Lodestar changes the shape of that interaction. It gives every agent one small,
+deterministic first place to obtain:
+
+- the rules governing how it should behave;
+- the identity of the project beneath its current working directory;
+- the commands, constraints, decisions, hazards, and known answers that matter;
+- stable links between related pieces of knowledge;
+- precise routes to authoritative repository documentation.
+
+The result is not a larger prompt. It is a **context plane**: a durable local
+layer between the agent and the filesystem that decides what should be known
+first, what can be retrieved exactly, and when repository inspection is
+actually necessary.
+
+## The core thesis
+
+Lodestar is built around five ideas.
+
+1. **Route before search.** If the destination is already known, the agent
+   should follow a stable link instead of rediscovering it probabilistically.
+2. **Identity before action.** An agent should know whose rules apply and which
+   project it inhabits before it edits, runs, or recommends anything.
+3. **Small context beats ambient context.** The best startup packet is the
+   smallest sufficient one, with obvious paths for expansion.
+4. **Repositories remain authoritative.** A context system should summarize and
+   route to source material, not silently create a second, stale copy of it.
+5. **A miss is useful information.** When context is absent, the system should
+   say so explicitly, permit targeted inspection, and expose what the canonical
+   store needs next.
+
+This is why Lodestar uses stable IDs, a linked record graph, deterministic
+indexes, bounded transfer budgets, and explicit context-miss results instead of
+making fuzzy search the center of the product.
+
+## The context port
+
+Lodestar is intended to be a stable ingress point for a larger agent operating
+environment.
+
+```text
+                         LODESTAR
+                 one deterministic context port
+                                |
+          +---------------------+---------------------+
+          |                     |                     |
+     global identity       project knowledge      retrieval map
+     behavior + rules      commands + decisions   links + locators
+          |                     |                     |
+          +---------------------+---------------------+
+                                |
+                         coding agent
+                                |
+                   targeted repository work
+```
+
+It does not try to become the entire operating system. It provides the
+contract that lets the rest of that system cohere. Different agents, shells,
+and repositories can enter through the same port, receive the same structured
+truth, and expand it through the same protocol.
+
+| Operating concern | Lodestar's role |
+| --- | --- |
+| Bootstrap | Supplies required global rules and current-project identity |
+| Knowledge | Stores compact operational facts, decisions, commands, and answers |
+| Topology | Links related knowledge through stable record IDs |
+| Transport | Emits bounded, deterministic JSON rather than large prose dumps |
+| Authority | Keeps source code and detailed documents in their owning repositories |
+| Recovery | Diagnoses broken state, stale locks, missing roots, and locator drift |
+| Feedback | Turns context misses into explicit maintenance signals |
+
+## Why it had to exist
+
+Useful repository knowledge is scattered across instruction files, READMEs,
+plans, configuration, source, and past sessions. General search can eventually
+find much of it, but “eventually” is the problem. An agent should not sweep a
+drive to answer:
 
 - How do I test this repository?
 - Which rules apply here?
@@ -30,8 +121,36 @@ drive to answer questions like:
 - Where is the release procedure?
 - Which project does this directory belong to?
 
-Lodestar turns those answers into a small, explicit graph with stable IDs and
-precise links back to the owning documentation.
+The original Lodestar began as a private context engine built to stop that
+repeated scavenger hunt. The public edition then had to solve a harder problem:
+retain the useful behavior while removing private history, private catalogs,
+machine-specific assumptions, and fragile one-off wiring.
+
+That work changed the project substantially. The public package now carries the
+retrieval behavior, project tooling, migration, profiling, diagnostics,
+rollback, and safety boundaries of the private engine in one universal,
+MIT-licensed implementation. Native Windows and WSL use the same package and
+can share the same canonical store.
+
+## What we built
+
+| Layer | What exists today |
+| --- | --- |
+| Linked retrieval | Bounded `start`, exact `get`, graph-aware `resolve`, and scoped `find` |
+| Canonical storage | Versioned JSON/JSONL records, stable IDs, deterministic routes, and search indexes |
+| Transaction safety | Immutable generations, atomic promotion, audited writes, and rollback on failure |
+| Concurrency | Multi-reader/single-writer operation with PID, host, nonce, heartbeat, and stale-lock handling |
+| Project intelligence | Bounded discovery, generated-versus-curated ownership, profiling, refresh, and coverage |
+| Scope and privacy | Canonical path confinement, cross-project authorization, locator health, and no source ingestion |
+| Agent integration | Managed Codex bootstrap blocks with byte-preserving updates, backups, and manifest rollback |
+| Portability | Native Windows, WSL, Linux, and macOS behavior from one zero-dependency Node.js package |
+
+This is deliberately more than a wrapper around `grep`. The difficult work is
+not finding a string; it is maintaining identity, authority, scope, freshness,
+transfer budgets, cross-platform paths, transactional safety, and a retrieval
+contract an agent will consistently prefer.
+
+## Before and after
 
 | Without Lodestar | With Lodestar |
 | --- | --- |
@@ -40,20 +159,6 @@ precise links back to the owning documentation.
 | Guess filenames and search broadly | Follow exact record IDs and documentation locators |
 | Mix knowledge from unrelated projects | Enforce global and current-project scope |
 | Silently fail into more searching | Report a context miss and the targeted next step |
-
-## What you get
-
-- **One local context home.** Global rules, project records, indexes, links,
-  health information, audit events, and backups use one portable store format.
-- **Small, linked retrieval.** `start` supplies the essentials; `get` and
-  `resolve` follow exact knowledge; `find` searches only authorized structured
-  context.
-- **A maintained project map.** Bounded discovery and profiling identify
-  projects and useful commands without ingesting source trees or secret values.
-- **Safe updates.** Validated writes build immutable generations and switch them
-  atomically, with single-writer locking, diagnostics, and rollback support.
-- **Native Windows and WSL support.** Both runtimes can use the same canonical
-  store while running the same public package.
 
 ## How an agent uses it
 
@@ -73,6 +178,23 @@ agentctx start --cwd <current-directory>
 The optional Codex adapter installs this lookup contract into a managed block
 without replacing unrelated user instructions. New sessions are directed to
 Lodestar before broad repository search.
+
+## Engineered as infrastructure
+
+The MVP is gated by more than command-level correctness:
+
+- deterministic startup and retrieval output;
+- strict record-count, byte, depth, and scope limits;
+- a 100-project material-lift fixture;
+- private-engine behavioral parity tests;
+- real tarball installation and rollback tests;
+- native Windows and WSL execution;
+- hosted Windows, Ubuntu, and macOS CI;
+- package-content, license, and release-metadata checks.
+
+Lodestar v0.4.4 passes 131 tests under WSL/Linux and the full native Windows
+suite with one expected platform-specific symlink skip. The published release
+is built from the same commit exercised by the cross-platform workflow.
 
 ## Local by design
 

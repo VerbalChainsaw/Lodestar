@@ -4,8 +4,10 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
-- Rewrite the repository front page around Lodestar's purpose, agent workflow,
-  concrete benefits, local-first boundary, and public release path.
+- Build a full product front page around Lodestar's theory, origin, operating
+  role, engineering depth, agent workflow, and public release path.
+- Add a standalone transparent Lodestar product mark and a panoramic linked-
+  context hero illustration.
 
 ## 0.4.4 - 2026-07-29
 
