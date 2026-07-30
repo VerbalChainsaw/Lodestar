@@ -21,6 +21,7 @@ import {
   installerHelpText,
   installWindowsCompatibilityShims,
   packageMetadata,
+  packageTransition,
   resolveNpmInvocation,
 } from "../install.mjs";
 
@@ -73,28 +74,126 @@ async function writeLegacyStore(root) {
   );
 }
 
-test("installer dry-run returns a complete plan without starting npm", async () => {
+test("installer dry-run inspects npm root and returns a complete plan", async () => {
   await withTemp("lodestar-installer-plan-", async (root) => {
     const output = [];
+    const prefix = path.join(root, "prefix");
+    const npmRoot = path.join(prefix, "lib", "node_modules");
     const result = await installLodestar([
       "--dry-run",
       "--package",
       packageRoot,
       "--prefix",
-      path.join(root, "prefix"),
+      prefix,
       "--home",
       path.join(root, "state"),
       "--skip-codex",
     ], {
-      spawn: () => assert.fail("dry-run must not start a subprocess"),
+      spawn: (_command, args) => {
+        assert.deepEqual(args, [
+          "root",
+          "--global",
+          "--prefix",
+          prefix,
+        ]);
+        return { status: 0, stdout: npmRoot, stderr: "" };
+      },
       stdout: (line) => output.push(JSON.parse(line)),
     });
     assert.equal(result.dry_run, true);
     assert.equal(result.plan.package_name, "lodestar-agent-context");
     assert.equal(result.plan.install_codex, false);
     assert.equal(result.plan.legacy_home, null);
+    assert.equal(result.plan.installed_version, null);
+    assert.equal(result.plan.transition, "install");
     assert.deepEqual(output, [result]);
     await assert.rejects(access(path.join(root, "prefix")));
+  });
+});
+
+test("installer reports package transitions and refuses accidental downgrade", async () => {
+  assert.equal(packageTransition(null, "0.6.1"), "install");
+  assert.equal(packageTransition("0.6.1", "0.6.1"), "reinstall");
+  assert.equal(packageTransition("0.5.0", "0.6.1"), "upgrade");
+  assert.equal(packageTransition("0.7.0", "0.6.1"), "downgrade");
+  assert.equal(packageTransition("1.0.0-beta.2", "1.0.0-beta.10"), "upgrade");
+  assert.equal(packageTransition("1.0.0-beta", "1.0.0"), "upgrade");
+  assert.equal(packageTransition("1.0.0+old", "1.0.0+new"), "reinstall");
+  assert.equal(packageTransition("development", "0.6.1"), "replace-unknown");
+
+  await withTemp("lodestar-installer-transition-", async (root) => {
+    const prefix = path.join(root, "prefix");
+    const npmRoot = path.join(prefix, "lib", "node_modules");
+    const installedRoot = path.join(npmRoot, "lodestar-agent-context");
+    await mkdir(installedRoot, { recursive: true });
+    const spawn = () => ({ status: 0, stdout: npmRoot, stderr: "" });
+
+    await writeFile(path.join(installedRoot, "package.json"), JSON.stringify({
+      name: "lodestar-agent-context",
+      version: "0.5.0",
+    }));
+    const upgrade = await installLodestar([
+      "--dry-run",
+      "--package",
+      packageRoot,
+      "--prefix",
+      prefix,
+      "--skip-codex",
+    ], { spawn, stdout: () => {} });
+    assert.equal(upgrade.plan.installed_version, "0.5.0");
+    assert.equal(upgrade.plan.transition, "upgrade");
+
+    await writeFile(path.join(installedRoot, "package.json"), JSON.stringify({
+      name: "lodestar-agent-context",
+      version: "9.0.0",
+    }));
+    await assert.rejects(
+      installLodestar([
+        "--dry-run",
+        "--package",
+        packageRoot,
+        "--prefix",
+        prefix,
+        "--skip-codex",
+      ], { spawn, stdout: () => {} }),
+      { code: "installer-downgrade-refused" },
+    );
+    const downgrade = await installLodestar([
+      "--dry-run",
+      "--allow-downgrade",
+      "--package",
+      packageRoot,
+      "--prefix",
+      prefix,
+      "--skip-codex",
+    ], { spawn, stdout: () => {} });
+    assert.equal(downgrade.plan.transition, "downgrade");
+
+    await writeFile(path.join(installedRoot, "package.json"), JSON.stringify({
+      name: "lodestar-agent-context",
+      version: "development",
+    }));
+    await assert.rejects(
+      installLodestar([
+        "--dry-run",
+        "--package",
+        packageRoot,
+        "--prefix",
+        prefix,
+        "--skip-codex",
+      ], { spawn, stdout: () => {} }),
+      { code: "installer-version-replacement-refused" },
+    );
+    const explicitReplacement = await installLodestar([
+      "--dry-run",
+      "--allow-downgrade",
+      "--package",
+      packageRoot,
+      "--prefix",
+      prefix,
+      "--skip-codex",
+    ], { spawn, stdout: () => {} });
+    assert.equal(explicitReplacement.plan.transition, "replace-unknown");
   });
 });
 
@@ -134,6 +233,7 @@ test("installer help and version succeed without package or npm access", async (
   assert.deepEqual(help, { ok: true, help: true });
   assert.deepEqual(helpOutput, [installerHelpText()]);
   assert.match(helpOutput[0], /--dry-run/);
+  assert.match(helpOutput[0], /--allow-downgrade/);
 
   const versionOutput = [];
   const version = await installLodestar(["--version"], {

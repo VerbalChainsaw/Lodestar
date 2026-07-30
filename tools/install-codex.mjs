@@ -21,7 +21,7 @@ import { resolveStateHome } from "../lib/state-home.mjs";
 
 export const CODEX_BOOTSTRAP = [
   "BOOT=agentctx start --cwd <cwd>",
-  "APPLY=required[]",
+  "APPLY=required[];do_not_refetch_loaded_ids",
   "LOOKUP=agentctx.get|agentctx.resolve>agentctx.find>repo.targeted>repo.broad",
   "FAIL=repo.targeted+report.context_error",
 ].join("\n");

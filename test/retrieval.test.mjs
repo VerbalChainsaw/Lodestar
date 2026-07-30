@@ -3,11 +3,12 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-import { ContextStore } from "../lib/context-store.mjs";
 import {
   AGENTCTX_VERSION,
   run,
 } from "../agentctx.mjs";
+import { BUDGETS_V1 } from "../lib/budgets.mjs";
+import { ContextStore } from "../lib/context-store.mjs";
 import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 function baseRecord(overrides = {}) {
@@ -135,7 +136,13 @@ test("start exposes known-broken locator health and warnings", async () => {
     const store = await ContextStore.open({ home, cwd: source.currentRoot });
     const packet = await store.start();
     const docs = packet.available.find(({ id }) => id === "p:current:docs");
-    assert.equal(docs.locators[0].health.status, "missing");
+    assert.equal(docs.locators, undefined);
+    assert.equal(docs.aliases, undefined);
+    assert.equal(docs.topics, undefined);
+    assert.equal(
+      (await store.get("p:current:docs")).locators[0].health.status,
+      "missing",
+    );
     assert.deepEqual(packet.warnings, [{
       code: "locator-missing",
       id: "p:current:docs",
@@ -164,10 +171,15 @@ test("start truncates optional cards deterministically within its byte budget", 
       cwd: source.currentRoot,
     })).start();
     const bytes = Buffer.byteLength(JSON.stringify(packet));
-    assert.ok(bytes > 12 * 1024);
-    assert.ok(bytes <= 16 * 1024);
+    assert.ok(bytes > 4 * 1024);
+    assert.ok(bytes <= BUDGETS_V1.start.maxBytes);
     assert.equal(packet.truncated, true);
     assert.ok(packet.omitted_ids.length > 0);
+    assert.ok(packet.available.length > 0);
+    assert.ok(packet.available.every((card) =>
+      card.locators === undefined
+      && card.aliases === undefined
+      && card.topics === undefined));
     assert.deepEqual(
       [...packet.omitted_ids].sort(),
       packet.omitted_ids,

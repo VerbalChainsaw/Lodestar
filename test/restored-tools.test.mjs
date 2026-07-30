@@ -105,6 +105,7 @@ test("Codex installer upgrades the exact legacy bootstrap without duplication", 
 });
 
 test("Codex managed block prefers exact linked retrieval before scoped search", () => {
+  assert.match(CODEX_BOOTSTRAP, /APPLY=required\[\];do_not_refetch_loaded_ids/);
   assert.match(
     CODEX_BOOTSTRAP,
     /LOOKUP=agentctx\.get\|agentctx\.resolve>agentctx\.find>repo\.targeted>repo\.broad/,
