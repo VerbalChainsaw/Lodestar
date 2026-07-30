@@ -48,7 +48,7 @@ const BOOLEAN_OPTIONS = new Set([
 ]);
 
 const PACKAGE_NAME = "lodestar-agent-context";
-export const INSTALLER_VERSION = "0.6.0";
+export const INSTALLER_VERSION = "0.6.1";
 const MAX_COMPRESSED_PACKAGE_BYTES = 128 * 1024 * 1024;
 const MAX_EXPANDED_PACKAGE_BYTES = 256 * 1024 * 1024;
 

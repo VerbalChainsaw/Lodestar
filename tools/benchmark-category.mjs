@@ -10,6 +10,27 @@ import {
 import { errorResult, LodestarError } from "../lib/errors.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
 
+export function categoryHelpText() {
+  return [
+    "Usage: lodestar-category-benchmark --config <file> [options]",
+    "",
+    "Plan or execute a paired live-agent category benchmark.",
+    "",
+    "Options:",
+    "  --config <file>            Benchmark configuration (required)",
+    "  --execute                  Start configured model runners",
+    "  --output <absolute-path>   Result directory for execution",
+    "  --max-cost-usd <amount>    Required execution cost ceiling",
+    "  --max-trials <count>       Limit new trials",
+    "  --keep-workspaces          Retain generated trial repositories",
+    "  --json                     Emit machine-readable JSON",
+    "  -h, --help                 Show this help",
+    "",
+    "Without --execute, the command is a no-spend dry run.",
+    "",
+  ].join("\n");
+}
+
 function value(args, name, { required = false } = {}) {
   const index = args.indexOf(name);
   if (index < 0) {
@@ -68,6 +89,10 @@ export async function run(args = process.argv.slice(2), io = {}) {
   const stdout = io.stdout ?? ((text) => process.stdout.write(text));
   const stderr = io.stderr ?? ((text) => process.stderr.write(text));
   try {
+    if (args.length === 1 && ["--help", "-h"].includes(args[0])) {
+      stdout(categoryHelpText());
+      return 0;
+    }
     validateArgs(args);
     const configFile = path.resolve(value(args, "--config", { required: true }));
     const config = await loadCategoryConfig(configFile);

@@ -6,6 +6,22 @@ import {
   runPerformanceBenchmark,
 } from "../lib/performance-benchmark.mjs";
 
+export function performanceHelpText() {
+  return [
+    "Usage: lodestar-performance [options]",
+    "",
+    "Run retrieval scale profiles and operation-latency probes.",
+    "",
+    "Options:",
+    "  --quick                    Use reduced development profiles",
+    "  --iterations <count>       Timed operation samples (default: 75)",
+    "  --warmups <count>          Warmup operation samples (default: 10)",
+    "  --json                     Emit machine-readable JSON",
+    "  -h, --help                 Show this help",
+    "",
+  ].join("\n");
+}
+
 function optionValue(args, name, fallback) {
   const index = args.indexOf(name);
   if (index < 0) return fallback;
@@ -100,6 +116,10 @@ export async function run(args = process.argv.slice(2), io = {}) {
   const stdout = io.stdout ?? ((value) => process.stdout.write(value));
   const stderr = io.stderr ?? ((value) => process.stderr.write(value));
   try {
+    if (args.length === 1 && ["--help", "-h"].includes(args[0])) {
+      stdout(performanceHelpText());
+      return 0;
+    }
     const allowed = new Set([
       "--json",
       "--quick",

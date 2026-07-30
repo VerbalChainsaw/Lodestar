@@ -105,3 +105,17 @@ test("performance executable uses the cross-platform main entry", async () => {
   assert.equal(stderr, "");
   assert.equal(JSON.parse(stdout).passed, true);
 });
+
+test("performance CLI exposes conventional help without running profiles", async () => {
+  const stdout = [];
+  const stderr = [];
+  const code = await run(["-h"], {
+    stdout: (value) => stdout.push(value),
+    stderr: (value) => stderr.push(value),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(stderr, []);
+  assert.match(stdout.join(""), /^Usage: lodestar-performance/m);
+  assert.match(stdout.join(""), /--iterations/);
+});

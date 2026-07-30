@@ -351,6 +351,20 @@ test("CLI defaults to a no-execution plan", async () => {
   assert.ok(plan.trialCount > 0);
 });
 
+test("category CLI exposes help without requiring config or starting a runner", async () => {
+  const stdout = [];
+  const stderr = [];
+  const code = await runCli(["--help"], {
+    stdout: (value) => stdout.push(value),
+    stderr: (value) => stderr.push(value),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(stderr, []);
+  assert.match(stdout.join(""), /^Usage: lodestar-category-benchmark/m);
+  assert.match(stdout.join(""), /no-spend dry run/);
+});
+
 test("CLI rejects a relative paid-run output before starting a runner", async () => {
   const stdout = [];
   const stderr = [];

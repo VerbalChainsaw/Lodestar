@@ -49,6 +49,11 @@ Lodestar is designed to reduce environmental work around coding-agent reasoning 
 
 The benchmark suite measures retrieval efficiency, determinism, project isolation, and runtime overhead. It does **not** claim universal improvement in LLM reasoning quality. See the full [benchmark results](docs/benchmarks.md), [performance methodology](docs/performance.md), and [paired evaluation design](docs/evaluation.md).
 
+The fixed routing cost is not a universal latency win: fresh 25-sample tests on
+repositories with only 8–16 tiny documents were 18.82–138.46% slower than a
+successful direct scan, even though Lodestar still inspected fewer files and
+bytes. The measured advantage appears as repository size and ambiguity grow.
+
 ## Context is not a prompt. It is an operating layer.
 
 Coding agents often begin every session as strangers. They search for
@@ -212,11 +217,11 @@ The MVP is gated by more than command-level correctness:
 - a required hosted Windows, Ubuntu, and macOS CI gate;
 - package-content, license, and release-metadata checks.
 
-The release candidate's local and native test totals are recorded in
-[docs/benchmarks.md](docs/benchmarks.md). Publication requires the hosted
-Windows, Ubuntu, and macOS workflows on the exact release commit.
+Release evidence and local/native test totals are recorded in
+[docs/benchmarks.md](docs/benchmarks.md). The release workflow will not publish
+until Windows, Ubuntu, and macOS checks pass on the exact tagged commit.
 
-Current local evidence is 198/198 WSL/Linux tests, 195 native Windows passes
+Current local evidence is 201/201 WSL/Linux tests, 198 native Windows passes
 with zero failures and three intentional platform skips, a complete isolated
 packed lifecycle, and a passing 500-project stress gate.
 
@@ -281,9 +286,9 @@ database, or duplicate entire repositories. Source code and detailed documents
 remain authoritative in their repositories; Lodestar stores compact operational
 knowledge and precise routes to them.
 
-The current worktree is the Lodestar v0.6.0 release candidate. It is not called
-released until the exact commit passes hosted Windows, Ubuntu, and macOS CI and
-the `v0.6.0` tag publishes its checksum and provenance-attested package.
+Published Lodestar releases come only from exact tagged commits that pass
+hosted Windows, Ubuntu, and macOS CI. Each release includes a SHA-256 checksum
+and GitHub provenance attestation for the package.
 
 ## Requirements and platform support
 
@@ -295,19 +300,22 @@ The same package and store format are used on every supported platform.
 
 ## Quick start
 
-After publication, download `lodestar-agent-context-0.6.0.tgz` and
+Download `lodestar-agent-context-0.6.1.tgz` and
 `SHA256SUMS.txt` from the
-[v0.6.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.6.0),
+[v0.6.1 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.6.1),
 verify the checksum, and install:
 
 ```sh
-npm install --global ./lodestar-agent-context-0.6.0.tgz
+npm install --global ./lodestar-agent-context-0.6.1.tgz
 agentctx --version
 agentctx --help
 agentctx init
 agentctx doctor
 agentctx start --cwd /path/to/project
 ```
+
+The supported public distribution is the provenance-attested GitHub release
+tarball. The package name is not currently published through the npm registry.
 
 To preview bounded project discovery and starter profiling during initialization:
 
@@ -699,7 +707,7 @@ an artifact provenance attestation, and publishes both assets to a GitHub
 release.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and
-[docs/releases/v0.6.0.md](docs/releases/v0.6.0.md) for this release's notes.
+[docs/releases/v0.6.1.md](docs/releases/v0.6.1.md) for this release's notes.
 
 ## License
 

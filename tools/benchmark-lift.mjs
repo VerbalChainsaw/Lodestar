@@ -6,6 +6,23 @@ import {
 } from "../lib/lift-benchmark.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
 
+export function liftHelpText() {
+  return [
+    "Usage: lodestar-benchmark [options]",
+    "",
+    "Run the deterministic paired retrieval benchmark.",
+    "",
+    "Options:",
+    "  --runs <count>             Warm samples (default: 7)",
+    "  --projects <count>         Catalog projects (default: 100)",
+    "  --documents <count>        Repository documents (default: 64)",
+    "  --document-bytes <count>   Target bytes per document (default: 16384)",
+    "  --json                     Emit machine-readable JSON",
+    "  -h, --help                 Show this help",
+    "",
+  ].join("\n");
+}
+
 function optionValue(args, name, fallback) {
   const index = args.indexOf(name);
   if (index < 0) return fallback;
@@ -112,6 +129,10 @@ export async function run(args = process.argv.slice(2), io = {}) {
   const stdout = io.stdout ?? ((value) => process.stdout.write(value));
   const stderr = io.stderr ?? ((value) => process.stderr.write(value));
   try {
+    if (args.length === 1 && ["--help", "-h"].includes(args[0])) {
+      stdout(liftHelpText());
+      return 0;
+    }
     const allowed = new Set([
       "--json",
       "--runs",

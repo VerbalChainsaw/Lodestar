@@ -4,6 +4,21 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
+## 0.6.1 - 2026-07-30
+
+- Remove stale release-candidate and publication-pending language from the
+  public README and release notes.
+- State the supported provenance-attested GitHub tarball distribution path
+  explicitly instead of implying that the package is available from the npm
+  registry.
+- Normalize package `bin` targets so npm does not rewrite the public metadata
+  during publication checks.
+- Add a public vulnerability-reporting policy and Dependabot coverage for npm
+  metadata and GitHub Actions.
+- Add conventional help output to all three public benchmark executables.
+- Refresh the paired retrieval and full 10/100/500-project performance evidence
+  without changing the v0.6 store format or context behavior.
+
 ## 0.6.0 - 2026-07-30
 
 - Seal new generations with deterministic SHA-256 manifests and add deep doctor

@@ -96,3 +96,17 @@ test("benchmark CLI rejects malformed options without throwing", async () => {
   assert.deepEqual(stdout, []);
   assert.equal(JSON.parse(stderr.join("")).ok, false);
 });
+
+test("benchmark CLI exposes conventional help without running a fixture", async () => {
+  const stdout = [];
+  const stderr = [];
+  const code = await run(["--help"], {
+    stdout: (value) => stdout.push(value),
+    stderr: (value) => stderr.push(value),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(stderr, []);
+  assert.match(stdout.join(""), /^Usage: lodestar-benchmark/m);
+  assert.match(stdout.join(""), /--document-bytes/);
+});
