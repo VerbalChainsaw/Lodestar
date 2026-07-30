@@ -4,8 +4,11 @@ import path from "node:path";
 import test from "node:test";
 
 import { ContextStore } from "../lib/context-store.mjs";
-import { run } from "../agentctx.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import {
+  AGENTCTX_VERSION,
+  run,
+} from "../agentctx.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 function baseRecord(overrides = {}) {
   return {
@@ -324,6 +327,27 @@ test("CLI validates the command before opening a state home", async () => {
   });
   assert.equal(code, 1);
   assert.equal(errors[0].error.code, "unknown-command");
+});
+
+test("CLI help and version succeed without opening a state home", async () => {
+  for (const [argv, expected] of [
+    [["--help"], /Usage:\n  agentctx <command>/],
+    [["help", "doctor"], /Usage: agentctx doctor/],
+    [["snapshot", "--help"], /portable snapshot/],
+    [["--version"], new RegExp(`^${AGENTCTX_VERSION}$`)],
+  ]) {
+    const output = [];
+    const errors = [];
+    const code = await run(argv, {
+      stdout: (line) => output.push(line),
+      stderr: (line) => errors.push(line),
+      home: "/definitely/not/a/state/home",
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(errors, []);
+    assert.equal(output.length, 1);
+    assert.match(output[0], expected);
+  }
 });
 
 test("CLI reports malformed JSON as an input error with a wrapped cause", async () => {

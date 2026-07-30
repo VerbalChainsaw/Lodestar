@@ -79,12 +79,20 @@ Installed packages also expose the public `lodestar-benchmark` and `lodestar-per
 
 At the time of this snapshot:
 
-- WSL/Linux: 158/158 tests pass.
-- Native Windows runs the same suite with one expected platform-specific
-  symlink skip.
-- Real tarball installation and npm binary execution pass.
+- WSL/Linux: 198/198 substantive tests pass with no skips.
+- Native Windows: 195 pass, 0 fail, with three intentional
+  platform-specific skips (two privileged directory-symlink cases and one
+  npm command-shim case).
+- The real `0.6.0` tarball passes isolated installation, installed-binary
+  startup, deep doctor, snapshot creation and verification, restore,
+  restored-store deep doctor, and maintenance preview.
 - JSON consumers and structured invalid-option behavior pass.
-- Hosted Windows, Ubuntu, and macOS CI pass.
+- The 500-project gate passes with 4/4 answer parity, no broad search, zero
+  cross-project records, 97.66% fewer files inspected, and 98.63% fewer bytes
+  inspected in the recorded WSL run.
+- Hosted Windows, Ubuntu, and macOS remain a required publication gate on the
+  exact release commit; they are not represented as passed by this local
+  snapshot.
 
 ## v0.5 project-readiness regression snapshot
 

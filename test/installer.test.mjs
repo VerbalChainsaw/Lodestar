@@ -11,16 +11,21 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import test from "node:test";
 
 import {
+  boundedGunzip,
+  INSTALLER_VERSION,
   installLodestar,
+  installerHelpText,
   installWindowsCompatibilityShims,
   packageMetadata,
   resolveNpmInvocation,
 } from "../install.mjs";
 
 const execFileAsync = promisify(execFile);
+const gzipAsync = promisify(gzip);
 const packageRoot = path.resolve(import.meta.dirname, "..");
 
 async function withTemp(prefix, run) {
@@ -119,6 +124,27 @@ test("installer rejects unsupported Node and unknown arguments", async () => {
   );
 });
 
+test("installer help and version succeed without package or npm access", async () => {
+  const helpOutput = [];
+  const help = await installLodestar(["--help"], {
+    nodeVersion: "1.0.0",
+    spawn: () => assert.fail("help must not start npm"),
+    stdout: (line) => helpOutput.push(line),
+  });
+  assert.deepEqual(help, { ok: true, help: true });
+  assert.deepEqual(helpOutput, [installerHelpText()]);
+  assert.match(helpOutput[0], /--dry-run/);
+
+  const versionOutput = [];
+  const version = await installLodestar(["--version"], {
+    nodeVersion: "1.0.0",
+    spawn: () => assert.fail("version must not start npm"),
+    stdout: (line) => versionOutput.push(line),
+  });
+  assert.deepEqual(version, { ok: true, version: INSTALLER_VERSION });
+  assert.deepEqual(versionOutput, [INSTALLER_VERSION]);
+});
+
 test("installer validates tarball identity before invoking npm", async () => {
   await withTemp("lodestar-installer-invalid-tar-", async (root) => {
     const archive = path.join(root, "not-lodestar.tgz");
@@ -133,6 +159,20 @@ test("installer validates tarball identity before invoking npm", async () => {
         stdout: () => {},
       }),
       { code: "installer-package-invalid" },
+    );
+  });
+});
+
+test("installer stops archive expansion at its decompressed byte budget", async () => {
+  await withTemp("lodestar-installer-gzip-budget-", async (root) => {
+    const archive = path.join(root, "expands.tgz");
+    await writeFile(archive, await gzipAsync(Buffer.alloc(8 * 1024)));
+    await assert.rejects(
+      boundedGunzip(archive, {
+        maxCompressedBytes: 1024 * 1024,
+        maxExpandedBytes: 1024,
+      }),
+      /expanded package archive exceeds/,
     );
   });
 });
@@ -168,6 +208,50 @@ test("Windows compatibility shims replace a stale prefix-bin command", async () 
       process.execPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
     ));
     assert.match(shim, /package[\\/]agentctx\.mjs/);
+  });
+});
+
+test("Windows compatibility shim failure restores every earlier shim", async () => {
+  await withTemp("lodestar-installer-shim-rollback-", async (root) => {
+    const prefix = path.join(root, "prefix");
+    const installed = path.join(root, "package");
+    await mkdir(path.join(prefix, "bin"), { recursive: true });
+    await mkdir(installed);
+    await Promise.all([
+      writeFile(path.join(installed, "first.mjs"), ""),
+      writeFile(path.join(installed, "second.mjs"), ""),
+      writeFile(path.join(prefix, "bin", "first.cmd"), "original"),
+    ]);
+    await assert.rejects(
+      installWindowsCompatibilityShims({
+        npmPrefix: prefix,
+        packageRoot: installed,
+        bins: {
+          first: "./first.mjs",
+          second: "./second.mjs",
+        },
+        nodeExecutable: process.execPath,
+        pathApi: path,
+        fsApi: {
+          async writeFile(file, content, encoding) {
+            if (file.includes("second.cmd.tmp-")) {
+              throw Object.assign(new Error("second shim failed"), {
+                code: "EIO",
+              });
+            }
+            return writeFile(file, content, encoding);
+          },
+        },
+      }),
+    );
+    assert.equal(
+      await readFile(path.join(prefix, "bin", "first.cmd"), "utf8"),
+      "original",
+    );
+    await assert.rejects(
+      access(path.join(prefix, "bin", "second.cmd")),
+      { code: "ENOENT" },
+    );
   });
 });
 
@@ -220,6 +304,48 @@ test("installer restores the previous package when post-install setup fails", as
       "package.json",
     ), "utf8"));
     assert.equal(installed.version, (await packageMetadata(packageRoot)).version);
+  });
+});
+
+test("installer removes state it created when a later adapter step fails", async () => {
+  await withTemp("lodestar-installer-state-rollback-", async (root) => {
+    const prefix = path.join(root, "prefix");
+    const stateHome = path.join(root, "state");
+    const broken = path.join(root, "late-failure-package");
+    await mkdir(broken);
+    await writeFile(path.join(broken, "package.json"), JSON.stringify({
+      name: "lodestar-agent-context",
+      version: "9.9.8",
+      type: "module",
+      bin: { agentctx: "./agentctx.mjs" },
+    }));
+    await writeFile(path.join(broken, "agentctx.mjs"), [
+      "import fs from 'node:fs';",
+      "const args = process.argv.slice(2);",
+      "const homeIndex = args.indexOf('--home');",
+      "const home = homeIndex >= 0 ? args[homeIndex + 1] : null;",
+      "if (args[0] === 'init') {",
+      "  fs.mkdirSync(home, { recursive: true });",
+      "  process.stdout.write(JSON.stringify({ ok: true, home, created: true }));",
+      "} else {",
+      "  process.stderr.write('adapter failed');",
+      "  process.exitCode = 7;",
+      "}",
+    ].join("\n"));
+    await assert.rejects(
+      installLodestar([
+        "--package",
+        broken,
+        "--prefix",
+        prefix,
+        "--home",
+        stateHome,
+        "--codex-home",
+        path.join(root, "codex"),
+      ], { stdout: () => {} }),
+      { code: "installer-process-failed" },
+    );
+    await assert.rejects(access(stateHome), { code: "ENOENT" });
   });
 });
 

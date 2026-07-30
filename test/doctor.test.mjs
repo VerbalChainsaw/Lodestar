@@ -16,7 +16,7 @@ import {
   repairWriterLock,
 } from "../lib/doctor.mjs";
 import { ContextStore } from "../lib/context-store.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 async function source(home) {
   const projectRoot = path.join(home, "project");

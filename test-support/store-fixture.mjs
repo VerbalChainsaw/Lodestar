@@ -5,8 +5,8 @@ import path from "node:path";
 import {
   buildGeneration,
   promoteGeneration,
-} from "../../lib/generation.mjs";
-import { buildIndexes } from "../../lib/indexes.mjs";
+} from "../lib/generation.mjs";
+import { buildIndexes } from "../lib/indexes.mjs";
 
 export async function withStoreFixture(sourceOrBuilder, run) {
   const home = await mkdtemp(path.join(os.tmpdir(), "lodestar-store-"));
@@ -18,11 +18,11 @@ export async function withStoreFixture(sourceOrBuilder, run) {
     const generation = await buildGeneration({
       home,
       source,
-      indexBuilder: (id) => buildIndexes({
+      indexBuilder: (id, persisted) => buildIndexes({
         generation: id,
-        catalog: source.catalog,
-        globalRecords: source.globalRecords,
-        projectRecords: source.projectRecords,
+        catalog: persisted.catalog,
+        globalRecords: persisted.globalRecords,
+        projectRecords: persisted.projectRecords,
         probeLocator: source.probeLocator,
       }),
     });

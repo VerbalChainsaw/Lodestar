@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -10,6 +9,7 @@ import { optionValue } from "../lib/cli-options.mjs";
 import { errorResult, LodestarError, wrapError } from "../lib/errors.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
 import { nativeProjectPath } from "../lib/native-path.mjs";
+import { readFileLimited } from "../lib/bounded-io.mjs";
 import { resolveStateHome } from "../lib/state-home.mjs";
 import { readStoreSource, updateStore } from "./tool-store.mjs";
 
@@ -647,7 +647,11 @@ export async function migrateRegistry({
   const nativeSource = nativeProjectPath(sourcePath, runtime);
   let input;
   try {
-    input = JSON.parse(await readFile(nativeSource, "utf8"));
+    input = JSON.parse(await readFileLimited(nativeSource, {
+      maximum: 32 * 1024 * 1024,
+      encoding: "utf8",
+      resource: "registry-input-bytes",
+    }));
   } catch (error) {
     throw wrapError(
       error,

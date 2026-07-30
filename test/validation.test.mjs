@@ -78,6 +78,55 @@ test("rejects duplicate project IDs before shards can overwrite each other", () 
   );
 });
 
+test("rejects project IDs whose portable shard stems collide", () => {
+  for (const projects of [
+    [
+      { id: "p:a/b", name: "Slash", roots: ["/slash"] },
+      { id: "p:a?b", name: "Question", roots: ["/question"] },
+    ],
+    [
+      { id: "p:Case", name: "Upper", roots: ["/upper"] },
+      { id: "p:case", name: "Lower", roots: ["/lower"] },
+    ],
+    [{ id: "global", name: "Reserved", roots: ["/reserved"] }],
+  ]) {
+    assert.throws(
+      () => validateGraph({
+        catalog: { v: 1, projects },
+        records: [],
+      }),
+      { code: "project-file-stem-collision" },
+    );
+  }
+  assert.throws(
+    () => validateGraph({
+      catalog: {
+        v: 1,
+        projects: [{ id: "__proto__", name: "Prototype", roots: ["/unsafe"] }],
+      },
+      records: [],
+    }),
+    { code: "project-file-stem-invalid" },
+  );
+});
+
+test("rejects project IDs that exceed portable filename limits", () => {
+  assert.throws(
+    () => validateGraph({
+      catalog: {
+        v: 1,
+        projects: [{
+          id: `p:${"x".repeat(200)}`,
+          name: "Too long",
+          roots: ["/long"],
+        }],
+      },
+      records: [],
+    }),
+    { code: "project-file-stem-invalid" },
+  );
+});
+
 test("confines project-relative locators without requiring the target to exist", () => {
   const root = path.resolve("/projects/sample");
   assert.doesNotThrow(() => validateGraph({
@@ -92,6 +141,8 @@ test("confines project-relative locators without requiring the target to exist",
   }));
   for (const locator of [
     { type: "file", path: "../outside.md" },
+    { type: "file", path: String.raw`..\outside.md` },
+    { type: "file", path: String.raw`C:outside.md` },
     { type: "file", path: path.resolve("/outside.md") },
   ]) {
     assert.throws(

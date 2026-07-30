@@ -18,8 +18,8 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
       - run: npm test
@@ -35,4 +35,10 @@ jobs:
       - run: npm install --prefix .package-smoke "./${{ env.PACKAGE }}"
       - run: npm --prefix .package-smoke exec -- agentctx init --home ../.package-smoke-state
       - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state
+      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state --deep
+      - run: npm --prefix .package-smoke exec -- agentctx snapshot --home ../.package-smoke-state --to ../.package-smoke-snapshot
+      - run: npm --prefix .package-smoke exec -- agentctx snapshot --verify ../.package-smoke-snapshot
+      - run: npm --prefix .package-smoke exec -- agentctx restore --from ../.package-smoke-snapshot --home ../.package-smoke-restored
+      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-restored --deep
+      - run: npm --prefix .package-smoke exec -- agentctx maintain --home ../.package-smoke-state --skip-drift
       - run: npm --prefix .package-smoke exec -- lodestar-performance --quick --iterations 3 --warmups 1 --json

@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import {
   lstat,
   mkdir,
-  readFile,
   readdir,
   stat,
 } from "node:fs/promises";
@@ -15,6 +13,7 @@ import { atomicWriteFile } from "../lib/atomic-file.mjs";
 import { optionValue, optionValues } from "../lib/cli-options.mjs";
 import { errorResult, LodestarError } from "../lib/errors.mjs";
 import { readCurrentGeneration } from "../lib/generation.mjs";
+import { hashFileLimited, readFileLimited } from "../lib/bounded-io.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
 import { nativeProjectPath } from "../lib/native-path.mjs";
 import { resolveStateHome } from "../lib/state-home.mjs";
@@ -123,15 +122,18 @@ function projectFor(file, catalog) {
 }
 
 async function describe(file, kind, catalog) {
-  const content = await readFile(file);
   const info = await stat(file);
+  const digest = await hashFileLimited(file, {
+    maximum: 1024 * 1024 * 1024,
+    resource: "inventory-file-bytes",
+  });
   const project = projectFor(file, catalog);
   return {
     path: normalized(file),
     kind,
     state: "observed",
     bytes: info.size,
-    sha256: createHash("sha256").update(content).digest("hex"),
+    sha256: digest.sha256,
     ...(project ? { project: project.id } : {}),
   };
 }
@@ -139,7 +141,11 @@ async function describe(file, kind, catalog) {
 async function currentCatalog(stateHome) {
   const generation = await readCurrentGeneration(stateHome);
   return JSON.parse(
-    await readFile(path.join(generation.root, "catalog.json"), "utf8"),
+    await readFileLimited(path.join(generation.root, "catalog.json"), {
+      maximum: 32 * 1024 * 1024,
+      encoding: "utf8",
+      resource: "catalog-bytes",
+    }),
   );
 }
 

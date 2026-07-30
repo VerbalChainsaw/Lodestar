@@ -3,7 +3,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
-  readFile,
   realpath,
   readdir,
   rename,
@@ -13,6 +12,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { atomicWriteFile } from "../lib/atomic-file.mjs";
+import { readFileLimited } from "../lib/bounded-io.mjs";
 import { optionValue } from "../lib/cli-options.mjs";
 import { errorResult, LodestarError, wrapError } from "../lib/errors.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
@@ -48,7 +48,10 @@ async function currentState(file) {
         { detail: { path: file } },
       );
     }
-    const content = await readFile(file);
+    const content = await readFileLimited(file, {
+      maximum: 8 * 1024 * 1024,
+      resource: "codex-managed-file-bytes",
+    });
     return { exists: true, content, sha256: hash(content) };
   } catch (error) {
     if (error.code === "ENOENT") {
@@ -146,7 +149,12 @@ async function confinedManifest(stateHome, manifestPath) {
   return selected;
 }
 
-async function prepareEntry(rawEntry, manifest, manifestPath) {
+async function prepareEntry(
+  rawEntry,
+  manifest,
+  manifestPath,
+  allowedHomes,
+) {
   if (
     !rawEntry
     || typeof rawEntry !== "object"
@@ -199,6 +207,17 @@ async function prepareEntry(rawEntry, manifest, manifestPath) {
         { detail: { home, path: target } },
       );
     }
+    if (
+      allowedHomes
+      && !allowedHomes.some((allowed) =>
+        path.resolve(allowed) === path.resolve(home))
+    ) {
+      throw new LodestarError(
+        "codex-manifest-home-not-authorized",
+        `Codex rollback home was not authorized by this invocation: ${home}`,
+        { detail: { home, allowed_homes: allowedHomes } },
+      );
+    }
   }
 
   let backup = null;
@@ -213,7 +232,10 @@ async function prepareEntry(rawEntry, manifest, manifestPath) {
           { detail: { backup, manifest: manifestPath } },
         );
       }
-      backupContent = await readFile(backup);
+      backupContent = await readFileLimited(backup, {
+        maximum: 8 * 1024 * 1024,
+        resource: "codex-backup-bytes",
+      });
     } catch (error) {
       if (error instanceof LodestarError) throw error;
       throw wrapError(
@@ -249,6 +271,7 @@ export async function rollbackCodex({
   stateHome,
   manifestPath,
   force = false,
+  allowedHomes = null,
 } = {}) {
   if (!stateHome) {
     throw new LodestarError(
@@ -259,7 +282,11 @@ export async function rollbackCodex({
   const selectedManifest = await confinedManifest(stateHome, manifestPath);
   let manifest;
   try {
-    manifest = JSON.parse(await readFile(selectedManifest, "utf8"));
+    manifest = JSON.parse(await readFileLimited(selectedManifest, {
+      maximum: 16 * 1024 * 1024,
+      encoding: "utf8",
+      resource: "codex-manifest-bytes",
+    }));
   } catch (error) {
     throw wrapError(
       error,
@@ -282,6 +309,7 @@ export async function rollbackCodex({
       rawEntry,
       manifest,
       selectedManifest,
+      allowedHomes?.map((home) => nativeProjectPath(home)),
     );
     if (
       !prepared.alreadyRestored
@@ -307,6 +335,23 @@ export async function rollbackCodex({
         unchanged += 1;
         continue;
       }
+      const current = await currentState(entry.path);
+      if (
+        !force
+        && current.sha256 !== state.sha256
+      ) {
+        throw new LodestarError(
+          "codex-active-file-drift",
+          `active file changed during rollback: ${entry.path}`,
+          {
+            detail: {
+              path: entry.path,
+              expected_sha256: state.sha256,
+              actual_sha256: current.sha256,
+            },
+          },
+        );
+      }
       if (entry.existed) {
         await atomicRestore(entry.path, backupContent);
       } else if (state.exists) {
@@ -319,6 +364,15 @@ export async function rollbackCodex({
     const restoreErrors = [];
     for (const { entry, state } of [...changed].reverse()) {
       try {
+        const current = await currentState(entry.path);
+        const restoredHash = entry.existed ? entry.before_sha256 : null;
+        if (current.sha256 !== restoredHash) {
+          throw new LodestarError(
+            "codex-active-file-drift",
+            `active file changed while rollback recovery was running: ${entry.path}`,
+            { detail: { path: entry.path } },
+          );
+        }
         if (state.exists) {
           await atomicWriteFile(entry.path, state.content);
         } else {

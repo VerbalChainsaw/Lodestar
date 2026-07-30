@@ -4,6 +4,41 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
+## 0.6.0 - 2026-07-30
+
+- Seal new generations with deterministic SHA-256 manifests and add deep doctor
+  verification of the complete file set, file bytes, canonical generation
+  identity, and rebuilt index content while retaining explicit compatibility
+  with legacy unsealed generations.
+- Synchronize staged generation, pointer, audit, initialization, snapshot, and
+  restore data before promotion, clean complete transaction roots after
+  pre-commit failures, and report post-commit durability uncertainty without
+  falsely reporting an unchanged destination.
+- Enforce versioned record, catalog, graph, shard, and store resource limits
+  before persistence or index construction, including the measured 500-project
+  boundary.
+- Add portable, independently checksummed snapshots and fail-closed
+  restore-to-new-home validation.
+- Add dry-run-first maintenance with storage telemetry, bounded generation
+  retention, recoverable quarantine rollback, exact preview/apply targets,
+  hashed audit-log rotation, and bounded source-drift detection.
+- Close the adversarial release gate with portable shard collision checks,
+  physical locator and destination confinement, composite maintenance rollback,
+  complete rotated-audit snapshots, bounded input/archive/index processing,
+  installer-wide recovery, immutable CI action pins, CodeQL, and artifact
+  provenance attestations.
+- Add `agentctx recover <generation> [--promote]` for validated, audited
+  quarantine recovery without an irreversible purge surface.
+- Keep irreversible quarantine purge and public schema migration out of the
+  release until each has a complete, independently proven product contract.
+- Add required-file corruption, manifest-omission, partial-write, disk-sync,
+  copy-failure, retention-rollback, snapshot, drift, resource-boundary, and
+  packed lifecycle regression coverage.
+- Complete the release-polish pass with conventional CLI and installer
+  help/version surfaces, WSL translation for cataloged Windows roots during
+  physical locator checks, and one authoritative doctor issue per unhealthy
+  locator.
+
 ## 0.5.0 - 2026-07-30
 
 - Make the default project-registry migration a lossless, previewable merge

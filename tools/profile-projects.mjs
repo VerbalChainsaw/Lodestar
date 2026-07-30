@@ -7,17 +7,17 @@ import { createHash } from "node:crypto";
 import {
   access,
   lstat,
-  readFile,
   readdir,
   realpath,
-  stat,
 } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
+import { readFileLimited } from "../lib/bounded-io.mjs";
 import { optionValue, optionValues } from "../lib/cli-options.mjs";
 import { errorResult } from "../lib/errors.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
+import { probeLocatorHealth } from "../lib/locator-health.mjs";
 import {
   isWslRuntime,
   nativeProjectPath,
@@ -125,9 +125,22 @@ async function safeProjectRoot(candidate) {
 }
 
 async function readBounded(file, bytes = 131_072) {
-  const info = await stat(file);
-  if (!info.isFile() || info.size > bytes) return null;
-  return readFile(file, "utf8");
+  try {
+    return await readFileLimited(file, {
+      maximum: bytes,
+      encoding: "utf8",
+      resource: "project-profile-file-bytes",
+    });
+  } catch (error) {
+    if (
+      error.code === "ENOENT"
+      || error.code === "EISDIR"
+      || error.code === "resource-limit-exceeded"
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function shallowFiles(
@@ -212,7 +225,13 @@ function generatedRecord(project, suffix, value) {
   };
 }
 
-async function inspectProject(project, root, rootValue, rootStates, timestamp) {
+export async function inspectProject(
+  project,
+  root,
+  rootValue,
+  rootStates,
+  timestamp,
+) {
   const files = await shallowFiles(root);
   const manifests = files.filter((file) =>
     manifestNames.has(path.posix.basename(file))
@@ -464,37 +483,40 @@ async function inspectProject(project, root, rootValue, rootStates, timestamp) {
   ];
 }
 
-async function probeLocator({ project, locator }) {
-  if (locator.type !== "file" || !project) return { status: "unchecked" };
+export async function inspectProjectFingerprint(
+  project,
+  { timestamp = new Date(0).toISOString() } = {},
+) {
+  const rootStates = [];
   for (const candidate of project.roots ?? []) {
-    const root = await safeProjectRoot(candidate);
-    if (!root) continue;
-    const target = path.resolve(root, locator.path);
-    const relative = path.relative(root, target);
-    if (
-      relative === ".."
-      || relative.startsWith(`..${path.sep}`)
-      || path.isAbsolute(relative)
-    ) {
-      return { status: "unreadable" };
-    }
-    try {
-      const resolved = await realpath(target);
-      const physicalRelative = path.relative(root, resolved);
-      if (
-        physicalRelative === ".."
-        || physicalRelative.startsWith(`..${path.sep}`)
-        || path.isAbsolute(physicalRelative)
-      ) {
-        return { status: "unreadable" };
-      }
-      return { status: "ok" };
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      return { status: "unreadable" };
-    }
+    rootStates.push({
+      root: candidate,
+      exists: Boolean(await safeProjectRoot(candidate)),
+    });
   }
-  return { status: "missing" };
+  const rootValue = rootStates.find(({ exists: present }) => present)?.root;
+  const root = rootValue ? await safeProjectRoot(rootValue) : null;
+  if (!root) {
+    return {
+      project: project.id,
+      status: "missing-root",
+      root: null,
+      sha256: null,
+    };
+  }
+  const records = await inspectProject(
+    project,
+    root,
+    rootValue,
+    rootStates,
+    timestamp,
+  );
+  return {
+    project: project.id,
+    status: "ok",
+    root: rootValue,
+    sha256: records[0]?.verified?.sha256 ?? null,
+  };
 }
 
 export async function profileProjects({
@@ -593,7 +615,7 @@ export async function profileProjects({
     op: "profile-projects",
     detail: { selected: [...selected].sort() },
     now,
-    probeLocator,
+    probeLocator: probeLocatorHealth,
     transform,
   });
   return {

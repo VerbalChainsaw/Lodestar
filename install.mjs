@@ -1,21 +1,26 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import {
   access,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   rm,
+  rmdir,
+  stat,
+  unlink,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { promisify } from "node:util";
-import { gunzip } from "node:zlib";
+import { createGunzip } from "node:zlib";
 
 import { atomicWriteFile } from "./lib/atomic-file.mjs";
+import { readFileLimited } from "./lib/bounded-io.mjs";
+import { syncDirectory, syncFile } from "./lib/durable-fs.mjs";
 import {
   optionValue,
   optionValues,
@@ -43,7 +48,58 @@ const BOOLEAN_OPTIONS = new Set([
 ]);
 
 const PACKAGE_NAME = "lodestar-agent-context";
-const gunzipAsync = promisify(gunzip);
+export const INSTALLER_VERSION = "0.6.0";
+const MAX_COMPRESSED_PACKAGE_BYTES = 128 * 1024 * 1024;
+const MAX_EXPANDED_PACKAGE_BYTES = 256 * 1024 * 1024;
+
+export function installerHelpText() {
+  return [
+    `Lodestar installer ${INSTALLER_VERSION}`,
+    "Safely install or upgrade the Lodestar package, state home, and Codex adapter.",
+    "",
+    "Usage:",
+    "  lodestar-install [options]",
+    "  node install.mjs [options]",
+    "",
+    "Options:",
+    "  --package <path>      Checkout or Lodestar .tgz to install",
+    "  --prefix <path>       npm global prefix",
+    "  --home <path>         Lodestar state home",
+    "  --legacy-home <path>  Legacy flat store to migrate",
+    "  --codex-home <path>   Codex home; repeat for multiple homes",
+    "  --skip-codex          Do not install the managed Codex block",
+    "  --dry-run             Validate inputs and print the install plan",
+    "  -h, --help            Show this help",
+    "  -v, --version         Show the installer version",
+  ].join("\n");
+}
+
+export async function boundedGunzip(packageSource, {
+  maxCompressedBytes = MAX_COMPRESSED_PACKAGE_BYTES,
+  maxExpandedBytes = MAX_EXPANDED_PACKAGE_BYTES,
+} = {}) {
+  const info = await stat(packageSource);
+  if (info.size > maxCompressedBytes) {
+    throw new Error("package archive exceeds the 128 MiB safety limit");
+  }
+  const stream = createReadStream(packageSource).pipe(createGunzip());
+  const chunks = [];
+  let bytes = 0;
+  try {
+    for await (const chunk of stream) {
+      bytes += chunk.byteLength;
+      if (bytes > maxExpandedBytes) {
+        stream.destroy();
+        throw new Error("expanded package archive exceeds the 256 MiB safety limit");
+      }
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    stream.destroy();
+    throw error;
+  }
+  return Buffer.concat(chunks, bytes);
+}
 
 function assertArguments(args) {
   validateValueOptions(args, VALUE_OPTIONS);
@@ -218,9 +274,12 @@ async function snapshotInstalledPackage({
     if (typeof filename !== "string" || filename.length === 0) {
       throw new Error("npm pack did not report a backup filename");
     }
+    const tarball = pathApi.join(directory, filename);
+    await syncFile(tarball);
+    await syncDirectory(directory);
     return {
       directory,
-      tarball: pathApi.join(directory, filename),
+      tarball,
       prefix,
     };
   } catch (error) {
@@ -280,12 +339,9 @@ function validatedPackageMetadata(value, packageSource) {
 }
 
 async function tarballPackageJson(packageSource) {
-  const compressed = await readFile(packageSource);
-  if (compressed.length > 128 * 1024 * 1024) {
-    throw new Error("package archive exceeds the 128 MiB safety limit");
-  }
-  const archive = await gunzipAsync(compressed);
+  const archive = await boundedGunzip(packageSource);
   let offset = 0;
+  let packageJson = null;
   while (offset + 512 <= archive.length) {
     const header = archive.subarray(offset, offset + 512);
     if (header.every((byte) => byte === 0)) break;
@@ -303,13 +359,19 @@ async function tarballPackageJson(packageSource) {
       throw new Error(`truncated tar entry ${name || "<unnamed>"}`);
     }
     if (name === "package/package.json" || name === "./package/package.json") {
+      if (packageJson !== null) {
+        throw new Error("archive contains duplicate package/package.json entries");
+      }
       if (size > 1_048_576) {
         throw new Error("package.json exceeds the 1 MiB safety limit");
       }
-      return JSON.parse(archive.subarray(bodyStart, bodyEnd).toString("utf8"));
+      packageJson = JSON.parse(
+        archive.subarray(bodyStart, bodyEnd).toString("utf8"),
+      );
     }
     offset = bodyStart + Math.ceil(size / 512) * 512;
   }
+  if (packageJson !== null) return packageJson;
   throw new Error("archive does not contain package/package.json");
 }
 
@@ -319,7 +381,11 @@ export async function packageMetadata(packageSource) {
     : path.join(packageSource, "package.json");
   try {
     const value = packageFile
-      ? JSON.parse(await readFile(packageFile, "utf8"))
+      ? JSON.parse(await readFileLimited(packageFile, {
+        maximum: 1024 * 1024,
+        encoding: "utf8",
+        resource: "package-metadata-bytes",
+      }))
       : await tarballPackageJson(packageSource);
     return validatedPackageMetadata(value, packageSource);
   } catch (error) {
@@ -385,6 +451,37 @@ export async function installWindowsCompatibilityShims({
     );
   }
   const compatibilityBin = pathApi.join(npmPrefix, "bin");
+  const changed = [];
+  const fsReadFile = fsApi?.readFile ?? readFile;
+  const fsLstat = fsApi?.lstat ?? lstat;
+  const fsUnlink = fsApi?.unlink ?? unlink;
+  const fsRmdir = fsApi?.rmdir ?? rmdir;
+  const restore = async () => {
+    const errors = [];
+    for (const item of [...changed].reverse()) {
+      try {
+        if (item.existed) {
+          await atomicWriteFile(item.shim, item.content, {
+            ...(fsApi ? { fsApi } : {}),
+            encoding: null,
+          });
+        } else {
+          await fsUnlink(item.shim).catch((error) => {
+            if (error.code !== "ENOENT") throw error;
+          });
+        }
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new LodestarError(
+        "installer-compatibility-rollback-failed",
+        "Unable to restore every Windows compatibility shim",
+        { cause: new AggregateError(errors) },
+      );
+    }
+  };
   try {
     await (fsApi?.mkdir ?? mkdir)(compatibilityBin, { recursive: true });
     const installedRoot = pathApi.resolve(packageRoot);
@@ -418,15 +515,55 @@ export async function installWindowsCompatibilityShims({
       }
       await (fsApi?.access ?? access)(target);
       const shim = pathApi.join(compatibilityBin, `${command}.cmd`);
+      let existed = true;
+      let content = null;
+      try {
+        const info = await fsLstat(shim);
+        if (info.isSymbolicLink()) {
+          throw new LodestarError(
+            "installer-compatibility-shim-symlink",
+            "Refusing to replace a symbolic-link compatibility shim",
+            { detail: { shim } },
+          );
+        }
+        content = await fsReadFile(shim);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        existed = false;
+      }
+      const prior = { shim, existed, content };
       await atomicWriteFile(
         shim,
         `@ECHO off\r\n${cmdQuoted(nodeExecutable)} ${cmdQuoted(target)} %*\r\n`,
         { ...(fsApi ? { fsApi } : {}) },
       );
+      changed.push(prior);
       written.push(shim);
     }
-    return { bin: compatibilityBin, shims: written };
+    return {
+      bin: compatibilityBin,
+      shims: written,
+      rollback: restore,
+    };
   } catch (error) {
+    let rollbackError = null;
+    try {
+      await restore();
+      if (changed.every(({ existed }) => !existed)) {
+        await fsRmdir(compatibilityBin).catch((failure) => {
+          if (!["ENOENT", "ENOTEMPTY"].includes(failure.code)) throw failure;
+        });
+      }
+    } catch (failure) {
+      rollbackError = failure;
+    }
+    if (rollbackError) {
+      throw new LodestarError(
+        "installer-compatibility-shim-rollback-failed",
+        "Windows compatibility shim installation failed and prior shims could not be restored",
+        { cause: new AggregateError([error, rollbackError]) },
+      );
+    }
     if (error instanceof LodestarError) throw error;
     throw wrapError(
       error,
@@ -451,6 +588,22 @@ export async function installLodestar(
     stdout = (line) => process.stdout.write(`${line}\n`),
   } = {},
 ) {
+  if (
+    args.length === 1
+    && ["--help", "-h"].includes(args[0])
+  ) {
+    const result = { ok: true, help: true };
+    stdout(installerHelpText());
+    return result;
+  }
+  if (
+    args.length === 1
+    && ["--version", "-v"].includes(args[0])
+  ) {
+    const result = { ok: true, version: INSTALLER_VERSION };
+    stdout(INSTALLER_VERSION);
+    return result;
+  }
   assertArguments(args);
   assertNodeVersion(nodeVersion);
   const runtime = {
@@ -552,6 +705,11 @@ export async function installLodestar(
     pathApi,
   });
   let packageReplaced = false;
+  let compatibility = null;
+  let stateResult = null;
+  let codex = null;
+  let installedMain = null;
+  let preserveBackup = false;
   try {
     runProcess(npm.command, [...npm.argsPrefix, ...installArguments], {
       cwd: packageRoot,
@@ -560,122 +718,170 @@ export async function installLodestar(
       displayCommand: npm.displayCommand,
     });
     packageReplaced = true;
-  const installedMain = pathApi.join(
-    npmRoot,
-    metadata.name,
-    "agentctx.mjs",
-  );
-  try {
-    await access(installedMain);
-  } catch (error) {
-    throw wrapError(
-      error,
-      "installer-entrypoint-missing",
-      `Installed agentctx entry point is missing: ${installedMain}`,
-      { entrypoint: installedMain },
+    installedMain = pathApi.join(
+      npmRoot,
+      metadata.name,
+      "agentctx.mjs",
     );
-  }
-  let installedBins;
-  try {
-    const installedPackage = JSON.parse(await readFile(
-      pathApi.join(npmRoot, metadata.name, "package.json"),
-      "utf8",
-    ));
-    if (
-      installedPackage.name !== PACKAGE_NAME
-      || typeof installedPackage.version !== "string"
-      || !installedPackage.bin
-      || typeof installedPackage.bin !== "object"
-      || Array.isArray(installedPackage.bin)
-    ) {
-      throw new Error("installed package identity is invalid");
+    try {
+      await access(installedMain);
+    } catch (error) {
+      throw wrapError(
+        error,
+        "installer-entrypoint-missing",
+        `Installed agentctx entry point is missing: ${installedMain}`,
+        { entrypoint: installedMain },
+      );
     }
-    metadata = {
-      name: installedPackage.name,
-      version: installedPackage.version,
-    };
-    installedBins = installedPackage.bin;
-  } catch (error) {
-    throw wrapError(
-      error,
-      "installer-installed-package-invalid",
-      "Unable to validate the installed Lodestar package",
-      { package_root: npmRoot },
-    );
-  }
+    let installedBins;
+    try {
+      const installedPackage = JSON.parse(await readFileLimited(
+        pathApi.join(npmRoot, metadata.name, "package.json"),
+        {
+          maximum: 1024 * 1024,
+          encoding: "utf8",
+          resource: "installed-package-metadata-bytes",
+        },
+      ));
+      if (
+        installedPackage.name !== PACKAGE_NAME
+        || typeof installedPackage.version !== "string"
+        || !installedPackage.bin
+        || typeof installedPackage.bin !== "object"
+        || Array.isArray(installedPackage.bin)
+      ) {
+        throw new Error("installed package identity is invalid");
+      }
+      if (installedPackage.version !== metadata.version) {
+        throw new Error(
+          `installed package version ${installedPackage.version} does not match preflight ${metadata.version}`,
+        );
+      }
+      metadata = {
+        name: installedPackage.name,
+        version: installedPackage.version,
+      };
+      installedBins = installedPackage.bin;
+    } catch (error) {
+      throw wrapError(
+        error,
+        "installer-installed-package-invalid",
+        "Unable to validate the installed Lodestar package",
+        { package_root: npmRoot },
+      );
+    }
 
-  const compatibility = platform === "win32"
-    ? await installWindowsCompatibilityShims({
-      npmPrefix,
-      packageRoot: pathApi.join(npmRoot, metadata.name),
-      bins: installedBins,
-      nodeExecutable,
-      pathApi,
-    })
-    : null;
-  const commonArguments = [
-    ...(stateHome ? ["--home", stateHome] : []),
-  ];
-  const stateResult = parseProcessJson(runProcess(nodeExecutable, [
-    installedMain,
-    legacyHome ? "migrate-legacy" : "init",
-    ...commonArguments,
-    ...(legacyHome ? ["--from", legacyHome] : []),
-  ], {
-    cwd: packageRoot,
-    spawn,
-    env,
-  }), legacyHome ? "legacy state migration" : "state initialization");
-  let codex = null;
-  if (!skipCodex) {
-    codex = parseProcessJson(runProcess(nodeExecutable, [
+    compatibility = platform === "win32"
+      ? await installWindowsCompatibilityShims({
+        npmPrefix,
+        packageRoot: pathApi.join(npmRoot, metadata.name),
+        bins: installedBins,
+        nodeExecutable,
+        pathApi,
+      })
+      : null;
+    const commonArguments = [
+      ...(stateHome ? ["--home", stateHome] : []),
+    ];
+    stateResult = parseProcessJson(runProcess(nodeExecutable, [
       installedMain,
-      "install-codex",
+      legacyHome ? "migrate-legacy" : "init",
       ...commonArguments,
-      ...codexHomes.flatMap((home) => ["--codex-home", home]),
+      ...(legacyHome ? ["--from", legacyHome] : []),
     ], {
       cwd: packageRoot,
       spawn,
       env,
-    }), "Codex adapter installation");
-  }
+    }), legacyHome ? "legacy state migration" : "state initialization");
+    if (!skipCodex) {
+      codex = parseProcessJson(runProcess(nodeExecutable, [
+        installedMain,
+        "install-codex",
+        ...commonArguments,
+        ...codexHomes.flatMap((home) => ["--codex-home", home]),
+      ], {
+        cwd: packageRoot,
+        spawn,
+        env,
+      }), "Codex adapter installation");
+    }
 
-  const standardBin = platform === "win32"
-    ? npmPrefix
-    : pathApi.join(npmPrefix, "bin");
-  const standardConfigured = pathConfigured(standardBin, {
-    env,
-    platform,
-    pathApi,
-  });
-  const compatibilityConfigured = compatibility
-    ? pathConfigured(compatibility.bin, {
+    const standardBin = platform === "win32"
+      ? npmPrefix
+      : pathApi.join(npmPrefix, "bin");
+    const standardConfigured = pathConfigured(standardBin, {
       env,
       platform,
       pathApi,
-    })
-    : false;
-  const binDirectory = standardConfigured || !compatibilityConfigured
-    ? standardBin
-    : compatibility.bin;
-  const result = {
-    ok: true,
-    package: {
-      name: metadata.name,
-      version: metadata.version,
-      source: packageSource,
-    },
-    prefix: npmPrefix,
-    bin: binDirectory,
-    compatibility_bin: compatibility?.bin ?? null,
-    path_configured: standardConfigured || compatibilityConfigured,
-    initialized: legacyHome ? null : stateResult,
-    migration: legacyHome ? stateResult : null,
-    codex,
-  };
-  stdout(JSON.stringify(result));
-  return result;
+    });
+    const compatibilityConfigured = compatibility
+      ? pathConfigured(compatibility.bin, {
+        env,
+        platform,
+        pathApi,
+      })
+      : false;
+    const binDirectory = standardConfigured || !compatibilityConfigured
+      ? standardBin
+      : compatibility.bin;
+    const result = {
+      ok: true,
+      package: {
+        name: metadata.name,
+        version: metadata.version,
+        source: packageSource,
+      },
+      prefix: npmPrefix,
+      bin: binDirectory,
+      compatibility_bin: compatibility?.bin ?? null,
+      path_configured: standardConfigured || compatibilityConfigured,
+      initialized: legacyHome ? null : stateResult,
+      migration: legacyHome ? stateResult : null,
+      codex,
+    };
+    stdout(JSON.stringify(result));
+    return result;
   } catch (error) {
+    const rollbackErrors = [];
+    if (codex?.manifest && installedMain) {
+      try {
+        runProcess(nodeExecutable, [
+          installedMain,
+          "rollback",
+          "--manifest",
+          codex.manifest,
+          ...(stateResult?.home ? ["--home", stateResult.home] : []),
+          ...(codex.installed ?? []).flatMap(({ home }) =>
+            ["--codex-home", home]),
+        ], {
+          cwd: packageRoot,
+          spawn,
+          env,
+        });
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (
+      stateResult?.home
+      && (
+        stateResult.created === true
+        || (legacyHome && stateResult.migrated === true)
+      )
+    ) {
+      try {
+        await rm(stateResult.home, { recursive: true, force: true });
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (compatibility?.rollback) {
+      try {
+        await compatibility.rollback();
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
     if (packageReplaced) {
       try {
         rollbackInstalledPackage({
@@ -687,23 +893,29 @@ export async function installLodestar(
           env,
         });
       } catch (rollbackError) {
-        throw new LodestarError(
-          "installer-package-rollback-failed",
-          "Lodestar setup failed and the previous package could not be restored",
-          {
-            cause: new AggregateError([error, rollbackError]),
-            detail: {
-              install_code: error.code ?? null,
-              rollback_code: rollbackError.code ?? null,
-              backup: backup?.tarball ?? null,
-            },
-          },
-        );
+        rollbackErrors.push(rollbackError);
+        preserveBackup = true;
       }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new LodestarError(
+        "installer-transaction-rollback-failed",
+        "Lodestar setup failed and its prior state could not be fully restored",
+        {
+          cause: new AggregateError([error, ...rollbackErrors]),
+          detail: {
+            install_code: error.code ?? null,
+            rollback_codes: rollbackErrors.map(
+              (failure) => failure.code ?? null,
+            ),
+            backup: preserveBackup ? backup?.tarball ?? null : null,
+          },
+        },
+      );
     }
     throw error;
   } finally {
-    if (backup) {
+    if (backup && !preserveBackup) {
       await rm(backup.directory, { recursive: true, force: true });
     }
   }

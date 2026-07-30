@@ -182,6 +182,23 @@ test("legacy migration rejects context traversal and CLI reports structured erro
   });
 });
 
+test("legacy migration refuses a destination physically inside its source", async () => {
+  await withTemp(async (root) => {
+    const legacy = path.join(root, "legacy");
+    const projectRoot = path.join(root, "project");
+    const nested = path.join(legacy, "new-state");
+    await writeLegacyStore(legacy, projectRoot);
+    await assert.rejects(
+      migrateLegacyStore({
+        home: nested,
+        sourceHome: legacy,
+      }),
+      { code: "legacy-migration-path-overlap" },
+    );
+    await assert.rejects(access(nested), { code: "ENOENT" });
+  });
+});
+
 test("legacy migration rejects duplicate project IDs without creating a store", async () => {
   await withTemp(async (root) => {
     const legacy = path.join(root, "legacy");

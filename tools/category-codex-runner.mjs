@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readFileLimited } from "../lib/bounded-io.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
 
 const PACKAGE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -16,6 +17,7 @@ const OUTPUT_SCHEMA = path.join(
 );
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const MAX_CODEX_OUTPUT_BYTES = 32 * 1024 * 1024;
+const MAX_FINAL_ANSWER_BYTES = 2 * 1024 * 1024;
 
 async function exists(file) {
   try {
@@ -370,7 +372,11 @@ export async function run({
       },
     );
     const rawEvents = parseJsonLines(result.stdout);
-    const answer = JSON.parse(await fs.readFile(finalFile, "utf8"));
+    const answer = JSON.parse(await readFileLimited(finalFile, {
+      maximum: MAX_FINAL_ANSWER_BYTES,
+      encoding: "utf8",
+      resource: "category-final-answer-bytes",
+    }));
     const normalized = normalizeEvents(rawEvents, request.workspace);
     stdout.write(`${JSON.stringify({
       v: 1,

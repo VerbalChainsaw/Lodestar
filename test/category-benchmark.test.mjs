@@ -11,6 +11,7 @@ import {
 import {
   buildCategoryPlan,
   executeCategoryPlan,
+  loadCategoryConfig,
 } from "../lib/category-harness.mjs";
 import {
   scoreCategoryTrial,
@@ -369,6 +370,22 @@ test("CLI rejects a relative paid-run output before starting a runner", async ()
   assert.deepEqual(stdout, []);
   assert.equal(JSON.parse(stderr.join("")).code, "category-cli-invalid");
   await assert.rejects(fs.access("relative-results"));
+});
+
+test("category config input is bounded before JSON parsing", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "category-config-"));
+  try {
+    const config = path.join(root, "oversized.json");
+    await fs.writeFile(config, "x".repeat(1024 * 1024 + 1));
+    await assert.rejects(
+      loadCategoryConfig(config),
+      {
+        code: "resource-limit-exceeded",
+      },
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("summary retains failed trials instead of hiding them", () => {

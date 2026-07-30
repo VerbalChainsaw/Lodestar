@@ -34,7 +34,7 @@ import { run } from "../agentctx.mjs";
 import { ContextStore } from "../lib/context-store.mjs";
 import { nativeProjectPath } from "../lib/native-path.mjs";
 import { initializeStateHome } from "../lib/state-home.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
@@ -273,6 +273,36 @@ test("Codex rollback refuses active-file drift without force", async () => {
     assert.equal(
       await readFile(agents, "utf8"),
       "user changed this after install\n",
+    );
+  });
+});
+
+test("Codex rollback confines manifest homes to the invoking authority", async () => {
+  await withTemp("lodestar-rollback-authority-", async (root) => {
+    const stateHome = path.join(root, "state");
+    const codexHome = path.join(root, "codex");
+    const otherHome = path.join(root, "other");
+    await Promise.all([
+      mkdir(path.join(stateHome, "backups"), { recursive: true }),
+      mkdir(codexHome),
+      mkdir(otherHome),
+    ]);
+    await writeFile(path.join(codexHome, "AGENTS.md"), "before\n");
+    const installed = await installCodex({
+      homes: [codexHome],
+      stateHome,
+    });
+    await assert.rejects(
+      rollbackCodex({
+        stateHome,
+        manifestPath: installed.manifest,
+        allowedHomes: [otherHome],
+      }),
+      { code: "codex-manifest-home-not-authorized" },
+    );
+    assert.match(
+      await readFile(path.join(codexHome, "AGENTS.md"), "utf8"),
+      /lodestar:start/,
     );
   });
 });

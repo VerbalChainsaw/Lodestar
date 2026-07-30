@@ -209,12 +209,16 @@ The MVP is gated by more than command-level correctness:
 - private-engine behavioral parity tests;
 - real tarball installation and rollback tests;
 - native Windows and WSL execution;
-- hosted Windows, Ubuntu, and macOS CI;
+- a required hosted Windows, Ubuntu, and macOS CI gate;
 - package-content, license, and release-metadata checks.
 
-Lodestar passes 158 tests under WSL/Linux and the full native Windows
-suite with one expected platform-specific symlink skip. The published release
-is built from the same commit exercised by the cross-platform workflow.
+The release candidate's local and native test totals are recorded in
+[docs/benchmarks.md](docs/benchmarks.md). Publication requires the hosted
+Windows, Ubuntu, and macOS workflows on the exact release commit.
+
+Current local evidence is 198/198 WSL/Linux tests, 195 native Windows passes
+with zero failures and three intentional platform skips, a complete isolated
+packed lifecycle, and a passing 500-project stress gate.
 
 Run the comparison yourself:
 
@@ -277,9 +281,9 @@ database, or duplicate entire repositories. Source code and detailed documents
 remain authoritative in their repositories; Lodestar stores compact operational
 knowledge and precise routes to them.
 
-The current finished package is
-[Lodestar v0.5.0](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.5.0),
-released under the MIT License and tested on Windows, WSL/Linux, and macOS.
+The current worktree is the Lodestar v0.6.0 release candidate. It is not called
+released until the exact commit passes hosted Windows, Ubuntu, and macOS CI and
+the `v0.6.0` tag publishes its checksum and provenance-attested package.
 
 ## Requirements and platform support
 
@@ -291,12 +295,15 @@ The same package and store format are used on every supported platform.
 
 ## Quick start
 
-Download `lodestar-agent-context-0.5.0.tgz` and `SHA256SUMS.txt` from the
-[v0.5.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.5.0),
+After publication, download `lodestar-agent-context-0.6.0.tgz` and
+`SHA256SUMS.txt` from the
+[v0.6.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.6.0),
 verify the checksum, and install:
 
 ```sh
-npm install --global ./lodestar-agent-context-0.5.0.tgz
+npm install --global ./lodestar-agent-context-0.6.0.tgz
+agentctx --version
+agentctx --help
 agentctx init
 agentctx doctor
 agentctx start --cwd /path/to/project
@@ -337,6 +344,8 @@ Useful installer options:
 --codex-home <codex-home>
 --skip-codex
 --dry-run
+-h, --help
+-v, --version
 ```
 
 Run `node install.mjs --dry-run --skip-codex` to inspect an installation plan
@@ -359,15 +368,18 @@ stable record links with bounded breadth-first traversal. `find` searches only
 indexed structured context in the authorized global/current-project scope; it
 does not scan repository files.
 
-All commands emit JSON. Failures emit a stable error code and details to stderr
-and exit nonzero. A lookup that has no result reports `context-miss` and directs
-the agent to a targeted repository inspection rather than silently widening
-scope.
+Operational commands emit JSON. `--help` and `--version` provide conventional
+human-readable CLI information without opening a state home. Failures emit a
+stable error code and details to stderr and exit nonzero. A lookup that has no
+result reports `context-miss` and directs the agent to a targeted repository
+inspection rather than silently widening scope.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
+| `agentctx --help` / `agentctx help <command>` | Show the command catalog or exact usage for one command. |
+| `agentctx --version` | Print the installed Lodestar version. |
 | `agentctx init` | Create a valid state home from packaged templates. Add `--discover --root <path>` to preview starter curation and `--yes` to confirm it. |
 | `agentctx start --cwd <path>` | Return the bounded startup packet for the current project. |
 | `agentctx get <id>` | Return one exact, scope-authorized record. |
@@ -375,7 +387,7 @@ scope.
 | `agentctx find <query> --cwd <path>` | Search structured fields in global/current-project scope. |
 | `agentctx project [selector]` | Return the current project or a matching project card. |
 | `agentctx put --json '<record>'` | Validate and transactionally write one curated record. Use `--file <path>` or stdin instead; generated records require `--take-ownership`. |
-| `agentctx doctor` | Validate pointers, generations, graph, every index, scopes, roots, locators, locks, startup budgets, write semantics, and project readiness. |
+| `agentctx doctor [--deep]` | Validate pointers, generations, graph, every index, scopes, roots, locators, locks, startup budgets, write semantics, durability, and project readiness. Deep mode verifies checksums, source identity, and rebuilt index content. |
 | `agentctx coverage [--project <id>]` | Report completeness and freshness. Add `--max-age-days <n>` and `--require-ready` for a CI gate. |
 | `agentctx ask <intent> <project>` | Query a project context using a recognized intent. |
 | `agentctx profile-projects [--project <id>]` | Refresh bounded generated project metadata without overwriting curated records. Add `--dry-run` for a non-mutating preview. |
@@ -383,6 +395,11 @@ scope.
 | `agentctx refresh --discover --root <path> --yes` | Discover and add projects under explicit roots after confirmation. |
 | `agentctx migrate-legacy --from <path>` | Import a legacy flat Lodestar store without changing the source. |
 | `agentctx migrate-projects --from <registry.json>` | Preview with `--dry-run`, then losslessly merge a bounded project registry. `--force` retains deliberate full replacement. |
+| `agentctx snapshot --to <path>` | Create and verify a portable active-generation snapshot outside the state home. |
+| `agentctx snapshot --verify <path>` | Recheck a snapshot's file set, checksums, generation identity, graph, and indexes. |
+| `agentctx restore --from <path> --home <new-path>` | Verify and restore a snapshot to a new path. Add `--dry-run` to validate without writing. |
+| `agentctx maintain [--apply]` | Report storage, retention, audit, and source-drift status. Mutation is explicit and deeply preflighted. |
+| `agentctx recover <generation> [--promote]` | Validate and restore one quarantined generation; activation remains a separate explicit choice. |
 | `agentctx inventory-codex --root <path>` | Inventory hashes and metadata under explicit roots; never file contents. |
 | `agentctx install-codex [--codex-home <path>]` | Install or update only Lodestar's marked Codex instruction block. |
 | `agentctx rollback [--manifest <path>] [--force]` | Restore managed Codex files from an installation manifest. |
@@ -470,6 +487,47 @@ log; an audit-write failure restores the previously active generation.
 
 Direct editing of generated JSONL or index files is unsupported because it can
 make the route and search indexes disagree with the records.
+
+New generations are sealed by a deterministic SHA-256 file manifest, and
+record/catalog/store resource limits are enforced before persistence. Use
+`agentctx doctor --deep` to recompute generation identity, verify sealed bytes,
+and rebuild indexes for semantic comparison.
+
+## Integrity, snapshots, and maintenance
+
+Lodestar's normal read path stays small; lifecycle work remains explicit:
+
+```sh
+agentctx doctor --deep
+agentctx snapshot --to /backups/lodestar-snapshot
+agentctx snapshot --verify /backups/lodestar-snapshot
+agentctx maintain
+agentctx maintain --retain 10 --apply
+```
+
+`maintain` is read-only unless `--apply` is present. It reports store bytes,
+retained generations, audit growth, and bounded project-source drift. Applied
+retention moves excess generations to recoverable quarantine and never removes
+the active generation. `agentctx recover <generation>` restores a quarantined
+generation after deep validation; add `--promote` only when it should become
+active. v0.6 does not expose an irreversible quarantine purge.
+
+Restore refuses to overwrite any existing path:
+
+```sh
+agentctx restore \
+  --from /backups/lodestar-snapshot \
+  --home /path/to/new-lodestar-home \
+  --dry-run
+agentctx restore \
+  --from /backups/lodestar-snapshot \
+  --home /path/to/new-lodestar-home
+agentctx doctor --home /path/to/new-lodestar-home --deep
+```
+
+For durability levels, resource budgets, retention semantics, source drift,
+audit checkpoints, and scheduling details, see
+[docs/maintenance.md](docs/maintenance.md).
 
 ## Add, migrate, and refresh projects
 
@@ -559,7 +617,13 @@ tree and the paths recorded at installation.
   escapes and cross-project reads.
 - Exact reads and linked traversal enforce global/current-project scope.
 - Writes validate a complete candidate generation and promote it atomically.
+- New generations carry per-file SHA-256 manifests and synchronize staged data
+  before promotion.
+- Restore targets must be new paths; retention is dry-run-first and quarantines
+  before explicit age-gated deletion.
 - Installer and Codex changes are staged, backed up, and error-wrapped.
+- Release actions are pinned to immutable commit SHAs; published packages carry
+  GitHub artifact provenance attestations in addition to SHA-256 checksums.
 
 Lodestar can point to detailed repository documentation, but the repository
 remains authoritative for source and document contents.
@@ -609,6 +673,9 @@ IDs. Promote only a listed valid generation:
 agentctx doctor --repair-current <64-character-generation-id>
 ```
 
+For suspected disk corruption, use `agentctx doctor --deep`. Restore a verified
+snapshot to a new state home rather than editing a generation in place.
+
 ### Missing project roots or locators
 
 `doctor` reports unavailable roots and known-broken locator status as warnings.
@@ -624,14 +691,15 @@ npm run pack:check
 node install.mjs --dry-run --skip-codex
 ```
 
-Continuous integration runs tests and real tarball installation smoke checks on
-Windows, Ubuntu, and macOS. A `v<package-version>` tag triggers the release
-workflow, which requires matching release notes under `docs/releases/`, reruns
-the test suite, packs the npm tarball, writes `SHA256SUMS.txt`, and publishes
-both assets to a GitHub release.
+Continuous integration must pass tests and real tarball installation smoke
+checks on Windows, Ubuntu, and macOS. A `v<package-version>` tag triggers the
+release workflow, which requires matching release notes under `docs/releases/`,
+reruns the test suite, packs the npm tarball, writes `SHA256SUMS.txt`, creates
+an artifact provenance attestation, and publishes both assets to a GitHub
+release.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and
-[docs/releases/v0.5.0.md](docs/releases/v0.5.0.md) for this release's notes.
+[docs/releases/v0.6.0.md](docs/releases/v0.6.0.md) for this release's notes.
 
 ## License
 

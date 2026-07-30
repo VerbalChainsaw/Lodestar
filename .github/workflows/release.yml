@@ -6,14 +6,55 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - run: npm test
+      - run: npm pack
+      - name: Resolve package artifact
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
+      - run: node install.mjs --package "./${{ env.PACKAGE }}" --prefix .installer-smoke --home .installer-state --skip-codex
+      - run: npm install --prefix .package-smoke "./${{ env.PACKAGE }}"
+      - run: npm --prefix .package-smoke exec -- agentctx init --home ../.package-smoke-state
+      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state --deep
+      - run: npm --prefix .package-smoke exec -- agentctx snapshot --home ../.package-smoke-state --to ../.package-smoke-snapshot
+      - run: npm --prefix .package-smoke exec -- agentctx snapshot --verify ../.package-smoke-snapshot
+      - run: npm --prefix .package-smoke exec -- agentctx restore --from ../.package-smoke-snapshot --home ../.package-smoke-restored
+      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-restored --deep
+      - run: npm --prefix .package-smoke exec -- agentctx maintain --home ../.package-smoke-state --skip-drift
+      - run: npm --prefix .package-smoke exec -- lodestar-performance --quick --iterations 3 --warmups 1 --json
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
       - name: Verify tag and release notes
@@ -32,6 +73,10 @@ jobs:
           test -f "${package}"
           sha256sum "${package}" > SHA256SUMS.txt
           echo "PACKAGE=${package}" >> "${GITHUB_ENV}"
+      - name: Attest release package provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-path: ${{ env.PACKAGE }}
       - name: Publish GitHub release
         shell: bash
         env:

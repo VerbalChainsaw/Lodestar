@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { readCurrentGeneration } from "../lib/generation.mjs";
 import { updateStore } from "../tools/tool-store.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 test("an audit-write failure restores the previously active generation", async () => {
   await withStoreFixture(async () => ({

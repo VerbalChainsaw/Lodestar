@@ -2,10 +2,8 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
-  copyFile,
   lstat,
   mkdir,
-  readFile,
   rm,
   unlink,
 } from "node:fs/promises";
@@ -14,6 +12,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { atomicWriteFile } from "../lib/atomic-file.mjs";
+import { readFileLimited } from "../lib/bounded-io.mjs";
 import { optionValue, optionValues } from "../lib/cli-options.mjs";
 import { errorResult, LodestarError, wrapError } from "../lib/errors.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
@@ -121,7 +120,11 @@ async function readManagedTarget(home) {
         { detail: { path: agents } },
       );
     }
-    before = await readFile(agents, "utf8");
+    before = await readFileLimited(agents, {
+      maximum: 8 * 1024 * 1024,
+      encoding: "utf8",
+      resource: "codex-managed-file-bytes",
+    });
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     existed = false;
@@ -133,6 +136,44 @@ async function readManagedTarget(home) {
     existed,
     after: updateManagedBlock(before),
   };
+}
+
+async function assertTargetUnchanged(item, expected) {
+  let current = null;
+  let exists = true;
+  try {
+    const info = await lstat(item.agents);
+    if (info.isSymbolicLink()) {
+      throw new LodestarError(
+        "codex-managed-file-symlink",
+        `Refusing to replace symbolic link ${item.agents}`,
+        { detail: { path: item.agents } },
+      );
+    }
+    current = await readFileLimited(item.agents, {
+      maximum: 8 * 1024 * 1024,
+      encoding: "utf8",
+      resource: "codex-managed-file-bytes",
+    });
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    exists = false;
+  }
+  const actual = exists ? hash(current) : null;
+  const wanted = expected === null ? null : hash(expected);
+  if (actual !== wanted) {
+    throw new LodestarError(
+      "codex-active-file-drift",
+      `Codex managed file changed during installation: ${item.agents}`,
+      {
+        detail: {
+          path: item.agents,
+          expected_sha256: wanted,
+          actual_sha256: actual,
+        },
+      },
+    );
+  }
 }
 
 export async function installCodex({
@@ -182,7 +223,10 @@ export async function installCodex({
     await mkdir(backupRoot);
     for (const [index, item] of prepared.entries()) {
       const backup = path.join(backupRoot, `${index}-AGENTS.md`);
-      if (item.existed) await copyFile(item.agents, backup);
+      await assertTargetUnchanged(item, item.existed ? item.before : null);
+      if (item.existed) {
+        await atomicWriteFile(backup, item.before);
+      }
       files.push({
         home: item.home,
         path: item.agents,
@@ -203,8 +247,10 @@ export async function installCodex({
       }, null, 2)}\n`,
     );
     for (const item of prepared) {
+      await assertTargetUnchanged(item, item.existed ? item.before : null);
       await atomicWriteFile(item.agents, item.after);
       changed.push(item);
+      await assertTargetUnchanged(item, item.after);
     }
     return { installed, manifest };
   } catch (error) {
@@ -212,8 +258,10 @@ export async function installCodex({
     for (const item of [...changed].reverse()) {
       try {
         if (item.existed) {
+          await assertTargetUnchanged(item, item.after);
           await atomicWriteFile(item.agents, item.before);
         } else {
+          await assertTargetUnchanged(item, item.after);
           await unlink(item.agents).catch((failure) => {
             if (failure.code !== "ENOENT") throw failure;
           });

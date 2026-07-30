@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
+import { AGENTCTX_VERSION } from "../agentctx.mjs";
+import { INSTALLER_VERSION } from "../install.mjs";
+
 const root = path.resolve(import.meta.dirname, "..");
 
 async function text(relativePath) {
@@ -35,6 +38,8 @@ test("versioned docs and package smoke checks match the package version", async 
   const ci = await text(".github/workflows/ci.yml");
   const releaseWorkflow = await text(".github/workflows/release.yml");
 
+  assert.equal(AGENTCTX_VERSION, version);
+  assert.equal(INSTALLER_VERSION, version);
   assert.match(releaseNotes, new RegExp(`Lodestar v${version.replaceAll(".", "\\.")}`));
   assert.match(readme, new RegExp(tarball.replaceAll(".", "\\.")));
   assert.doesNotMatch(readme, /\bunlicensed\b/i);

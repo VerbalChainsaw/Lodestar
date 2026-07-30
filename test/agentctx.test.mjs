@@ -131,6 +131,76 @@ test("package is private-state-free and its lift benchmark is runnable", async (
     ]);
     assert.equal(JSON.parse(performanceJson).passed, true);
 
+    const packedCli = path.join(unpacked, "agentctx.mjs");
+    const { stdout: packedVersion } = await execFileAsync(
+      process.execPath,
+      [packedCli, "--version"],
+    );
+    assert.equal(packedVersion.trim(), packageVersion);
+    const { stdout: packedHelp } = await execFileAsync(
+      process.execPath,
+      [packedCli, "--help"],
+    );
+    assert.match(packedHelp, /Usage:\s+agentctx <command>/);
+    const { stdout: installerHelp } = await execFileAsync(
+      process.execPath,
+      [path.join(unpacked, "install.mjs"), "--help"],
+    );
+    assert.match(installerHelp, /Lodestar installer/);
+
+    const lifecycleHome = path.join(temp, "lifecycle-home");
+    const lifecycleSnapshot = path.join(temp, "lifecycle-snapshot");
+    const lifecycleRestore = path.join(temp, "lifecycle-restore");
+    async function packedCommand(args) {
+      const { stdout: commandJson } = await execFileAsync(
+        process.execPath,
+        [packedCli, ...args],
+      );
+      return JSON.parse(commandJson);
+    }
+    assert.equal((await packedCommand([
+      "init",
+      "--home",
+      lifecycleHome,
+    ])).created, true);
+    assert.equal((await packedCommand([
+      "doctor",
+      "--home",
+      lifecycleHome,
+      "--deep",
+    ])).ok, true);
+    assert.equal((await packedCommand([
+      "snapshot",
+      "--home",
+      lifecycleHome,
+      "--to",
+      lifecycleSnapshot,
+    ])).ok, true);
+    assert.equal((await packedCommand([
+      "snapshot",
+      "--verify",
+      lifecycleSnapshot,
+    ])).ok, true);
+    assert.equal((await packedCommand([
+      "restore",
+      "--from",
+      lifecycleSnapshot,
+      "--home",
+      lifecycleRestore,
+    ])).restored, true);
+    assert.equal((await packedCommand([
+      "doctor",
+      "--home",
+      lifecycleRestore,
+      "--deep",
+    ])).ok, true);
+    assert.equal((await packedCommand([
+      "maintain",
+      "--home",
+      lifecycleHome,
+      "--skip-drift",
+    ])).applied, false);
+
     const installed = path.join(temp, "installed");
     const [npmInstall, npmInstallArgs] = npmInvocation([
       "install",

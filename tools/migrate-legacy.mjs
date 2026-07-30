@@ -2,16 +2,17 @@
 
 import {
   access,
-  readFile,
   realpath,
 } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
 import { optionValue } from "../lib/cli-options.mjs";
+import { readFileLimited } from "../lib/bounded-io.mjs";
 import { LodestarError, errorResult, wrapError } from "../lib/errors.mjs";
 import { isMainModule } from "../lib/main-entry.mjs";
 import { nativeProjectPath } from "../lib/native-path.mjs";
+import { assertPhysicallySeparatePaths } from "../lib/safe-path.mjs";
 import {
   initializeStateHome,
   resolveStateHome,
@@ -158,11 +159,23 @@ async function readLegacySource(sourceHome, packageRoot) {
   let globalRecords;
   try {
     [catalog, schema, globalRecords] = await Promise.all([
-      readFile(catalogFile, "utf8").then((text) =>
+      readFileLimited(catalogFile, {
+        maximum: 32 * 1024 * 1024,
+        encoding: "utf8",
+        resource: "legacy-catalog-bytes",
+      }).then((text) =>
         parseJson(text, "catalog.json")),
-      readFile(schemaFile, "utf8").then((text) =>
+      readFileLimited(schemaFile, {
+        maximum: 1024 * 1024,
+        encoding: "utf8",
+        resource: "legacy-schema-bytes",
+      }).then((text) =>
         parseJson(text, "schema/store.json")),
-      readFile(globalFile, "utf8").then((text) =>
+      readFileLimited(globalFile, {
+        maximum: 64 * 1024 * 1024,
+        encoding: "utf8",
+        resource: "legacy-shard-bytes",
+      }).then((text) =>
         parseJsonLines(text, "records/global.jsonl")),
     ]);
   } catch (error) {
@@ -214,7 +227,11 @@ async function readLegacySource(sourceHome, packageRoot) {
     let records;
     try {
       records = parseJsonLines(
-        await readFile(contextFile, "utf8"),
+        await readFileLimited(contextFile, {
+          maximum: 64 * 1024 * 1024,
+          encoding: "utf8",
+          resource: "legacy-shard-bytes",
+        }),
         project.context,
       );
     } catch (error) {
@@ -278,6 +295,13 @@ export async function migrateLegacyStore({
       "A legacy Lodestar home is required",
     );
   }
+  await assertPhysicallySeparatePaths({
+    source: sourceHome,
+    destination: home,
+    code: "legacy-migration-path-overlap",
+    message:
+      "Legacy migration source and destination must not contain one another",
+  });
   const source = await readLegacySource(sourceHome, packageRoot);
   const summary = {
     projects: source.catalog.projects.length,

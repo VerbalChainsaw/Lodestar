@@ -163,6 +163,31 @@ test("initialization is idempotent for an existing valid state home", async () =
   }
 });
 
+test("idempotent initialization rejects a tampered sealed state home", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "lodestar-state-"));
+  const destination = path.join(fixture, "state");
+  try {
+    await initializeStateHome({
+      destination,
+      packageRoot: path.resolve(import.meta.dirname, ".."),
+    });
+    const current = await readCurrentGeneration(destination);
+    await writeFile(
+      path.join(current.root, "catalog.json"),
+      `${JSON.stringify({ v: 1, projects: [{ id: "p:tampered" }] })}\n`,
+    );
+    await assert.rejects(
+      initializeStateHome({
+        destination,
+        packageRoot: path.resolve(import.meta.dirname, ".."),
+      }),
+      { code: "integrity-checksum-mismatch" },
+    );
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("initialization refuses an existing invalid directory", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "lodestar-state-"));
   const destination = path.join(fixture, "state");

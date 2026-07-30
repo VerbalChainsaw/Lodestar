@@ -10,7 +10,7 @@ import test from "node:test";
 
 import { ContextStore } from "../lib/context-store.mjs";
 import { run } from "../agentctx.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 const coverageCategories = [
   "identity",
@@ -102,11 +102,17 @@ test("project lookup and path-scoped records preserve private-engine behavior", 
 test("put writes through a new generation, rebuilds indexes, and audits", async () => {
   await withStoreFixture(paritySource, async ({ home, source }) => {
     const store = await ContextStore.open({ home, cwd: source.root });
-    await store.put(record("p:demo:new-answer", {
+    const outcome = await store.put(record("p:demo:new-answer", {
       kind: "index",
       aliases: ["new answer"],
       summary: "A newly curated answer",
     }));
+    assert.equal(outcome.record.id, "p:demo:new-answer");
+    assert.match(outcome.generation, /^[a-f0-9]{64}$/);
+    assert.equal(typeof outcome.durability, "object");
+    assert.equal(typeof outcome.durability.generation, "object");
+    assert.equal(typeof outcome.durability.pointer, "object");
+    assert.equal(typeof outcome.durability.audit, "object");
     const reopened = await ContextStore.open({ home, cwd: source.root });
     assert.equal((await reopened.get("p:demo:new-answer")).summary,
       "A newly curated answer");

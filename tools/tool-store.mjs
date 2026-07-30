@@ -1,6 +1,7 @@
-import { appendFile, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { atomicWriteFile } from "../lib/atomic-file.mjs";
+import { readFileLimited } from "../lib/bounded-io.mjs";
 import { LodestarError, wrapError } from "../lib/errors.mjs";
 import { canonicalStringify } from "../lib/canonical-json.mjs";
 import {
@@ -9,7 +10,9 @@ import {
   readCurrentGeneration,
 } from "../lib/generation.mjs";
 import { buildIndexes } from "../lib/indexes.mjs";
+import { probeLocatorHealth } from "../lib/locator-health.mjs";
 import { projectShardPath } from "../lib/store-layout.mjs";
+import { STORE_LIMITS_V1 } from "../lib/resource-limits.mjs";
 import { withWriteLock } from "../lib/write-lock.mjs";
 
 function parseJsonLines(text) {
@@ -22,29 +25,49 @@ function parseJsonLines(text) {
 export async function readStoreSource(home) {
   const generation = await readCurrentGeneration(home);
   const catalog = JSON.parse(
-    await readFile(path.join(generation.root, "catalog.json"), "utf8"),
+    await readFileLimited(path.join(generation.root, "catalog.json"), {
+      maximum: STORE_LIMITS_V1.maxCatalogBytes,
+      encoding: "utf8",
+      resource: "catalog-bytes",
+    }),
   );
   const schema = JSON.parse(
-    await readFile(path.join(generation.root, "schema", "store.json"), "utf8"),
+    await readFileLimited(path.join(generation.root, "schema", "store.json"), {
+      maximum: 1024 * 1024,
+      encoding: "utf8",
+      resource: "schema-bytes",
+    }),
   );
   const globalRecords = parseJsonLines(
-    await readFile(
+    await readFileLimited(
       path.join(generation.root, "records", "global.jsonl"),
-      "utf8",
+      {
+        maximum: STORE_LIMITS_V1.maxShardBytes,
+        encoding: "utf8",
+        resource: "store-shard-bytes",
+      },
     ),
   );
   const locatorHealth = JSON.parse(
-    await readFile(
+    await readFileLimited(
       path.join(generation.root, "indexes", "locator-health.json"),
-      "utf8",
+      {
+        maximum: STORE_LIMITS_V1.maxIndexBytes,
+        encoding: "utf8",
+        resource: "generated-index-bytes",
+      },
     ),
   );
   const projectRecords = {};
   for (const project of catalog.projects) {
     projectRecords[project.id] = parseJsonLines(
-      await readFile(
+      await readFileLimited(
         path.join(generation.root, projectShardPath(project.id)),
-        "utf8",
+        {
+          maximum: STORE_LIMITS_V1.maxShardBytes,
+          encoding: "utf8",
+          resource: "store-shard-bytes",
+        },
       ).catch((error) => {
         if (error.code === "ENOENT") return "";
         throw error;
@@ -83,8 +106,38 @@ function preservingLocatorProbe(source) {
     const prior = previous.get(`${record.id}#${index}`);
     return prior?.locator === canonicalStringify(locator)
       ? prior.health
-      : { status: "unchecked" };
+      : probeLocatorHealth({
+        project: source.catalog.projects.find(({ id }) =>
+          record.scope.includes(`project:${id}`)) ?? null,
+        record,
+        locator,
+      });
   };
+}
+
+async function writeAuditEvent(file, line) {
+  const maximum = 64 * 1024 * 1024;
+  let existing = "";
+  try {
+    existing = await readFileLimited(file, {
+      maximum,
+      encoding: "utf8",
+      resource: "audit-log-bytes",
+    });
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  const prefix = existing.length === 0 || existing.endsWith("\n")
+    ? existing
+    : `${existing}\n`;
+  if (Buffer.byteLength(prefix) + Buffer.byteLength(line) > maximum) {
+    throw new LodestarError(
+      "audit-maintenance-required",
+      "Audit log reached its write-side safety limit; run agentctx maintain --apply",
+      { detail: { path: file, maximum } },
+    );
+  }
+  return atomicWriteFile(file, `${prefix}${line}`);
 }
 
 export async function updateStore({
@@ -94,7 +147,7 @@ export async function updateStore({
   transform,
   probeLocator,
   now = () => new Date(),
-  appendEvent = appendFile,
+  appendEvent = null,
 } = {}) {
   return withWriteLock({ home }, async () => {
     const previousGeneration = await readCurrentGeneration(home);
@@ -104,26 +157,27 @@ export async function updateStore({
     const generation = await buildGeneration({
       home,
       source,
-      indexBuilder: (id) => buildIndexes({
+      indexBuilder: (id, persisted) => buildIndexes({
         generation: id,
-        catalog: source.catalog,
-        globalRecords: source.globalRecords,
-        projectRecords: source.projectRecords,
+        catalog: persisted.catalog,
+        globalRecords: persisted.globalRecords,
+        projectRecords: persisted.projectRecords,
         probeLocator: probeLocator ?? preserveLocatorHealth,
       }),
     });
-    await promoteGeneration({ home, generation });
+    const pointerPromotion = await promoteGeneration({ home, generation });
+    let auditWrite = null;
     try {
-      await appendEvent(
-        path.join(home, "events.jsonl"),
-        `${JSON.stringify({
+      const auditFile = path.join(home, "events.jsonl");
+      const line = `${JSON.stringify({
           at: now().toISOString(),
           op,
           generation: generation.id,
           ...(typeof detail === "function" ? detail(result) : detail),
-        })}\n`,
-        "utf8",
-      );
+        })}\n`;
+      auditWrite = appendEvent
+        ? await appendEvent(auditFile, line, "utf8")
+        : await writeAuditEvent(auditFile, line);
     } catch (error) {
       try {
         await promoteGeneration({
@@ -157,6 +211,14 @@ export async function updateStore({
         },
       );
     }
-    return { generation: generation.id, result };
+    return {
+      generation: generation.id,
+      result,
+      durability: {
+        generation: generation.durability ?? null,
+        pointer: pointerPromotion.durability ?? null,
+        audit: auditWrite ?? null,
+      },
+    };
   });
 }

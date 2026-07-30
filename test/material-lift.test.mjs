@@ -11,7 +11,7 @@ import test from "node:test";
 
 import { BUDGETS_V1 } from "../lib/budgets.mjs";
 import { ContextStore } from "../lib/context-store.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 const PROJECT_COUNT = 100;
 const ACTIVE_ID = "p:050";

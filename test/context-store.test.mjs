@@ -14,7 +14,7 @@ import {
   pathContains,
   resolveProjectAt,
 } from "../lib/project-roots.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 function globalRecord() {
   return {

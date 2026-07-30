@@ -97,6 +97,26 @@ test("builds deterministic ID-to-shard routes without byte offsets", async () =>
   assert.deepEqual(reversed, indexes);
 });
 
+test("indexes prototype-key record IDs as ordinary route data", async () => {
+  const input = fixtures();
+  input.globalRecords = [{
+    ...input.globalRecords[0],
+    id: "__proto__",
+  }];
+  const indexes = await buildIndexes({
+    generation,
+    ...input,
+  });
+  assert.equal(
+    Object.hasOwn(indexes["routes.json"].records, "__proto__"),
+    true,
+  );
+  assert.deepEqual(indexes["routes.json"].records.__proto__, {
+    shard: "records/global.jsonl",
+    scope: ["global"],
+  });
+});
+
 test("indexes only structured searchable fields by scope", async () => {
   const indexes = await buildIndexes({
     generation,

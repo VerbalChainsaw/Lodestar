@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { ContextStore } from "../lib/context-store.mjs";
 import { run } from "../agentctx.mjs";
-import { withStoreFixture } from "./helpers/store-fixture.mjs";
+import { withStoreFixture } from "../test-support/store-fixture.mjs";
 
 function record(id, links = [], overrides = {}) {
   return {
