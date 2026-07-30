@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "seed": "lodestar-category-v1",
+  "repetitions": 2,
+  "timeout_ms": 600000,
+  "scenarios": [
+    "tiny-direct",
+    "ambiguous-repository",
+    "stale-lodestar"
+  ],
+  "conditions": [
+    "unmanaged",
+    "lodestar"
+  ],
+  "runners": [
+    {
+      "id": "codex-default",
+      "enabled": true,
+      "command": [
+        "{node}",
+        "{packageRoot}/tools/category-codex-runner.mjs"
+      ],
+      "estimated_cost_usd_per_trial": 0.5,
+      "metadata": {
+        "provider": "openai",
+        "adapter": "codex-exec",
+        "context_control": "isolated CODEX_HOME; requires invocation-scoped CODEX_API_KEY",
+        "pricing_note": "Replace the estimate with your account-specific ceiling before execution."
+      }
+    }
+  ]
+}

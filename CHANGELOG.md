@@ -13,6 +13,14 @@ All notable changes to Lodestar are documented here.
   documents its claim boundary, and runs from the packed Windows/WSL package.
 - Add small, standard, and 500-project stress profiles plus fresh/warm
   operation-level p50/p95 measurements and observational memory reporting.
+- Add a provider-neutral live-agent category benchmark with realistic ambiguous,
+  tiny-direct, and stale-context fixtures; paired randomized trials; leakage,
+  confidence, reproducibility, and search-efficiency scoring; retained raw
+  evidence; resumable runs; and explicit no-spend, cost-cap, timeout, and STOP
+  boundaries.
+- Add a read-only Codex `exec --json` adapter, a deterministic protocol
+  self-test adapter, a public benchmark methodology, and a preregistered plan
+  that requires publishing neutral and losing cases.
 
 ## 0.4.4 - 2026-07-29
 

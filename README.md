@@ -212,7 +212,7 @@ The MVP is gated by more than command-level correctness:
 - hosted Windows, Ubuntu, and macOS CI;
 - package-content, license, and release-metadata checks.
 
-Lodestar passes 139 tests under WSL/Linux and the full native Windows
+Lodestar passes 152 tests under WSL/Linux and the full native Windows
 suite with one expected platform-specific symlink skip. The published release
 is built from the same commit exercised by the cross-platform workflow.
 
@@ -230,6 +230,45 @@ npm run benchmark:performance
 
 See the transparent [performance methodology](docs/performance.md) for fixture
 sizes, p50/p95 interpretation, cache semantics, and comparison rules.
+
+### The category benchmark
+
+The deterministic suites prove retrieval mechanics. Lodestar also ships a
+provider-neutral live-agent harness that tests the larger product claim:
+
+```text
+Lodestar-enabled
+vs.
+unmanaged agent context
+```
+
+It gives fresh model sessions realistic repository questions amid stale plans,
+conflicting commands, nested instructions, generated artifacts, and
+cross-project traps. It measures answer correctness, evidence, time, tokens,
+files, bytes, tool calls, wrong turns, leakage, confidence calibration, and
+reproducibility.
+
+The suite intentionally includes a tiny repository where direct inspection may
+tie or win and a stale-Lodestar case where structured context can lose. The
+goal is to find the crossover point, not manufacture a perfect chart.
+
+Preview the complete randomized trial matrix without starting a model or
+spending anything:
+
+```bash
+npm run benchmark:category -- \
+  --config benchmarks/category/config.example.json
+```
+
+Paid execution requires a separate `--execute` flag, an absolute output
+directory, an explicit maximum cost, and per-runner cost estimates. Completed
+trial IDs are resumable, raw evidence is retained locally, and a `STOP` file
+halts before the next trial.
+
+See the [category benchmark methodology](docs/category-benchmark.md) for the
+runner protocol and the
+[registered benchmark plan](docs/plans/2026-07-30-lodestar-category-benchmark-plan.md)
+for hypotheses, losing cases, analysis, and publication rules.
 
 ## Local by design
 
