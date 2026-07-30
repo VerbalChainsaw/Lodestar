@@ -11,7 +11,9 @@
     "agentctx-migrate-legacy": "./tools/migrate-legacy.mjs",
     "agentctx-migrate-projects": "./tools/migrate-projects.mjs",
     "agentctx-profile-projects": "./tools/profile-projects.mjs",
-    "agentctx-rollback-codex": "./tools/rollback-codex.mjs"
+    "agentctx-rollback-codex": "./tools/rollback-codex.mjs",
+    "lodestar-benchmark": "./tools/benchmark-lift.mjs",
+    "lodestar-performance": "./tools/benchmark-performance.mjs"
   },
   "files": [
     "agentctx.mjs",
@@ -23,6 +25,7 @@
     "schema/",
     "templates/",
     "docs/evaluation.md",
+    "docs/performance.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -30,6 +33,7 @@
   "scripts": {
     "test": "node --test",
     "benchmark:lift": "node tools/benchmark-lift.mjs",
+    "benchmark:performance": "node tools/benchmark-performance.mjs",
     "doctor": "node agentctx.mjs doctor",
     "install:codex": "node agentctx.mjs install-codex",
     "inventory:codex": "node agentctx.mjs inventory-codex",

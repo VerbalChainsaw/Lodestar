@@ -85,6 +85,12 @@ test("package is private-state-free and its lift benchmark is runnable", async (
       true,
       "packed benchmark is missing its methodology",
     );
+    assert.equal(
+      packedFiles.some((file) =>
+        path.relative(unpacked, file) === path.join("docs", "performance.md")),
+      true,
+      "packed performance suite is missing its methodology",
+    );
     const { stdout: benchmarkJson } = await execFileAsync(process.execPath, [
       path.join(unpacked, "tools", "benchmark-lift.mjs"),
       "--json",
@@ -98,6 +104,44 @@ test("package is private-state-free and its lift benchmark is runnable", async (
       "1024",
     ]);
     assert.equal(JSON.parse(benchmarkJson).passed, true);
+    const { stdout: performanceJson } = await execFileAsync(process.execPath, [
+      path.join(unpacked, "tools", "benchmark-performance.mjs"),
+      "--quick",
+      "--json",
+      "--iterations",
+      "3",
+      "--warmups",
+      "1",
+    ]);
+    assert.equal(JSON.parse(performanceJson).passed, true);
+
+    const installed = path.join(temp, "installed");
+    const [npmInstall, npmInstallArgs] = npmInvocation([
+      "install",
+      "--ignore-scripts",
+      "--prefix",
+      installed,
+      path.join(temp, filename),
+    ]);
+    await execFileAsync(npmInstall, npmInstallArgs);
+    const [npmExec, npmExecArgs] = npmInvocation([
+      "--prefix",
+      installed,
+      "exec",
+      "--",
+      "lodestar-performance",
+      "--quick",
+      "--iterations",
+      "3",
+      "--warmups",
+      "1",
+      "--json",
+    ]);
+    const { stdout: installedPerformanceJson } = await execFileAsync(
+      npmExec,
+      npmExecArgs,
+    );
+    assert.equal(JSON.parse(installedPerformanceJson).passed, true);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

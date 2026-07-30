@@ -16,6 +16,11 @@ test("public package metadata and MIT license are release-ready", async () => {
   assert.equal(metadata.license, "MIT");
   assert.equal(metadata.repository.url, "git+https://github.com/VerbalChainsaw/Lodestar.git");
   assert.equal(metadata.bugs.url, "https://github.com/VerbalChainsaw/Lodestar/issues");
+  assert.equal(metadata.bin["lodestar-benchmark"], "./tools/benchmark-lift.mjs");
+  assert.equal(
+    metadata.bin["lodestar-performance"],
+    "./tools/benchmark-performance.mjs",
+  );
   assert.match(license, /^MIT License/m);
   assert.match(license, /Copyright \(c\) 2026 VerbalChainsaw/);
   assert.match(license, /Permission is hereby granted, free of charge/);
@@ -35,6 +40,7 @@ test("versioned docs and package smoke checks match the package version", async 
   assert.doesNotMatch(readme, /\bunlicensed\b/i);
   assert.match(ci, /PACKAGE=lodestar-agent-context-\$version\.tgz/);
   assert.match(ci, /"\.\/\$\{\{ env\.PACKAGE \}\}"/);
+  assert.match(ci, /npm --prefix \.package-smoke exec -- lodestar-performance/);
   assert.doesNotMatch(ci, /lodestar-agent-context-\d+\.\d+\.\d+\.tgz/);
   assert.match(releaseWorkflow, /sha256sum/);
   assert.match(releaseWorkflow, /gh release create/);

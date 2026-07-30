@@ -6,6 +6,8 @@ Lodestar includes a paired, automated retrieval benchmark:
 npm run benchmark:lift
 ```
 
+An installed package also exposes `lodestar-benchmark`.
+
 For machine-readable evidence:
 
 ```bash

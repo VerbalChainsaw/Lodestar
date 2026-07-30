@@ -35,3 +35,4 @@ jobs:
       - run: npm install --prefix .package-smoke "./${{ env.PACKAGE }}"
       - run: npm --prefix .package-smoke exec -- agentctx init --home ../.package-smoke-state
       - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state
+      - run: npm --prefix .package-smoke exec -- lodestar-performance --quick --iterations 3 --warmups 1 --json

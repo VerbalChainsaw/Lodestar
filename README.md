@@ -194,7 +194,7 @@ The MVP is gated by more than command-level correctness:
 - hosted Windows, Ubuntu, and macOS CI;
 - package-content, license, and release-metadata checks.
 
-Lodestar passes 135 tests under WSL/Linux and the full native Windows
+Lodestar passes 139 tests under WSL/Linux and the full native Windows
 suite with one expected platform-specific symlink skip. The published release
 is built from the same commit exercised by the cross-platform workflow.
 
@@ -203,6 +203,15 @@ Run the comparison yourself:
 ```bash
 npm run benchmark:lift
 ```
+
+Run the extended scale and operation-level performance suite:
+
+```bash
+npm run benchmark:performance
+```
+
+See the transparent [performance methodology](docs/performance.md) for fixture
+sizes, p50/p95 interpretation, cache semantics, and comparison rules.
 
 ## Local by design
 
