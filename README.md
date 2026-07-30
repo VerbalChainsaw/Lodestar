@@ -51,6 +51,23 @@ local-first retrieval model.
   <a href="SECURITY.md">Report a vulnerability</a>
 </p>
 
+### Why this version matters
+
+v0.6.1 turns Lodestar from fast context retrieval into dependable context
+infrastructure. Agents do less repeated discovery, projects stay isolated, and
+operators gain a verified path through corruption, interrupted writes, and
+routine maintenance.
+
+| Advantage | What it means in practice |
+| --- | --- |
+| Less agent wandering | Exact routing replaced broad search while inspecting **90.63% fewer files** and **97.62% fewer bytes** in the standard profile |
+| Predictable context | Stable IDs, deterministic indexes, and bounded evidence give agents the same scoped answer path every time |
+| Strong project isolation | Retrieval returned **zero cross-project records**, even in the 500-project stress profile |
+| Safer automation | Atomic publication, path confinement, collision checks, and rollback-aware setup reduce damaging partial outcomes |
+| Recovery you can verify | Integrity seals, deep diagnostics, snapshots, restore, and recoverable quarantine provide a tested route back |
+| Confidence at scale | The 500-project profile preserved **4/4 answers** while inspecting **97.66% fewer files** and **98.63% fewer bytes** |
+| An auditable release | The public package is checksum-verified, provenance-attested, zero-dependency, and lifecycle-tested across platforms |
+
 ### What shipped
 
 | Area | v0.6.1 capability |
