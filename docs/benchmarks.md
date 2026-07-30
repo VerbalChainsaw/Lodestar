@@ -7,6 +7,60 @@ The benchmark suites are intentionally separated into two questions:
 1. **Material lift:** Can Lodestar preserve answer correctness while reducing the amount of repository material an agent must inspect?
 2. **Runtime overhead:** How quickly does Lodestar start, retrieve exact records, resolve linked context, and search its bounded index as the project catalog grows?
 
+## Unreleased payload/payback pass
+
+The v0.7 working tree was measured on 2026-07-30 before any version bump or
+release tag. The real 71-project canonical startup packet fell from 16,300 to
+4,879 bytes, a 70.1% reduction, while retaining all six required records and
+explicitly reporting omitted optional IDs.
+
+Three fresh 10/100/500-project performance runs passed every correctness,
+determinism, scope, broad-search, inspected-byte, and 5 KiB startup-payload
+gate. Median elapsed-time reductions across those runs were 33.47%, 34.58%,
+and 33.87%, respectively. The synthetic fixture's startup packet was 1,482
+bytes in every scale profile.
+
+An immediate three-run comparison against commit `6851f9c` measured these
+operation p50 medians on the same machine:
+
+| Operation | `6851f9c` | v0.7 working tree |
+| --- | ---: | ---: |
+| Fresh-store startup | 11.593 ms | 10.842 ms |
+| Warm startup | 0.050 ms | 0.047 ms |
+| Exact `get` | 0.013 ms | 0.016 ms |
+| Linked `resolve` | 0.073 ms | 0.072 ms |
+| Indexed `find` | 0.639 ms | 0.628 ms |
+| 16 parallel exact reads | 0.208 ms | 0.197 ms |
+
+The 0.003 ms exact-read difference is below a material user-visible threshold;
+the changed startup path was faster in the paired code comparison.
+
+The deliberately tiny 25-run controls remain losing elapsed-time cases.
+Lodestar avoided 3,249 bytes but added 0.553 ms at 10 projects/8 KiB, and
+avoided 7,845 bytes but added 7.183 ms at 100 projects/32 KiB. Those results
+define where direct inspection is cheaper and remain visible.
+
+The smallest authenticated local Codex smoke was also run under explicit
+trial/cost caps. It is **not publishable evidence** because invocation-scoped
+credentials were unavailable and the adapter inherited user context. After a
+scorer compatibility fix and a no-refetch instruction, one paired ambiguous-
+repository question produced:
+
+| Metric | Unmanaged | Lodestar |
+| --- | ---: | ---: |
+| Correct answer and evidence | 1/1 | 1/1 |
+| Tool calls | 3 | 3 |
+| Unique repository files | 6 | 1 |
+| Broad search / leakage | 0 / 0 | 0 / 0 |
+| Elapsed time | 19.479 s | 23.064 s |
+| Reported input tokens | 69,535 | 71,821 |
+
+This smoke validates the lean command path and a five-file focus improvement,
+but it does not prove payback: Lodestar added 3.585 seconds and 2,286 reported
+input tokens in the single contaminated pair. A randomized, repeated,
+invocation-isolated run is still required before making a live-agent economic
+claim or publishing a v0.7 tag.
+
 ## Headline results
 
 ### Material-lift benchmark
@@ -95,7 +149,7 @@ Installed packages also expose the public `lodestar-benchmark` and `lodestar-per
 
 ## Regression coverage
 
-At the time of this snapshot:
+At the v0.6.1 snapshot:
 
 - WSL/Linux: 201/201 substantive tests pass with no skips.
 - Native Windows: 198 pass, 0 fail, with three intentional

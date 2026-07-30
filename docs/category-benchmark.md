@@ -47,6 +47,10 @@ tool calls, unique files, observed bytes, broad searches, known wrong turns,
 cross-project leakage, Lodestar protocol compliance, answer reproducibility,
 confidence, and Brier score.
 
+Protocol compliance requires a Lodestar condition's first tool action to be
+`start`. Quoted executable paths and shell-wrapped `agentctx` commands are
+recognized; exact reads without the required bootstrap do not pass.
+
 Metrics depend on adapter telemetry. If a provider does not expose file bytes
 or token usage, those values must be reported as unavailable rather than
 inferred. The Codex adapter's byte metric is shell-tool output transferred back

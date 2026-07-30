@@ -4,6 +4,20 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
+- Reduce the hard startup packet ceiling from 16 KiB to 5 KiB by keeping
+  required records complete and emitting compact optional routing cards.
+- Add startup-payload and observed-value fields to the paired retrieval
+  benchmark without inventing token, dollar, authoring, or maintenance costs.
+- Make installer preflight report installed/target versions, package
+  transitions, the active `agentctx` command, and PATH shadowing; refuse
+  accidental downgrades without explicit authorization.
+- Include the running package and Node versions in doctor output.
+- Recognize quoted and shell-wrapped `agentctx` runner commands in category
+  scoring, while requiring `start` as the first Lodestar tool action for
+  protocol compliance.
+- Tell managed Codex agents to consume required startup records directly
+  instead of paying for a redundant exact read of already-loaded context.
+
 ## 0.6.1 - 2026-07-30
 
 - Remove stale release-candidate and publication-pending language from the

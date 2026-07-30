@@ -28,12 +28,21 @@ test("paired benchmark proves scoped retrieval lift against a broad control", as
     fewer_bytes_inspected: true,
     no_broad_search: true,
     no_cross_project_records: true,
+    startup_payload_within_budget: true,
   });
   assert.equal(without.accuracy.ratio, 1);
   assert.equal(withLodestar.accuracy.ratio, 1);
   assert.ok(withLodestar.files_inspected < without.files_inspected);
   assert.ok(withLodestar.bytes_inspected < without.bytes_inspected);
   assert.equal(withLodestar.unrelated_records.length, 0);
+  assert.ok(
+    withLodestar.startup_bytes <= withLodestar.startup_budget_bytes,
+  );
+  assert.equal(
+    report.value_observations.inspected_bytes_avoided,
+    without.bytes_inspected - withLodestar.bytes_inspected,
+  );
+  assert.match(report.value_observations.note, /no token, dollar/);
   assert.equal(without.broad_search_used, true);
   assert.equal(withLodestar.broad_search_used, false);
 });

@@ -174,6 +174,96 @@ test("scorer measures correctness, wrong turns, broad search, and leakage", () =
   assert.equal(leaked.correct, false);
   assert.equal(leaked.leakage, true);
   assert.equal(leaked.protocol_compliant, false);
+
+  const shellWrappedLodestar = scoreCategoryTrial({
+    question: {
+      id: "test-command",
+      answer: "npm run verify:ci",
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    answer: {
+      answer: "npm run verify:ci",
+      confidence: 1,
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    events: [{
+      type: "tool",
+      command:
+        "/bin/bash -lc '\"/usr/bin/node\" \"/repo/agentctx.mjs\" \"start\" \"--cwd\" \"/repo\"'",
+    }, {
+      type: "tool",
+      command:
+        "/bin/bash -lc '\"/usr/bin/node\" \"/repo/agentctx.mjs\" \"get\" \"p:demo:index\"'",
+    }],
+    canary: "PRIVATE_CANARY",
+    condition: "lodestar",
+  });
+  assert.equal(shellWrappedLodestar.used_lodestar, true);
+  assert.equal(shellWrappedLodestar.protocol_compliant, true);
+
+  const powershellWrappedLodestar = scoreCategoryTrial({
+    question: {
+      id: "test-command",
+      answer: "npm run verify:ci",
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    answer: {
+      answer: "npm run verify:ci",
+      confidence: 1,
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    events: [{
+      type: "tool",
+      command:
+        "pwsh -NoProfile -Command '& \"C:\\Program Files\\nodejs\\node.exe\" \"C:\\repo\\agentctx.mjs\" \"start\"'",
+    }],
+    canary: "PRIVATE_CANARY",
+    condition: "lodestar",
+  });
+  assert.equal(powershellWrappedLodestar.used_lodestar, true);
+  assert.equal(powershellWrappedLodestar.protocol_compliant, true);
+
+  const skippedBootstrap = scoreCategoryTrial({
+    question: {
+      id: "test-command",
+      answer: "npm run verify:ci",
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    answer: {
+      answer: "npm run verify:ci",
+      confidence: 1,
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    events: [{
+      type: "tool",
+      command: "node /repo/agentctx.mjs get p:demo:index",
+    }],
+    canary: "PRIVATE_CANARY",
+    condition: "lodestar",
+  });
+  assert.equal(skippedBootstrap.used_lodestar, true);
+  assert.equal(skippedBootstrap.protocol_compliant, false);
+
+  const echoedBootstrap = scoreCategoryTrial({
+    question: {
+      id: "test-command",
+      answer: "npm run verify:ci",
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    answer: {
+      answer: "npm run verify:ci",
+      confidence: 1,
+      evidence: ["docs/operations/testing-current.md"],
+    },
+    events: [{
+      type: "tool",
+      command: "echo agentctx start",
+    }],
+    canary: "PRIVATE_CANARY",
+    condition: "lodestar",
+  });
+  assert.equal(echoedBootstrap.used_lodestar, false);
+  assert.equal(echoedBootstrap.protocol_compliant, false);
 });
 
 test("mock execution writes resumable raw evidence and paired summaries", async () => {

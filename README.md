@@ -415,13 +415,18 @@ Useful installer options:
 --legacy-home <legacy-flat-store>
 --codex-home <codex-home>
 --skip-codex
+--allow-downgrade
 --dry-run
 -h, --help
 -v, --version
 ```
 
 Run `node install.mjs --dry-run --skip-codex` to inspect an installation plan
-without writing files or launching npm.
+without writing files. Preflight uses read-only npm-root and prefix queries to
+report the installed version, target version, transition, active `agentctx`
+command, and whether another installation shadows the target. Downgrades and
+unrecognized-version replacements fail closed unless `--allow-downgrade` is
+explicit.
 
 ## Agent lookup protocol
 
@@ -453,13 +458,13 @@ inspection rather than silently widening scope.
 | `agentctx --help` / `agentctx help <command>` | Show the command catalog or exact usage for one command. |
 | `agentctx --version` | Print the installed Lodestar version. |
 | `agentctx init` | Create a valid state home from packaged templates. Add `--discover --root <path>` to preview starter curation and `--yes` to confirm it. |
-| `agentctx start --cwd <path>` | Return the bounded startup packet for the current project. |
+| `agentctx start --cwd <path>` | Return the current project's required context and compact optional routes within a 5 KiB hard limit. |
 | `agentctx get <id>` | Return one exact, scope-authorized record. |
 | `agentctx resolve <id> [--depth <1-3>]` | Return an exact record and its bounded linked graph. |
 | `agentctx find <query> --cwd <path>` | Search structured fields in global/current-project scope. |
 | `agentctx project [selector]` | Return the current project or a matching project card. |
 | `agentctx put --json '<record>'` | Validate and transactionally write one curated record. Use `--file <path>` or stdin instead; generated records require `--take-ownership`. |
-| `agentctx doctor [--deep]` | Validate pointers, generations, graph, every index, scopes, roots, locators, locks, startup budgets, write semantics, durability, and project readiness. Deep mode verifies checksums, source identity, and rebuilt index content. |
+| `agentctx doctor [--deep]` | Validate pointers, generations, graph, every index, scopes, roots, locators, locks, startup budgets, write semantics, durability, and project readiness, and report the running package version. Deep mode verifies checksums, source identity, and rebuilt index content. |
 | `agentctx coverage [--project <id>]` | Report completeness and freshness. Add `--max-age-days <n>` and `--require-ready` for a CI gate. |
 | `agentctx ask <intent> <project>` | Query a project context using a recognized intent. |
 | `agentctx profile-projects [--project <id>]` | Refresh bounded generated project metadata without overwriting curated records. Add `--dry-run` for a non-mutating preview. |

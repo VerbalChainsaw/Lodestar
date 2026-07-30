@@ -568,6 +568,10 @@ export async function run(
         env,
         deep: args.includes("--deep"),
       });
+      result.runtime = {
+        package_version: AGENTCTX_VERSION,
+        node_version: process.versions.node,
+      };
       if (repairs.length > 0) result.repairs = repairs;
       stdout(JSON.stringify(result));
       return result.ok ? 0 : 1;

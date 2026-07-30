@@ -38,6 +38,9 @@ The benchmark records:
 - whether broad repository search was required;
 - cross-project record leakage;
 - deterministic output hashes;
+- startup-packet bytes and the active hard budget;
+- inspected bytes avoided, evidence bytes added, and median elapsed
+  milliseconds saved without inferring tokens or dollars;
 - median local elapsed time over repeated warm runs.
 
 ## Pass/fail contract
@@ -47,8 +50,9 @@ The benchmark passes only when:
 1. both paths answer every fixture question correctly;
 2. repeated Lodestar results are byte-deterministic;
 3. Lodestar inspects fewer files and fewer bytes;
-4. Lodestar does not use broad repository search; and
-5. Lodestar returns zero unrelated-project records.
+4. Lodestar does not use broad repository search;
+5. Lodestar returns zero unrelated-project records; and
+6. the startup packet remains within its 5 KiB budget.
 
 Elapsed time and returned-evidence size are reported but are not pass/fail
 gates. Timing varies by filesystem, cache state, antivirus software, and
