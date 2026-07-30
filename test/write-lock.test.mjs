@@ -159,12 +159,23 @@ test("refresh and release require the original nonce", async () => {
 
 test("competing acquisitions produce one owner", async () => {
   await fixture(async (home) => {
+    let timestamp = 10_000;
+    const contenderOptions = (overrides) => options(home, {
+      timeoutMs: 100,
+      retryMs: 1,
+      now: () => timestamp,
+      sleep: async (milliseconds) => {
+        timestamp += Math.max(1, milliseconds);
+        await new Promise((resolve) => setImmediate(resolve));
+      },
+      ...overrides,
+    });
     const attempts = await Promise.allSettled([
-      acquireWriteLock(options(home, {
+      acquireWriteLock(contenderOptions({
         nonce: () => "first",
         pid: 1,
       })),
-      acquireWriteLock(options(home, {
+      acquireWriteLock(contenderOptions({
         nonce: () => "second",
         pid: 2,
       })),

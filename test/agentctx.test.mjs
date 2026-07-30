@@ -9,6 +9,19 @@ import test from "node:test";
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
 
+function npmInvocation(args) {
+  if (process.platform !== "win32") return ["npm", args];
+  const npmCli = process.env.npm_execpath
+    ?? path.join(
+      path.dirname(process.execPath),
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    );
+  return [process.execPath, [npmCli, ...args]];
+}
+
 async function filesBelow(root) {
   const entries = await readdir(root, { withFileTypes: true });
   const paths = [];
@@ -26,9 +39,15 @@ async function filesBelow(root) {
 test("package contains no private state", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "lodestar-pack-"));
   try {
+    const [npm, npmArgs] = npmInvocation([
+      "pack",
+      "--json",
+      "--pack-destination",
+      temp,
+    ]);
     const { stdout } = await execFileAsync(
-      "npm",
-      ["pack", "--json", "--pack-destination", temp],
+      npm,
+      npmArgs,
       { cwd: packageRoot },
     );
     const [{ filename }] = JSON.parse(stdout);

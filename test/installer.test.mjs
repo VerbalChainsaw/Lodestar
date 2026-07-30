@@ -11,7 +11,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { installLodestar } from "../install.mjs";
+import {
+  installLodestar,
+  resolveNpmInvocation,
+} from "../install.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
@@ -60,6 +63,18 @@ test("installer rejects unsupported Node and unknown arguments", async () => {
   await assert.rejects(
     installLodestar(["--surprise"], { stdout: () => {} }),
     { code: "installer-argument-invalid" },
+  );
+  assert.throws(
+    () => resolveNpmInvocation({
+      platform: "win32",
+      pathApi: path.win32,
+      nodeExecutable: "C:\\missing\\node.exe",
+      fileExists: () => false,
+      env: { PATH: "" },
+    }),
+    (error) =>
+      error.code === "installer-npm-unavailable"
+      && error.detail.repair.includes("Node.js 22"),
   );
 });
 

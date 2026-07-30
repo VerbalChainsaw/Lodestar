@@ -119,12 +119,14 @@ test("sorts normalized roots and collapses duplicate physical projects", async (
     const result = await discoverProjects({
       roots: [path.dirname(alpha), path.dirname(beta), path.dirname(alpha)],
     });
+    const physicalAlpha = path.normalize(await realpath(alpha));
+    const physicalBeta = path.normalize(await realpath(beta));
     assert.deepEqual(
       result.projects.map(({ root }) => root),
-      [beta, alpha].sort((a, b) => a.localeCompare(b)),
+      [physicalBeta, physicalAlpha].sort((a, b) => a.localeCompare(b)),
     );
     assert.deepEqual(
-      result.projects.find(({ root }) => root === beta).markers,
+      result.projects.find(({ root }) => root === physicalBeta).markers,
       [".git", "go.mod"],
     );
   });

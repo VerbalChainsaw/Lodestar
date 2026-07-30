@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -66,14 +67,70 @@ function assertNodeVersion(version) {
   }
 }
 
-function executableName(platform) {
-  return platform === "win32" ? "npm.cmd" : "npm";
+export function resolveNpmInvocation({
+  platform,
+  env,
+  pathApi,
+  nodeExecutable,
+  fileExists = existsSync,
+}) {
+  if (platform !== "win32") {
+    return {
+      command: "npm",
+      argsPrefix: [],
+      displayCommand: "npm",
+    };
+  }
+
+  const candidates = [
+    env.npm_execpath,
+    pathApi.join(
+      pathApi.dirname(nodeExecutable),
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    ),
+    ...String(env.PATH ?? "")
+      .split(pathApi.delimiter)
+      .filter(Boolean)
+      .map((entry) => pathApi.join(
+        entry,
+        "node_modules",
+        "npm",
+        "bin",
+        "npm-cli.js",
+      )),
+  ];
+  const npmCli = candidates.find((candidate) =>
+    typeof candidate === "string"
+    && candidate.length > 0
+    && fileExists(candidate));
+  if (!npmCli) {
+    throw new LodestarError(
+      "installer-npm-unavailable",
+      "Unable to locate npm's JavaScript entry point for this Node.js installation",
+      {
+        detail: {
+          node: nodeExecutable,
+          checked: [...new Set(candidates.filter(Boolean))],
+          repair: "Install Node.js 22 or newer with npm included",
+        },
+      },
+    );
+  }
+  return {
+    command: nodeExecutable,
+    argsPrefix: [npmCli],
+    displayCommand: "npm",
+  };
 }
 
 function runProcess(command, args, {
   cwd,
   spawn = spawnSync,
   env = process.env,
+  displayCommand = command,
 } = {}) {
   const result = spawn(command, args, {
     cwd,
@@ -85,17 +142,17 @@ function runProcess(command, args, {
     throw wrapError(
       result.error,
       "installer-process-start-failed",
-      `Unable to start ${command}`,
-      { command },
+      `Unable to start ${displayCommand}`,
+      { command: displayCommand },
     );
   }
   if (result.status !== 0) {
     throw new LodestarError(
       "installer-process-failed",
-      `${command} exited with status ${result.status}`,
+      `${displayCommand} exited with status ${result.status}`,
       {
         detail: {
-          command,
+          command: displayCommand,
           exit_code: result.status,
           stderr: String(result.stderr ?? "").trim().slice(-4_096),
         },
@@ -174,6 +231,8 @@ export async function installLodestar(
     packageRoot = import.meta.dirname,
     spawn = spawnSync,
     pathApi = platform === "win32" ? path.win32 : path,
+    nodeExecutable = process.execPath,
+    fileExists = existsSync,
     stdout = (line) => process.stdout.write(`${line}\n`),
   } = {},
 ) {
@@ -211,7 +270,13 @@ export async function installLodestar(
     );
   }
 
-  const npm = executableName(platform);
+  const npm = resolveNpmInvocation({
+    platform,
+    env,
+    pathApi,
+    nodeExecutable,
+    fileExists,
+  });
   const installArguments = [
     "install",
     "--global",
@@ -228,7 +293,7 @@ export async function installLodestar(
     codex_homes: codexHomes,
     install_codex: !skipCodex,
     npm: {
-      command: npm,
+      command: npm.displayCommand,
       args: installArguments,
     },
   };
@@ -238,12 +303,14 @@ export async function installLodestar(
     return result;
   }
 
-  runProcess(npm, installArguments, {
+  runProcess(npm.command, [...npm.argsPrefix, ...installArguments], {
     cwd: packageRoot,
     spawn,
     env,
+    displayCommand: npm.displayCommand,
   });
-  const npmRoot = runProcess(npm, [
+  const npmRoot = runProcess(npm.command, [
+    ...npm.argsPrefix,
     "root",
     "--global",
     ...(prefix ? ["--prefix", prefix] : []),
@@ -251,14 +318,17 @@ export async function installLodestar(
     cwd: packageRoot,
     spawn,
     env,
+    displayCommand: npm.displayCommand,
   });
-  const npmPrefix = prefix ?? runProcess(npm, [
+  const npmPrefix = prefix ?? runProcess(npm.command, [
+    ...npm.argsPrefix,
     "prefix",
     "--global",
   ], {
     cwd: packageRoot,
     spawn,
     env,
+    displayCommand: npm.displayCommand,
   });
   const installedMain = pathApi.join(
     npmRoot,
