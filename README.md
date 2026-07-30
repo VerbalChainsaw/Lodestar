@@ -1,13 +1,89 @@
 # Lodestar
 
-Lodestar is a local, deterministic linked-context store and project-discovery
-tool for coding agents. It gives an agent one small startup packet and stable
-links to exact commands, constraints, decisions, answers, and documentation
-locations before broader repository inspection is necessary.
+> Give coding agents a map before they search.
 
-Lodestar does not upload state, ingest source trees, require a database, run a
-daemon, or replace source control. Runtime state is stored outside the installed
-package.
+[![Latest release](https://img.shields.io/github/v/release/VerbalChainsaw/Lodestar)](https://github.com/VerbalChainsaw/Lodestar/releases/latest)
+[![Cross-platform CI](https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml/badge.svg)](https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml)
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Coding agents often begin every session blind. They search the repository for
+instructions, reread large documents, guess which files matter, and rediscover
+commands and decisions the last agent already found. That costs time, tokens,
+and trust.
+
+Lodestar gives an agent one small, deterministic first place to look. It keeps
+global rules, project identity, commands, constraints, decisions, known
+answers, and documentation routes in a local linked context store. The agent
+loads only the startup context it needs, follows exact links for more, and
+searches the repository only when the context store reports a miss.
+
+## Why it exists
+
+The useful knowledge about a codebase is usually scattered across instruction
+files, READMEs, plans, configuration, source, and past sessions. General search
+can eventually find much of it, but an agent should not have to sweep an entire
+drive to answer questions like:
+
+- How do I test this repository?
+- Which rules apply here?
+- What decision has already been made?
+- Where is the release procedure?
+- Which project does this directory belong to?
+
+Lodestar turns those answers into a small, explicit graph with stable IDs and
+precise links back to the owning documentation.
+
+| Without Lodestar | With Lodestar |
+| --- | --- |
+| Re-scan files at the start of every session | Run one deterministic startup command |
+| Load large instruction documents wholesale | Transfer a bounded packet of required context |
+| Guess filenames and search broadly | Follow exact record IDs and documentation locators |
+| Mix knowledge from unrelated projects | Enforce global and current-project scope |
+| Silently fail into more searching | Report a context miss and the targeted next step |
+
+## What you get
+
+- **One local context home.** Global rules, project records, indexes, links,
+  health information, audit events, and backups use one portable store format.
+- **Small, linked retrieval.** `start` supplies the essentials; `get` and
+  `resolve` follow exact knowledge; `find` searches only authorized structured
+  context.
+- **A maintained project map.** Bounded discovery and profiling identify
+  projects and useful commands without ingesting source trees or secret values.
+- **Safe updates.** Validated writes build immutable generations and switch them
+  atomically, with single-writer locking, diagnostics, and rollback support.
+- **Native Windows and WSL support.** Both runtimes can use the same canonical
+  store while running the same public package.
+
+## How an agent uses it
+
+```text
+agentctx start --cwd <current-directory>
+  |
+  +-- required global rules and current-project context
+  |
+  +-- agentctx get <exact-id>
+  |     or agentctx resolve <exact-id>
+  |
+  +-- agentctx find <terms> --cwd <current-directory>
+  |
+  +-- targeted repository inspection after a reported context miss
+```
+
+The optional Codex adapter installs this lookup contract into a managed block
+without replacing unrelated user instructions. New sessions are directed to
+Lodestar before broad repository search.
+
+## Local by design
+
+Lodestar does not upload context, require an account, run a daemon, add a
+database, or duplicate entire repositories. Source code and detailed documents
+remain authoritative in their repositories; Lodestar stores compact operational
+knowledge and precise routes to them.
+
+The current finished package is
+[Lodestar v0.4.4](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.4.4),
+released under the MIT License and tested on Windows, WSL/Linux, and macOS.
 
 ## Requirements and platform support
 

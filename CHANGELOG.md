@@ -4,6 +4,9 @@ All notable changes to Lodestar are documented here.
 
 ## Unreleased
 
+- Rewrite the repository front page around Lodestar's purpose, agent workflow,
+  concrete benefits, local-first boundary, and public release path.
+
 ## 0.4.4 - 2026-07-29
 
 - Make exact `get`/`resolve` retrieval precede scoped `find` in the installed
