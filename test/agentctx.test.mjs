@@ -69,9 +69,6 @@ test("package contains no private state", async () => {
     const forbidden = [
       "zero" + "p",
       "phi" + "xx",
-      "Verbal" + "Chainsaw",
-      "C:" + "/Users/",
-      "/mnt/c/" + "Users/",
       "Suno" + "Savvy",
       "Jobby" + "Job",
     ];

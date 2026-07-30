@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import test from "node:test";
+
+const root = path.resolve(import.meta.dirname, "..");
+
+async function text(relativePath) {
+  return readFile(path.join(root, relativePath), "utf8");
+}
+
+test("public package metadata and MIT license are release-ready", async () => {
+  const metadata = JSON.parse(await text("package.json"));
+  const license = await text("LICENSE");
+
+  assert.equal(metadata.license, "MIT");
+  assert.equal(metadata.repository.url, "git+https://github.com/VerbalChainsaw/Lodestar.git");
+  assert.equal(metadata.bugs.url, "https://github.com/VerbalChainsaw/Lodestar/issues");
+  assert.match(license, /^MIT License/m);
+  assert.match(license, /Copyright \(c\) 2026 VerbalChainsaw/);
+  assert.match(license, /Permission is hereby granted, free of charge/);
+});
+
+test("versioned docs and package smoke checks match the package version", async () => {
+  const metadata = JSON.parse(await text("package.json"));
+  const version = metadata.version;
+  const tarball = `lodestar-agent-context-${version}.tgz`;
+  const releaseNotes = await text(`docs/releases/v${version}.md`);
+  const readme = await text("README.md");
+  const ci = await text(".github/workflows/ci.yml");
+  const releaseWorkflow = await text(".github/workflows/release.yml");
+
+  assert.match(releaseNotes, new RegExp(`Lodestar v${version.replaceAll(".", "\\.")}`));
+  assert.match(readme, new RegExp(tarball.replaceAll(".", "\\.")));
+  assert.doesNotMatch(readme, /\bunlicensed\b/i);
+  assert.match(ci, new RegExp(tarball.replaceAll(".", "\\.")));
+  assert.match(releaseWorkflow, /sha256sum/);
+  assert.match(releaseWorkflow, /gh release create/);
+});

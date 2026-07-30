@@ -1,0 +1,45 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify tag and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+          test -f "docs/releases/${GITHUB_REF_NAME}.md"
+      - run: npm test
+      - name: Build release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$(npm pack --silent)"
+          test -f "${package}"
+          sha256sum "${package}" > SHA256SUMS.txt
+          echo "PACKAGE=${package}" >> "${GITHUB_ENV}"
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            "${PACKAGE}" \
+            SHA256SUMS.txt \
+            --title "Lodestar ${GITHUB_REF_NAME}" \
+            --notes-file "docs/releases/${GITHUB_REF_NAME}.md"

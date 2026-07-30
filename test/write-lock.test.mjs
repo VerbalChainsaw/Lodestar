@@ -84,6 +84,30 @@ test("an old lock owned by a live process is never reclaimed", async () => {
   });
 });
 
+test("a lock timeout reports safe recovery without inventing a command", async () => {
+  await fixture(async (home) => {
+    const owner = await acquireWriteLock(options(home, {
+      now: () => 0,
+    }));
+    await assert.rejects(
+      acquireWriteLock(options(home, {
+        now: () => 5_000,
+        pid: 200,
+        nonce: () => "contender",
+        isProcessAlive: () => true,
+      })),
+      (error) => {
+        assert.equal(error.code, "store-write-locked");
+        assert.match(error.detail.repair, /active writer/i);
+        assert.match(error.detail.repair, /automatically/i);
+        assert.doesNotMatch(error.detail.repair, /--repair-lock/);
+        return true;
+      },
+    );
+    await owner.release();
+  });
+});
+
 test("reclaims only a dead same-host lock with an expired heartbeat", async () => {
   await fixture(async (home) => {
     await acquireWriteLock(options(home, {

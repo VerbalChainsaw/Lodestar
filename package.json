@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Local deterministic context and project discovery for coding agents",
   "type": "module",
   "bin": {
@@ -22,7 +22,9 @@
     "tools/",
     "schema/",
     "templates/",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --test",
@@ -37,5 +39,21 @@
   "engines": {
     "node": ">=22"
   },
-  "license": "UNLICENSED"
+  "keywords": [
+    "coding-agents",
+    "context",
+    "codex",
+    "cli",
+    "local-first"
+  ],
+  "author": "VerbalChainsaw",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VerbalChainsaw/Lodestar.git"
+  },
+  "homepage": "https://github.com/VerbalChainsaw/Lodestar#readme",
+  "bugs": {
+    "url": "https://github.com/VerbalChainsaw/Lodestar/issues"
+  }
 }
