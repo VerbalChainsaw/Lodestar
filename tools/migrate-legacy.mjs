@@ -16,7 +16,10 @@ import {
   initializeStateHome,
   resolveStateHome,
 } from "../lib/state-home.mjs";
-import { validateGraph } from "../lib/validation.mjs";
+import {
+  validateCatalog,
+  validateGraph,
+} from "../lib/validation.mjs";
 
 function parseJson(text, file) {
   try {
@@ -177,6 +180,12 @@ async function readLegacySource(sourceHome, packageRoot) {
       "Legacy catalog must be version 1 with a projects array",
     );
   }
+  validateCatalog({
+    ...catalog,
+    projects: catalog.projects.map(
+      ({ context: _context, ...project }) => project,
+    ),
+  });
 
   const contexts = new Set();
   const projectRecords = {};

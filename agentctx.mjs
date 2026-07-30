@@ -2,14 +2,20 @@
 
 import path from "node:path";
 import process from "node:process";
+import { readFile } from "node:fs/promises";
 
 import {
   optionValue,
   optionValues,
   positionalValues,
-  validateValueOptions,
+  validateKnownOptions,
 } from "./lib/cli-options.mjs";
 import { ContextStore } from "./lib/context-store.mjs";
+import {
+  diagnoseStore,
+  repairCurrentGeneration,
+  repairWriterLock,
+} from "./lib/doctor.mjs";
 import { errorResult, wrapError } from "./lib/errors.mjs";
 import { isMainModule } from "./lib/main-entry.mjs";
 import { nativeProjectPath } from "./lib/native-path.mjs";
@@ -49,32 +55,72 @@ const COMMANDS = Object.freeze([
   "refresh",
 ]);
 
-const VALUE_OPTIONS = new Set([
-  "--home",
-  "--cwd",
-  "--project",
-  "--depth",
-  "--batch",
-  "--codex-home",
-  "--manifest",
-  "--root",
-  "--from",
-  "--max-depth",
-  "--max-entries",
-]);
+const COMMON_READ_OPTIONS = ["--home", "--cwd", "--project"];
+const JSON_OUTPUT = ["--json"];
+const OPTIONS_BY_COMMAND = Object.freeze({
+  start: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
+  init: {
+    values: ["--home", "--root", "--max-depth", "--codex-home"],
+    booleans: ["--discover", "--yes", "--skip-codex"],
+  },
+  get: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
+  find: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
+  resolve: {
+    values: [...COMMON_READ_OPTIONS, "--depth"],
+    booleans: JSON_OUTPUT,
+  },
+  project: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
+  put: {
+    values: [...COMMON_READ_OPTIONS, "--json", "--file"],
+    booleans: ["--take-ownership"],
+  },
+  doctor: {
+    values: [...COMMON_READ_OPTIONS, "--repair-current"],
+    booleans: ["--repair-lock", "--force"],
+  },
+  coverage: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
+  ask: { values: COMMON_READ_OPTIONS, booleans: JSON_OUTPUT },
+  "install-codex": {
+    values: ["--home", "--codex-home"],
+  },
+  rollback: {
+    values: ["--home", "--manifest"],
+    booleans: ["--force"],
+  },
+  "inventory-codex": {
+    values: [
+      "--home",
+      "--root",
+      "--codex-home",
+      "--max-depth",
+      "--max-entries",
+    ],
+  },
+  "migrate-projects": {
+    values: ["--home", "--from"],
+    booleans: ["--force"],
+  },
+  "migrate-legacy": {
+    values: ["--home", "--from"],
+    booleans: ["--dry-run"],
+  },
+  "profile-projects": {
+    values: ["--home", "--project"],
+    booleans: ["--dry-run"],
+  },
+  refresh: {
+    values: ["--home", "--project", "--root", "--max-depth"],
+    booleans: ["--discover", "--yes", "--dry-run"],
+  },
+});
 
 function validateOptionValues(command, args) {
-  validateValueOptions(args, VALUE_OPTIONS);
-  if (command === "put" && args.includes("--json")) {
-    const index = args.indexOf("--json");
-    const value = args[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      throw new ContextError("invalid-option", {
-        option: "--json",
-        reason: "value-required-for-put",
-      });
-    }
-  }
+  const options = OPTIONS_BY_COMMAND[command];
+  validateKnownOptions(args, {
+    command,
+    valueOptions: options?.values,
+    booleanOptions: options?.booleans,
+  });
 }
 
 async function readStdin() {
@@ -116,9 +162,33 @@ export async function run(
     const project = optionValue(args, "--project", null);
     let result;
     if (command === "init") {
+      const initialized = await initializeStateHome({ destination: stateHome });
+      const discoverRoots = optionValues(args, "--root").map(nativePath);
+      const discover = args.includes("--discover") || discoverRoots.length > 0;
+      const discovery = discover
+        ? await refreshProjects({
+          home: stateHome,
+          discoverRoots,
+          confirm: args.includes("--yes"),
+          maxDepth: Number(optionValue(args, "--max-depth", 4)),
+        })
+        : null;
+      const installAdapter = args.includes("--yes")
+        && !args.includes("--skip-codex");
+      const explicitHomes = optionValues(args, "--codex-home");
+      const codex = installAdapter
+        ? await installCodex({
+          homes: explicitHomes.length > 0
+            ? explicitHomes.map(nativePath)
+            : defaultCodexHomes({ env }),
+          stateHome,
+        })
+        : null;
       result = {
         ok: true,
-        ...await initializeStateHome({ destination: stateHome }),
+        ...initialized,
+        ...(discovery ? { discovery } : {}),
+        ...(codex ? { codex } : {}),
       };
       stdout(JSON.stringify(result));
       return 0;
@@ -196,7 +266,33 @@ export async function run(
       result = await profileProjects({
         home: stateHome,
         projectIds: optionValues(args, "--project"),
+        dryRun: args.includes("--dry-run"),
       });
+      stdout(JSON.stringify(result));
+      return result.ok ? 0 : 1;
+    }
+    if (command === "doctor") {
+      const repairs = [];
+      if (args.includes("--repair-lock")) {
+        repairs.push(await repairWriterLock({
+          home: stateHome,
+          force: args.includes("--force"),
+        }));
+      }
+      const repairCurrent = optionValue(args, "--repair-current", null);
+      if (repairCurrent) {
+        repairs.push(await repairCurrentGeneration({
+          home: stateHome,
+          generation: repairCurrent,
+        }));
+      }
+      result = await diagnoseStore({
+        home: stateHome,
+        cwd: commandCwd,
+        project,
+        env,
+      });
+      if (repairs.length > 0) result.repairs = repairs;
       stdout(JSON.stringify(result));
       return result.ok ? 0 : 1;
     }
@@ -205,20 +301,10 @@ export async function run(
       cwd: commandCwd,
       project,
     });
-    const positional = positionalValues(args, [
-      "--home",
-      "--cwd",
-      "--project",
-      "--depth",
-      "--json",
-      "--batch",
-      "--codex-home",
-      "--manifest",
-      "--root",
-      "--from",
-      "--max-depth",
-      "--max-entries",
-    ]);
+    const positional = positionalValues(
+      args,
+      OPTIONS_BY_COMMAND[command]?.values,
+    );
     if (command === "start") {
       result = await store.start();
     } else if (command === "get") {
@@ -254,26 +340,55 @@ export async function run(
         : store.projectCard();
     } else if (command === "put") {
       const encoded = optionValue(args, "--json", null);
+      const file = optionValue(args, "--file", null);
+      if (encoded !== null && file !== null) {
+        throw new ContextError("invalid-option", {
+          command,
+          options: ["--json", "--file"],
+          reason: "mutually-exclusive",
+        });
+      }
       let record;
       try {
-        record = JSON.parse(encoded ?? await stdin());
+        const input = encoded
+          ?? (file === null ? await stdin() : await readFile(nativePath(file), "utf8"));
+        record = JSON.parse(input);
       } catch (error) {
         throw wrapError(
           error,
           "invalid-json",
           "Unable to parse the record supplied to agentctx put",
-          { source: encoded === null ? "stdin" : "--json" },
+          {
+            source: encoded !== null
+              ? "--json"
+              : file !== null
+                ? "--file"
+                : "stdin",
+          },
         );
       }
-      result = await store.put(record);
-    } else if (command === "doctor") {
-      result = await store.doctor();
+      result = await store.put(record, {
+        takeOwnership: args.includes("--take-ownership"),
+      });
     } else if (command === "coverage") {
       result = await store.coverage({
         project: optionValue(args, "--project", null),
       });
     } else if (command === "ask") {
-      result = await store.ask(positional[0], positional[1]);
+      if (!positional[0]) {
+        throw new ContextError("missing-argument", {
+          command,
+          argument: "intent",
+        });
+      }
+      const askProject = positional[1] ?? project;
+      if (!askProject) {
+        throw new ContextError("missing-argument", {
+          command,
+          argument: "project",
+        });
+      }
+      result = await store.ask(positional[0], askProject);
     }
     stdout(JSON.stringify(result));
     return 0;

@@ -2,6 +2,23 @@
 
 All notable changes to Lodestar are documented here.
 
+## Unreleased
+
+- Make exact `get`/`resolve` retrieval precede scoped `find` in the installed
+  Codex contract.
+- Make `put` share the audited rollback transaction, preserve locator health,
+  protect generated ownership, and record prior/next hashes.
+- Reject duplicate project IDs before legacy migration can collapse shards.
+- Reject unknown CLI options and make refresh/profile dry runs non-mutating.
+- Deduplicate Windows/WSL roots by physical identity and recheck discovery
+  candidates inside the writer lock.
+- Add fail-closed standalone doctor diagnostics and explicit current-pointer and
+  stale-lock repair commands.
+- Add guided initialization and a deterministic 100-project material-lift gate.
+- Validate tarball identity before npm, suppress lifecycle scripts, use the
+  validated Node executable in Windows shims, and restore the previous package
+  when post-install setup fails.
+
 ## 0.4.3 - 2026-07-29
 
 - License the public package under the MIT License.

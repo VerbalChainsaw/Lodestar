@@ -299,6 +299,23 @@ test("CLI rejects a missing option value instead of treating another flag as dat
   assert.equal(errors[0].error.detail.option, "--home");
 });
 
+test("CLI rejects unknown and command-inapplicable options", async () => {
+  for (const argv of [
+    ["init", "--surprise"],
+    ["migrate-legacy", "--dryrun"],
+    ["get", "g:rules", "--dry-run"],
+  ]) {
+    const errors = [];
+    const code = await run(argv, {
+      stderr: (line) => errors.push(JSON.parse(line)),
+      stdout: () => assert.fail("invalid options must not produce output"),
+    });
+    assert.equal(code, 1);
+    assert.equal(errors[0].error.code, "invalid-option");
+    assert.equal(errors[0].error.detail.reason, "unknown-for-command");
+  }
+});
+
 test("CLI validates the command before opening a state home", async () => {
   const errors = [];
   const code = await run(["definitely-not-a-command"], {

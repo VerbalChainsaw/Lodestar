@@ -2,6 +2,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { LodestarError, wrapError } from "../lib/errors.mjs";
+import { canonicalStringify } from "../lib/canonical-json.mjs";
 import {
   buildGeneration,
   promoteGeneration,
@@ -32,6 +33,12 @@ export async function readStoreSource(home) {
       "utf8",
     ),
   );
+  const locatorHealth = JSON.parse(
+    await readFile(
+      path.join(generation.root, "indexes", "locator-health.json"),
+      "utf8",
+    ),
+  );
   const projectRecords = {};
   for (const project of catalog.projects) {
     projectRecords[project.id] = parseJsonLines(
@@ -44,7 +51,40 @@ export async function readStoreSource(home) {
       }),
     );
   }
-  return { catalog, schema, globalRecords, projectRecords };
+  return {
+    generation,
+    catalog,
+    schema,
+    globalRecords,
+    projectRecords,
+    locatorHealth,
+  };
+}
+
+function preservingLocatorProbe(source) {
+  const previous = new Map();
+  const records = [
+    ...source.globalRecords,
+    ...Object.values(source.projectRecords).flat(),
+  ];
+  for (const record of records) {
+    for (const [index, locator] of (record.locators ?? []).entries()) {
+      const key = `${record.id}#${index}`;
+      previous.set(key, {
+        locator: canonicalStringify(locator),
+        health: source.locatorHealth?.locators?.[key] ?? {
+          status: "unchecked",
+        },
+      });
+    }
+  }
+  return async ({ record, locator }) => {
+    const index = (record.locators ?? []).indexOf(locator);
+    const prior = previous.get(`${record.id}#${index}`);
+    return prior?.locator === canonicalStringify(locator)
+      ? prior.health
+      : { status: "unchecked" };
+  };
 }
 
 export async function updateStore({
@@ -59,6 +99,7 @@ export async function updateStore({
   return withWriteLock({ home }, async () => {
     const previousGeneration = await readCurrentGeneration(home);
     const source = await readStoreSource(home);
+    const preserveLocatorHealth = preservingLocatorProbe(source);
     const result = await transform(source);
     const generation = await buildGeneration({
       home,
@@ -68,7 +109,7 @@ export async function updateStore({
         catalog: source.catalog,
         globalRecords: source.globalRecords,
         projectRecords: source.projectRecords,
-        ...(probeLocator ? { probeLocator } : {}),
+        probeLocator: probeLocator ?? preserveLocatorHealth,
       }),
     });
     await promoteGeneration({ home, generation });
@@ -79,7 +120,7 @@ export async function updateStore({
           at: now().toISOString(),
           op,
           generation: generation.id,
-          ...detail,
+          ...(typeof detail === "function" ? detail(result) : detail),
         })}\n`,
         "utf8",
       );

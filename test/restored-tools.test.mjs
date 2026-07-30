@@ -102,6 +102,14 @@ test("Codex installer upgrades the exact legacy bootstrap without duplication", 
   assert.match(updated, /<!-- lodestar:end -->/);
 });
 
+test("Codex managed block prefers exact linked retrieval before scoped search", () => {
+  assert.match(
+    CODEX_BOOTSTRAP,
+    /LOOKUP=agentctx\.get\|agentctx\.resolve>agentctx\.find>repo\.targeted>repo\.broad/,
+  );
+  assert.doesNotMatch(CODEX_BOOTSTRAP, /LOOKUP=agentctx\.find>/);
+});
+
 test("Codex installer rejects duplicate managed blocks", () => {
   const block = [
     "<!-- lodestar:start v1 -->",
@@ -515,6 +523,121 @@ test("refresh discovery adds only explicit-root projects and profiles them", asy
   });
 });
 
+test("refresh dry-run profiles without changing the active generation", async () => {
+  await withTemp("lodestar-refresh-dry-", async (root) => {
+    const home = path.join(root, "state");
+    const projectRoot = path.join(root, "project");
+    await mkdir(projectRoot);
+    await writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "dry-run-project",
+      scripts: { test: "node --test" },
+    }));
+    await initializeStateHome({ destination: home });
+    await refreshProjects({
+      home,
+      discoverRoots: [projectRoot],
+      confirm: true,
+      idFactory: () => "00000000-0000-4000-8000-000000000003",
+    });
+    const before = (await ContextStore.open({ home, cwd: projectRoot }))
+      .generation.id;
+    const output = [];
+    const errors = [];
+    const code = await run([
+      "refresh",
+      "--dry-run",
+      "--home",
+      home,
+      "--project",
+      "p:00000000-0000-4000-8000-000000000003",
+    ], {
+      stdout: (line) => output.push(JSON.parse(line)),
+      stderr: (line) => errors.push(JSON.parse(line)),
+    });
+    assert.equal(code, 0, JSON.stringify(errors));
+    assert.equal(output[0].dry_run, true);
+    assert.equal(
+      (await ContextStore.open({ home, cwd: projectRoot })).generation.id,
+      before,
+    );
+  });
+});
+
+test("refresh discovery deduplicates Windows and WSL roots by physical identity", async () => {
+  await withStoreFixture(async (home) => {
+    const projectRoot = path.join(home, "project");
+    await mkdir(projectRoot);
+    await writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "same-project",
+    }));
+    return {
+      catalog: {
+        v: 1,
+        projects: [{
+          id: "p:existing",
+          name: "Existing",
+          roots: [String.raw`C:\Users\Alex\Project`],
+        }],
+      },
+      schema: { v: 1, record_kinds: [] },
+      globalRecords: [],
+      projectRecords: { "p:existing": [] },
+      projectRoot,
+    };
+  }, async ({ home, source }) => {
+    const result = await refreshProjects({
+      home,
+      discoverRoots: [source.projectRoot],
+      confirm: true,
+      platform: "linux",
+      env: { WSL_DISTRO_NAME: "Ubuntu" },
+      release: "6.8.0-microsoft-standard-WSL2",
+      fsApi: {
+        realpath: async (value) =>
+          value === "/mnt/c/Users/Alex/Project"
+            || (
+              process.platform === "win32"
+              && String(value).startsWith("/mnt/c/")
+            )
+            ? source.projectRoot
+            : import("node:fs/promises").then(({ realpath }) =>
+              realpath(value)),
+      },
+    });
+    assert.equal(result.added, 0);
+    assert.equal(result.profile.profiled, 0);
+  });
+});
+
+test("concurrent refresh discovery rechecks candidates inside the write lock", async () => {
+  await withTemp("lodestar-refresh-race-", async (root) => {
+    const home = path.join(root, "state");
+    const projectRoot = path.join(root, "project");
+    await mkdir(projectRoot);
+    await writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "one-project",
+    }));
+    await initializeStateHome({ destination: home });
+    const results = await Promise.all([
+      refreshProjects({
+        home,
+        discoverRoots: [projectRoot],
+        confirm: true,
+        idFactory: () => "00000000-0000-4000-8000-000000000004",
+      }),
+      refreshProjects({
+        home,
+        discoverRoots: [projectRoot],
+        confirm: true,
+        idFactory: () => "00000000-0000-4000-8000-000000000005",
+      }),
+    ]);
+    assert.equal(results.reduce((sum, result) => sum + result.added, 0), 1);
+    const store = await ContextStore.open({ home, cwd: projectRoot });
+    assert.equal(store.catalog.projects.length, 1);
+  });
+});
+
 test("public CLI exposes the restored universal operations", async () => {
   await withTemp("lodestar-tools-cli-", async (root) => {
     const stateHome = path.join(root, "state");
@@ -549,6 +672,54 @@ test("public CLI exposes the restored universal operations", async () => {
       await readFile(path.join(codexHome, "AGENTS.md"), "utf8"),
       /BOOT=agentctx/,
     );
+  });
+});
+
+test("guided init previews discovery and profiles only after confirmation", async () => {
+  await withTemp("lodestar-guided-init-", async (root) => {
+    const stateHome = path.join(root, "state");
+    const projectRoot = path.join(root, "project");
+    await mkdir(projectRoot);
+    await writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "guided-project",
+      scripts: { test: "node --test" },
+    }));
+    const previewOutput = [];
+    const previewCode = await run([
+      "init",
+      "--home",
+      stateHome,
+      "--discover",
+      "--root",
+      projectRoot,
+      "--skip-codex",
+    ], {
+      stdout: (line) => previewOutput.push(JSON.parse(line)),
+      stderr: () => {},
+    });
+    assert.equal(previewCode, 0);
+    assert.equal(previewOutput[0].discovery.dry_run, true);
+    assert.equal(previewOutput[0].discovery.discovered.length, 1);
+
+    const confirmedOutput = [];
+    const confirmedCode = await run([
+      "init",
+      "--home",
+      stateHome,
+      "--discover",
+      "--root",
+      projectRoot,
+      "--yes",
+      "--skip-codex",
+    ], {
+      stdout: (line) => confirmedOutput.push(JSON.parse(line)),
+      stderr: () => {},
+    });
+    assert.equal(confirmedCode, 0);
+    assert.equal(confirmedOutput[0].discovery.added, 1);
+    assert.equal(confirmedOutput[0].discovery.profile.profiled, 1);
+    const store = await ContextStore.open({ home: stateHome, cwd: projectRoot });
+    assert.equal(store.project.name, "project");
   });
 });
 

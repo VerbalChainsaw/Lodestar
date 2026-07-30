@@ -23,7 +23,7 @@ import {
   nativeProjectPath,
 } from "../lib/native-path.mjs";
 import { resolveStateHome } from "../lib/state-home.mjs";
-import { updateStore } from "./tool-store.mjs";
+import { readStoreSource, updateStore } from "./tool-store.mjs";
 
 const ignored = new Set([
   ".git",
@@ -500,6 +500,7 @@ async function probeLocator({ project, locator }) {
 export async function profileProjects({
   home,
   projectIds = [],
+  dryRun = false,
   now = () => new Date(),
 } = {}) {
   if (!home) throw new Error("home is required");
@@ -507,75 +508,93 @@ export async function profileProjects({
   const failures = [];
   let profiled = 0;
   const timestamp = now().toISOString();
+  const transform = async (source) => {
+    const known = new Set(source.catalog.projects.map(({ id }) => id));
+    for (const id of selected) {
+      if (!known.has(id)) {
+        throw new Error(`project not found: ${id}`);
+      }
+    }
+    for (const project of source.catalog.projects) {
+      if (selected.size > 0 && !selected.has(project.id)) continue;
+      const rootStates = [];
+      for (const candidate of project.roots ?? []) {
+        rootStates.push({
+          root: candidate,
+          exists: Boolean(await safeProjectRoot(candidate)),
+        });
+      }
+      const rootValue = rootStates.find(({ exists: present }) => present)?.root;
+      const root = rootValue ? await safeProjectRoot(rootValue) : null;
+      if (!root) {
+        failures.push({ project: project.id, code: "project-root-missing" });
+        continue;
+      }
+      try {
+        const generated = await inspectProject(
+          project,
+          root,
+          rootValue,
+          rootStates,
+          timestamp,
+        );
+        const generatedIds = new Set(generated.map(({ id }) => id));
+        const current = source.projectRecords[project.id] ?? [];
+        const curatedIds = new Set(
+          current
+            .filter(({ ownership }) => ownership === "curated")
+            .map(({ id }) => id),
+        );
+        source.projectRecords[project.id] = [
+          ...current.filter(({ id }) =>
+            !generatedIds.has(id) || curatedIds.has(id)
+          ),
+          ...generated.filter(({ id }) => !curatedIds.has(id)),
+        ].sort((a, b) => a.id.localeCompare(b.id));
+        if (
+          current.some((record) =>
+            record.required === true
+            && record.ownership !== "generated"
+            && record.id !== `${project.id}:profile:rules`
+          )
+        ) {
+          const fallback = source.projectRecords[project.id]
+            .find(({ id }) => id === `${project.id}:profile:rules`);
+          if (fallback) fallback.required = false;
+        }
+        profiled += 1;
+      } catch (error) {
+        failures.push({
+          project: project.id,
+          code: "profile-failed",
+          message: error.message,
+        });
+      }
+    }
+    return { profiled, failures };
+  };
+  if (dryRun) {
+    const source = await readStoreSource(home);
+    await transform(source);
+    return {
+      ok: failures.length === 0,
+      dry_run: true,
+      profiled,
+      failed: failures.length,
+      failures,
+      projects: source.catalog.projects
+        .filter(({ id }) => selected.size === 0 || selected.has(id))
+        .map(({ id }) => id),
+      generation: source.generation.id,
+    };
+  }
   const update = await updateStore({
     home,
     op: "profile-projects",
     detail: { selected: [...selected].sort() },
     now,
     probeLocator,
-    async transform(source) {
-      const known = new Set(source.catalog.projects.map(({ id }) => id));
-      for (const id of selected) {
-        if (!known.has(id)) throw new Error(`project not found: ${id}`);
-      }
-      for (const project of source.catalog.projects) {
-        if (selected.size > 0 && !selected.has(project.id)) continue;
-        const rootStates = [];
-        for (const candidate of project.roots ?? []) {
-          rootStates.push({
-            root: candidate,
-            exists: Boolean(await safeProjectRoot(candidate)),
-          });
-        }
-        const rootValue = rootStates.find(({ exists: present }) => present)?.root;
-        const root = rootValue ? await safeProjectRoot(rootValue) : null;
-        if (!root) {
-          failures.push({ project: project.id, code: "project-root-missing" });
-          continue;
-        }
-        try {
-          const generated = await inspectProject(
-            project,
-            root,
-            rootValue,
-            rootStates,
-            timestamp,
-          );
-          const generatedIds = new Set(generated.map(({ id }) => id));
-          const current = source.projectRecords[project.id] ?? [];
-          const curatedIds = new Set(
-            current
-              .filter(({ ownership }) => ownership === "curated")
-              .map(({ id }) => id),
-          );
-          source.projectRecords[project.id] = [
-            ...current.filter(({ id }) =>
-              !generatedIds.has(id) || curatedIds.has(id)
-            ),
-            ...generated.filter(({ id }) => !curatedIds.has(id)),
-          ].sort((a, b) => a.id.localeCompare(b.id));
-          if (
-            current.some((record) =>
-              record.required === true
-              && record.ownership !== "generated"
-              && record.id !== `${project.id}:profile:rules`
-            )
-          ) {
-            const fallback = source.projectRecords[project.id]
-              .find(({ id }) => id === `${project.id}:profile:rules`);
-            if (fallback) fallback.required = false;
-          }
-          profiled += 1;
-        } catch (error) {
-          failures.push({
-            project: project.id,
-            code: "profile-failed",
-            message: error.message,
-          });
-        }
-      }
-      return { profiled, failures };
-    },
+    transform,
   });
   return {
     ok: failures.length === 0,

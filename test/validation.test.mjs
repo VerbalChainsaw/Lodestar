@@ -62,12 +62,28 @@ test("rejects duplicate IDs and broken links", () => {
   );
 });
 
+test("rejects duplicate project IDs before shards can overwrite each other", () => {
+  assert.throws(
+    () => validateGraph({
+      catalog: {
+        v: 1,
+        projects: [
+          { id: "p:duplicate", name: "First", roots: ["/first"] },
+          { id: "p:duplicate", name: "Second", roots: ["/second"] },
+        ],
+      },
+      records: [],
+    }),
+    { code: "duplicate-project-id" },
+  );
+});
+
 test("confines project-relative locators without requiring the target to exist", () => {
   const root = path.resolve("/projects/sample");
   assert.doesNotThrow(() => validateGraph({
     catalog: {
       v: 1,
-      projects: [{ id: "p:sample", roots: [root] }],
+      projects: [{ id: "p:sample", name: "Sample", roots: [root] }],
     },
     records: [record({
       kind: "index",
@@ -82,7 +98,7 @@ test("confines project-relative locators without requiring the target to exist",
       () => validateGraph({
         catalog: {
           v: 1,
-          projects: [{ id: "p:sample", roots: [root] }],
+          projects: [{ id: "p:sample", name: "Sample", roots: [root] }],
         },
         records: [record({ kind: "index", locators: [locator] })],
       }),
@@ -99,7 +115,11 @@ test("permits explicit external locators", () => {
     assert.doesNotThrow(() => validateGraph({
       catalog: {
         v: 1,
-        projects: [{ id: "p:sample", roots: ["/projects/sample"] }],
+        projects: [{
+          id: "p:sample",
+          name: "Sample",
+          roots: ["/projects/sample"],
+        }],
       },
       records: [record({
         kind: "index",

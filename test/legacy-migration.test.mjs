@@ -181,3 +181,41 @@ test("legacy migration rejects context traversal and CLI reports structured erro
     await assert.rejects(access(home));
   });
 });
+
+test("legacy migration rejects duplicate project IDs without creating a store", async () => {
+  await withTemp(async (root) => {
+    const legacy = path.join(root, "legacy");
+    const home = path.join(root, "lodestar");
+    const firstRoot = path.join(root, "first");
+    const secondRoot = path.join(root, "second");
+    await mkdir(path.join(legacy, "records", "projects"), { recursive: true });
+    await mkdir(firstRoot);
+    await mkdir(secondRoot);
+    await writeFile(path.join(legacy, "catalog.json"), JSON.stringify({
+      v: 1,
+      projects: [
+        {
+          id: "p:duplicate",
+          name: "First",
+          roots: [firstRoot],
+          context: "records/projects/first.jsonl",
+        },
+        {
+          id: "p:duplicate",
+          name: "Second",
+          roots: [secondRoot],
+          context: "records/projects/second.jsonl",
+        },
+      ],
+    }));
+    await writeFile(path.join(legacy, "records", "global.jsonl"), "");
+    await writeFile(path.join(legacy, "records", "projects", "first.jsonl"), "");
+    await writeFile(path.join(legacy, "records", "projects", "second.jsonl"), "");
+
+    await assert.rejects(
+      migrateLegacyStore({ home, sourceHome: legacy }),
+      { code: "duplicate-project-id" },
+    );
+    await assert.rejects(access(home));
+  });
+});

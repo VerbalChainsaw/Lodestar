@@ -171,6 +171,53 @@ test("project resolution translates cataloged Windows roots under WSL", async ()
   assert.equal(result.root, root);
 });
 
+test("explicit project selection canonicalizes its Windows root under WSL", async () => {
+  await withStoreFixture(() => ({
+    catalog: {
+      v: 1,
+      projects: [{
+        id: "p:demo",
+        name: "Demo",
+        roots: [String.raw`C:\Users\Alex\Project`],
+      }],
+    },
+    schema: { v: 1, record_kinds: ["rule"] },
+    globalRecords: [],
+    projectRecords: {
+      "p:demo": [{
+        v: 1,
+        id: "p:demo:api-rule",
+        kind: "rule",
+        priority: 900,
+        required: true,
+        scope: ["project:p:demo"],
+        within: "packages/api",
+        links: [],
+      }],
+    },
+  }), async ({ home }) => {
+    const root = "/mnt/c/Users/Alex/Project";
+    const cwd = `${root}/packages/api`;
+    const store = await ContextStore.open({
+      home,
+      cwd,
+      project: "p:demo",
+      platform: "linux",
+      env: { WSL_DISTRO_NAME: "Ubuntu" },
+      release: "6.8.0-microsoft-standard-WSL2",
+      fsApi: {
+        realpath: async (value) =>
+          String(value).startsWith("/mnt/c/") ? value : realpath(value),
+      },
+    });
+    assert.equal(store.root, root);
+    assert.deepEqual(
+      (await store.start()).required.map(({ id }) => id),
+      ["p:demo:api-rule"],
+    );
+  });
+});
+
 test("get uses the route index and opens exactly one owning shard", async () => {
   await withStoreFixture(sourceWithProjects, async ({ home, source }) => {
     const reads = [];

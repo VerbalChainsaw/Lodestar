@@ -137,6 +137,55 @@ test("concurrent puts do not lose records", async () => {
   });
 });
 
+test("put restores the prior generation when its audit write fails", async () => {
+  await withStoreFixture(paritySource, async ({ home, source }) => {
+    const store = await ContextStore.open({ home, cwd: source.root });
+    const before = store.generation.id;
+    await assert.rejects(
+      store.put(record("p:demo:audit-failure"), {
+        appendEvent: async () => {
+          throw Object.assign(new Error("disk unavailable"), { code: "EIO" });
+        },
+      }),
+      { code: "store-audit-write-failed" },
+    );
+    const reopened = await ContextStore.open({ home, cwd: source.root });
+    assert.equal(reopened.generation.id, before);
+    await assert.rejects(
+      reopened.get("p:demo:audit-failure"),
+      { code: "record-not-found" },
+    );
+  });
+});
+
+test("put preserves locator health and protects generated ownership", async () => {
+  await withStoreFixture(async (home) => {
+    const source = await paritySource(home);
+    source.projectRecords["p:demo"].push(record("p:demo:generated-doc", {
+      ownership: "generated",
+      locators: [{ type: "file", path: "README.md" }],
+    }));
+    source.probeLocator = async () => ({ status: "ok" });
+    return source;
+  }, async ({ home, source }) => {
+    const store = await ContextStore.open({ home, cwd: source.root });
+    const changed = record("p:demo:generated-doc", {
+      ownership: "generated",
+      summary: "curated replacement",
+      locators: [{ type: "file", path: "README.md" }],
+    });
+    await assert.rejects(
+      store.put(changed),
+      { code: "generated-record-read-only" },
+    );
+    await store.put(changed, { takeOwnership: true });
+    const reopened = await ContextStore.open({ home, cwd: source.root });
+    const result = await reopened.get("p:demo:generated-doc");
+    assert.equal(result.ownership, "curated");
+    assert.equal(result.locators[0].health.status, "ok");
+  });
+});
+
 test("coverage and ask return deterministic project context", async () => {
   await withStoreFixture(paritySource, async ({ home, source }) => {
     const store = await ContextStore.open({ home, cwd: source.root });
@@ -239,6 +288,10 @@ test("CLI exposes put, doctor, coverage, and ask as JSON commands", async () => 
     };
 
     await invoke("put", "--json", JSON.stringify(record("p:demo:cli")));
+    const recordFile = path.join(source.root, "record.json");
+    await writeFile(recordFile, JSON.stringify(record("p:demo:file")));
+    await invoke("put", "--file", recordFile);
+    assert.equal((await invoke("get", "p:demo:file")).id, "p:demo:file");
     assert.equal((await invoke("doctor")).ok, true);
     assert.equal((await invoke("coverage", "--project", "p:demo")).complete, 1);
     assert.deepEqual(
@@ -246,4 +299,15 @@ test("CLI exposes put, doctor, coverage, and ask as JSON commands", async () => 
       [source.root],
     );
   });
+});
+
+test("CLI reports missing ask arguments without leaking an internal TypeError", async () => {
+  const errors = [];
+  const code = await run(["ask"], {
+    stderr: (line) => errors.push(JSON.parse(line)),
+    stdout: () => assert.fail("missing arguments must not produce output"),
+  });
+  assert.equal(code, 1);
+  assert.equal(errors[0].error.code, "missing-argument");
+  assert.equal(errors[0].error.detail.argument, "intent");
 });

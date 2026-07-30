@@ -16,6 +16,7 @@ import test from "node:test";
 import {
   installLodestar,
   installWindowsCompatibilityShims,
+  packageMetadata,
   resolveNpmInvocation,
 } from "../install.mjs";
 
@@ -118,6 +119,24 @@ test("installer rejects unsupported Node and unknown arguments", async () => {
   );
 });
 
+test("installer validates tarball identity before invoking npm", async () => {
+  await withTemp("lodestar-installer-invalid-tar-", async (root) => {
+    const archive = path.join(root, "not-lodestar.tgz");
+    await writeFile(archive, "not a gzip archive");
+    await assert.rejects(
+      packageMetadata(archive),
+      { code: "installer-package-invalid" },
+    );
+    await assert.rejects(
+      installLodestar(["--package", archive, "--skip-codex"], {
+        spawn: () => assert.fail("invalid package must not invoke npm"),
+        stdout: () => {},
+      }),
+      { code: "installer-package-invalid" },
+    );
+  });
+});
+
 test("Windows compatibility shims replace a stale prefix-bin command", async () => {
   await withTemp("lodestar-installer-shim-", async (root) => {
     const prefix = path.join(root, "prefix");
@@ -135,6 +154,7 @@ test("Windows compatibility shims replace a stale prefix-bin command", async () 
       npmPrefix: prefix,
       packageRoot: installed,
       bins: { agentctx: "./agentctx.mjs" },
+      nodeExecutable: process.execPath,
       pathApi: path,
     });
 
@@ -144,7 +164,62 @@ test("Windows compatibility shims replace a stale prefix-bin command", async () 
     ]);
     const shim = await readFile(result.shims[0], "utf8");
     assert.doesNotMatch(shim, /legacy/);
+    assert.match(shim, new RegExp(
+      process.execPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ));
     assert.match(shim, /package[\\/]agentctx\.mjs/);
+  });
+});
+
+test("installer restores the previous package when post-install setup fails", async () => {
+  await withTemp("lodestar-installer-rollback-", async (root) => {
+    const prefix = path.join(root, "prefix");
+    const stateHome = path.join(root, "state");
+    await installLodestar([
+      "--package",
+      packageRoot,
+      "--prefix",
+      prefix,
+      "--home",
+      stateHome,
+      "--skip-codex",
+    ], { stdout: () => {} });
+
+    const broken = path.join(root, "broken-package");
+    await mkdir(broken);
+    await writeFile(path.join(broken, "package.json"), JSON.stringify({
+      name: "lodestar-agent-context",
+      version: "9.9.9",
+      type: "module",
+      bin: { agentctx: "./agentctx.mjs" },
+    }));
+    await writeFile(
+      path.join(broken, "agentctx.mjs"),
+      "process.stderr.write('setup failed\\n'); process.exit(7);",
+    );
+
+    await assert.rejects(
+      installLodestar([
+        "--package",
+        broken,
+        "--prefix",
+        prefix,
+        "--home",
+        stateHome,
+        "--skip-codex",
+      ], { stdout: () => {} }),
+      { code: "installer-process-failed" },
+    );
+
+    const npmRoot = process.platform === "win32"
+      ? path.join(prefix, "node_modules")
+      : path.join(prefix, "lib", "node_modules");
+    const installed = JSON.parse(await readFile(path.join(
+      npmRoot,
+      "lodestar-agent-context",
+      "package.json",
+    ), "utf8"));
+    assert.equal(installed.version, "0.4.3");
   });
 });
 

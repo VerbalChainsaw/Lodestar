@@ -30,6 +30,18 @@ agentctx doctor
 agentctx start --cwd /path/to/project
 ```
 
+To preview bounded project discovery and starter profiling during initialization:
+
+```sh
+agentctx init --discover --root /path/to/development --skip-codex
+agentctx init --discover --root /path/to/development --yes --skip-codex
+```
+
+The first command creates the state home and returns a discovery preview. The
+second confirms catalog insertion and generates bounded command, entrypoint,
+environment, and rule records. Omit `--skip-codex` on the confirmed command to
+install the managed Codex block.
+
 From a source checkout, the guided installer initializes the state home and
 installs Lodestar's managed Codex instruction block:
 
@@ -84,18 +96,18 @@ scope.
 
 | Command | Purpose |
 | --- | --- |
-| `agentctx init` | Create a valid state home from packaged templates. |
+| `agentctx init` | Create a valid state home from packaged templates. Add `--discover --root <path>` to preview starter curation and `--yes` to confirm it. |
 | `agentctx start --cwd <path>` | Return the bounded startup packet for the current project. |
 | `agentctx get <id>` | Return one exact, scope-authorized record. |
 | `agentctx resolve <id> [--depth <1-3>]` | Return an exact record and its bounded linked graph. |
 | `agentctx find <query> --cwd <path>` | Search structured fields in global/current-project scope. |
 | `agentctx project [selector]` | Return the current project or a matching project card. |
-| `agentctx put --json '<record>'` | Validate and transactionally write one curated record. JSON may instead be supplied on stdin. |
-| `agentctx doctor` | Validate store generations, graph, indexes, scopes, roots, and locators. |
+| `agentctx put --json '<record>'` | Validate and transactionally write one curated record. Use `--file <path>` or stdin instead; generated records require `--take-ownership`. |
+| `agentctx doctor` | Validate pointers, generations, graph, every index, scopes, roots, locators, locks, startup budgets, and write semantics. |
 | `agentctx coverage [--project <id>]` | Report structured-context coverage. |
 | `agentctx ask <intent> <project>` | Query a project context using a recognized intent. |
-| `agentctx profile-projects [--project <id>]` | Refresh bounded generated project metadata without overwriting curated records. |
-| `agentctx refresh` | Profile projects; equivalent to `profile-projects`. |
+| `agentctx profile-projects [--project <id>]` | Refresh bounded generated project metadata without overwriting curated records. Add `--dry-run` for a non-mutating preview. |
+| `agentctx refresh` | Profile projects; equivalent to `profile-projects`. Supports `--dry-run`. |
 | `agentctx refresh --discover --root <path> --yes` | Discover and add projects under explicit roots after confirmation. |
 | `agentctx migrate-legacy --from <path>` | Import a legacy flat Lodestar store without changing the source. |
 | `agentctx migrate-projects --from <registry.json>` | Import an explicit project registry. |
@@ -176,7 +188,13 @@ transaction boundary:
 
 ```sh
 agentctx put --json '{"v":1,"id":"p:demo:commands","kind":"command","priority":850,"scope":["project:p:demo"],"links":[],"commands":{"test":"npm test"}}'
+agentctx put --file ./commands-record.json
 ```
+
+Generated records are refresh-owned and cannot be overwritten accidentally.
+Use `--take-ownership` only when intentionally converting one to a curated
+record. Every successful write records prior and next hashes in the local audit
+log; an audit-write failure restores the previously active generation.
 
 Direct editing of generated JSONL or index files is unsupported because it can
 make the route and search indexes disagree with the records.
@@ -187,7 +205,8 @@ Discover projects only under roots you explicitly name:
 
 ```sh
 agentctx refresh --discover --root /path/to/development --yes
-agentctx profile-projects
+agentctx refresh --dry-run
+agentctx refresh
 agentctx doctor
 ```
 
@@ -271,6 +290,21 @@ same-host writer crashed, Lodestar reclaims its lock automatically after the
 heartbeat becomes stale. Do not delete `.write-lock` while the recorded process
 may still be running. Network shares can have weaker filesystem semantics;
 prefer a local NTFS/APFS/ext4 state directory and use `agentctx doctor`.
+
+Windows and WSL use separate PID namespaces. A stale cross-runtime lock is
+reported as ambiguous instead of being deleted automatically. After confirming
+that neither runtime has an active writer, quarantine it explicitly:
+
+```sh
+agentctx doctor --repair-lock --force
+```
+
+If `current.json` is damaged, `doctor` lists independently validated generation
+IDs. Promote only a listed valid generation:
+
+```sh
+agentctx doctor --repair-current <64-character-generation-id>
+```
 
 ### Missing project roots or locators
 

@@ -2,10 +2,18 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access, mkdir, readFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { promisify } from "node:util";
+import { gunzip } from "node:zlib";
 
 import { atomicWriteFile } from "./lib/atomic-file.mjs";
 import {
@@ -35,6 +43,7 @@ const BOOLEAN_OPTIONS = new Set([
 ]);
 
 const PACKAGE_NAME = "lodestar-agent-context";
+const gunzipAsync = promisify(gunzip);
 
 function assertArguments(args) {
   validateValueOptions(args, VALUE_OPTIONS);
@@ -164,27 +173,160 @@ function runProcess(command, args, {
   return String(result.stdout ?? "").trim();
 }
 
-async function packageMetadata(packageSource) {
+async function snapshotInstalledPackage({
+  npm,
+  npmRoot,
+  prefix,
+  packageRoot,
+  spawn,
+  env,
+  pathApi,
+}) {
+  const installedRoot = pathApi.join(npmRoot, PACKAGE_NAME);
+  try {
+    await access(installedRoot);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw wrapError(
+      error,
+      "installer-existing-package-unreadable",
+      "Unable to inspect the existing Lodestar installation",
+      { package_root: installedRoot },
+    );
+  }
+  const directory = await mkdtemp(path.join(
+    os.tmpdir(),
+    "lodestar-install-backup-",
+  ));
+  try {
+    const packed = runProcess(npm.command, [
+      ...npm.argsPrefix,
+      "pack",
+      "--ignore-scripts",
+      "--json",
+      "--pack-destination",
+      directory,
+      installedRoot,
+    ], {
+      cwd: packageRoot,
+      spawn,
+      env,
+      displayCommand: npm.displayCommand,
+    });
+    const result = JSON.parse(packed);
+    const filename = result?.[0]?.filename;
+    if (typeof filename !== "string" || filename.length === 0) {
+      throw new Error("npm pack did not report a backup filename");
+    }
+    return {
+      directory,
+      tarball: pathApi.join(directory, filename),
+      prefix,
+    };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    if (error instanceof LodestarError) throw error;
+    throw wrapError(
+      error,
+      "installer-package-backup-failed",
+      "Unable to back up the existing Lodestar package before replacement",
+      { package_root: installedRoot },
+    );
+  }
+}
+
+function rollbackInstalledPackage({
+  npm,
+  backup,
+  prefix,
+  packageRoot,
+  spawn,
+  env,
+}) {
+  const args = backup
+    ? [
+      "install",
+      "--global",
+      "--ignore-scripts",
+      ...(prefix ? ["--prefix", prefix] : []),
+      backup.tarball,
+    ]
+    : [
+      "uninstall",
+      "--global",
+      ...(prefix ? ["--prefix", prefix] : []),
+      PACKAGE_NAME,
+    ];
+  runProcess(npm.command, [...npm.argsPrefix, ...args], {
+    cwd: packageRoot,
+    spawn,
+    env,
+    displayCommand: npm.displayCommand,
+  });
+}
+
+function validatedPackageMetadata(value, packageSource) {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || value.name !== PACKAGE_NAME
+    || typeof value.version !== "string"
+    || value.version.length === 0
+  ) {
+    throw new Error(`expected package ${PACKAGE_NAME} with a version`);
+  }
+  return { name: value.name, version: value.version };
+}
+
+async function tarballPackageJson(packageSource) {
+  const compressed = await readFile(packageSource);
+  if (compressed.length > 128 * 1024 * 1024) {
+    throw new Error("package archive exceeds the 128 MiB safety limit");
+  }
+  const archive = await gunzipAsync(compressed);
+  let offset = 0;
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const name = header.subarray(0, 100).toString("utf8")
+      .replace(/\0.*$/, "");
+    const rawSize = header.subarray(124, 136).toString("ascii")
+      .replace(/\0.*$/, "").trim();
+    const size = Number.parseInt(rawSize || "0", 8);
+    if (!Number.isSafeInteger(size) || size < 0) {
+      throw new Error(`invalid tar entry size for ${name || "<unnamed>"}`);
+    }
+    const bodyStart = offset + 512;
+    const bodyEnd = bodyStart + size;
+    if (bodyEnd > archive.length) {
+      throw new Error(`truncated tar entry ${name || "<unnamed>"}`);
+    }
+    if (name === "package/package.json" || name === "./package/package.json") {
+      if (size > 1_048_576) {
+        throw new Error("package.json exceeds the 1 MiB safety limit");
+      }
+      return JSON.parse(archive.subarray(bodyStart, bodyEnd).toString("utf8"));
+    }
+    offset = bodyStart + Math.ceil(size / 512) * 512;
+  }
+  throw new Error("archive does not contain package/package.json");
+}
+
+export async function packageMetadata(packageSource) {
   const packageFile = packageSource.toLowerCase().endsWith(".tgz")
     ? null
     : path.join(packageSource, "package.json");
-  if (!packageFile) {
-    return { name: PACKAGE_NAME, version: null };
-  }
   try {
-    const value = JSON.parse(await readFile(packageFile, "utf8"));
-    if (
-      value.name !== PACKAGE_NAME
-      || typeof value.version !== "string"
-    ) {
-      throw new Error(`expected package ${PACKAGE_NAME} with a version`);
-    }
-    return { name: value.name, version: value.version };
+    const value = packageFile
+      ? JSON.parse(await readFile(packageFile, "utf8"))
+      : await tarballPackageJson(packageSource);
+    return validatedPackageMetadata(value, packageSource);
   } catch (error) {
     throw wrapError(
       error,
       "installer-package-invalid",
-      `Unable to read package metadata from ${packageFile}`,
+      `Unable to validate package metadata from ${packageSource}`,
       { package: packageSource },
     );
   }
@@ -232,6 +374,7 @@ export async function installWindowsCompatibilityShims({
   npmPrefix,
   packageRoot,
   bins,
+  nodeExecutable = process.execPath,
   pathApi = path.win32,
   fsApi,
 } = {}) {
@@ -277,7 +420,7 @@ export async function installWindowsCompatibilityShims({
       const shim = pathApi.join(compatibilityBin, `${command}.cmd`);
       await atomicWriteFile(
         shim,
-        `@ECHO off\r\nnode ${cmdQuoted(target)} %*\r\n`,
+        `@ECHO off\r\n${cmdQuoted(nodeExecutable)} ${cmdQuoted(target)} %*\r\n`,
         { ...(fsApi ? { fsApi } : {}) },
       );
       written.push(shim);
@@ -353,6 +496,7 @@ export async function installLodestar(
   const installArguments = [
     "install",
     "--global",
+    "--ignore-scripts",
     ...(prefix ? ["--prefix", prefix] : []),
     packageSource,
   ];
@@ -377,12 +521,6 @@ export async function installLodestar(
     return result;
   }
 
-  runProcess(npm.command, [...npm.argsPrefix, ...installArguments], {
-    cwd: packageRoot,
-    spawn,
-    env,
-    displayCommand: npm.displayCommand,
-  });
   const npmRoot = runProcess(npm.command, [
     ...npm.argsPrefix,
     "root",
@@ -404,6 +542,24 @@ export async function installLodestar(
     env,
     displayCommand: npm.displayCommand,
   });
+  const backup = await snapshotInstalledPackage({
+    npm,
+    npmRoot,
+    prefix,
+    packageRoot,
+    spawn,
+    env,
+    pathApi,
+  });
+  let packageReplaced = false;
+  try {
+    runProcess(npm.command, [...npm.argsPrefix, ...installArguments], {
+      cwd: packageRoot,
+      spawn,
+      env,
+      displayCommand: npm.displayCommand,
+    });
+    packageReplaced = true;
   const installedMain = pathApi.join(
     npmRoot,
     metadata.name,
@@ -453,13 +609,14 @@ export async function installLodestar(
       npmPrefix,
       packageRoot: pathApi.join(npmRoot, metadata.name),
       bins: installedBins,
+      nodeExecutable,
       pathApi,
     })
     : null;
   const commonArguments = [
     ...(stateHome ? ["--home", stateHome] : []),
   ];
-  const stateResult = parseProcessJson(runProcess(process.execPath, [
+  const stateResult = parseProcessJson(runProcess(nodeExecutable, [
     installedMain,
     legacyHome ? "migrate-legacy" : "init",
     ...commonArguments,
@@ -471,7 +628,7 @@ export async function installLodestar(
   }), legacyHome ? "legacy state migration" : "state initialization");
   let codex = null;
   if (!skipCodex) {
-    codex = parseProcessJson(runProcess(process.execPath, [
+    codex = parseProcessJson(runProcess(nodeExecutable, [
       installedMain,
       "install-codex",
       ...commonArguments,
@@ -518,6 +675,38 @@ export async function installLodestar(
   };
   stdout(JSON.stringify(result));
   return result;
+  } catch (error) {
+    if (packageReplaced) {
+      try {
+        rollbackInstalledPackage({
+          npm,
+          backup,
+          prefix,
+          packageRoot,
+          spawn,
+          env,
+        });
+      } catch (rollbackError) {
+        throw new LodestarError(
+          "installer-package-rollback-failed",
+          "Lodestar setup failed and the previous package could not be restored",
+          {
+            cause: new AggregateError([error, rollbackError]),
+            detail: {
+              install_code: error.code ?? null,
+              rollback_code: rollbackError.code ?? null,
+              backup: backup?.tarball ?? null,
+            },
+          },
+        );
+      }
+    }
+    throw error;
+  } finally {
+    if (backup) {
+      await rm(backup.directory, { recursive: true, force: true });
+    }
+  }
 }
 
 if (isMainModule(import.meta.url)) {

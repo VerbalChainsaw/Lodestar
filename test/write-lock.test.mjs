@@ -52,6 +52,7 @@ test("acquires an atomic directory lock and records its owner", async () => {
       nonce: "owner-nonce",
       pid: 100,
       hostname: "test-host",
+      runtime: process.platform,
       started_at: 10_000,
     });
     assert.equal(
@@ -130,6 +131,52 @@ test("reclaims only a dead same-host lock with an expired heartbeat", async () =
   });
 });
 
+test("same-machine hostnames compare case-insensitively", async () => {
+  await fixture(async (home) => {
+    await acquireWriteLock(options(home, {
+      hostname: "Gigaflex",
+      now: () => 0,
+      nonce: () => "abandoned",
+    }));
+    const contender = await acquireWriteLock(options(home, {
+      hostname: "GIGAFLEX",
+      now: () => 5_000,
+      pid: 200,
+      nonce: () => "new-owner",
+      isProcessAlive: () => false,
+    }));
+    assert.equal(contender.nonce, "new-owner");
+    await contender.release();
+  });
+});
+
+test("different Windows and WSL PID namespaces are never auto-reclaimed", async () => {
+  await fixture(async (home) => {
+    const owner = await acquireWriteLock(options(home, {
+      hostname: "Gigaflex",
+      runtime: "linux",
+      now: () => 0,
+      nonce: () => "wsl-owner",
+    }));
+    await assert.rejects(
+      acquireWriteLock(options(home, {
+        hostname: "GIGAFLEX",
+        runtime: "win32",
+        now: () => 5_000,
+        pid: 200,
+        nonce: () => "windows-contender",
+        isProcessAlive: () => false,
+      })),
+      (error) =>
+        error.code === "store-write-locked"
+        && error.detail.same_machine === true
+        && error.detail.same_runtime === false
+        && error.detail.liveness === null,
+    );
+    await owner.release();
+  });
+});
+
 test("does not reclaim fresh, remote, or ambiguously live locks", async () => {
   for (const scenario of [
     {
@@ -174,6 +221,7 @@ test("refresh and release require the original nonce", async () => {
       nonce: "replacement",
       pid: 999,
       hostname: "test-host",
+      runtime: process.platform,
       started_at: 10_001,
     }));
     await assert.rejects(lock.refresh(), { code: "lock-ownership-lost" });
