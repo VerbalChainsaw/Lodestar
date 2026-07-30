@@ -31,28 +31,75 @@
   >
 </p>
 
-## Measured impact
+## v0.6.1 is live
+
+**Trustworthy context, verified recovery, and a release path you can audit.**
+
+Lodestar v0.6.1 is the finished v0.6 trust-and-recovery release. It adds
+cryptographically sealed generations, deep integrity checks, verified
+snapshot/restore, recoverable maintenance, safer installation, bounded storage,
+and cross-platform release verification—without changing the deterministic,
+local-first retrieval model.
+
+<p align="center">
+  <a href="https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.6.1"><strong>Download v0.6.1</strong></a>
+  ·
+  <a href="docs/releases/v0.6.1.md">Read the release notes</a>
+  ·
+  <a href="docs/benchmarks.md">Inspect the benchmarks</a>
+  ·
+  <a href="SECURITY.md">Report a vulnerability</a>
+</p>
+
+### What shipped
+
+| Area | v0.6.1 capability |
+| --- | --- |
+| Integrity | SHA-256-sealed generations and deep verification of committed state |
+| Recovery | Verified snapshots, restore into a new home, and explicit recovery from interrupted writes |
+| Maintenance | Dry-run-first cleanup, recoverable quarantine, audit checkpoints, and bounded retention |
+| Safety | Path confinement, collision detection, race-safe publication, and rollback-complete setup |
+| Portability | One zero-dependency package tested through full lifecycles on Ubuntu, macOS, Windows, and WSL |
+| Supply chain | Checksum and SLSA-provenance-attested release artifacts from a protected tag |
+
+### Release scorecard
+
+| Gate | Verified result |
+| --- | ---: |
+| Linux/WSL test suite | **201/201 passed** |
+| Native Windows test suite | **198 passed, 0 failed** |
+| Hosted lifecycle matrices | **Ubuntu + macOS + Windows passed** |
+| CodeQL | **Passed, 0 open alerts** |
+| Published package | **Checksum + provenance verified** |
+| Retrieval correctness | **4/4 answers preserved** |
+| Project isolation | **0 cross-project records** |
+| Stress profile | **500 projects passed** |
+
+The three native Windows skips are intentional platform-specific cases. The
+published tarball passed install, startup, deep diagnostics, snapshot,
+verification, restore, maintenance, and performance checks. See the
+[v0.6.1 verification record](docs/releases/v0.6.1.md) for the complete scope.
+
+## Benchmark results
 
 Lodestar is designed to reduce environmental work around coding-agent reasoning while preserving correctness. Current cross-platform benchmark results:
 
-| Metric | Result |
-| --- | ---: |
-| Correct answers preserved | **4/4 → 4/4** |
-| Files inspected | **64 → 6** |
-| Repository bytes inspected | **97–98% reduction** |
-| Broad repository search | **Eliminated** |
-| Cross-project leakage | **0** |
-| Warm startup | **0.037–0.048 ms** |
-| Exact retrieval | **0.010–0.013 ms** |
-| Indexed search | **0.483–0.737 ms** |
-| Tested scale | **10, 100, and 500 projects** |
+| Metric | Standard profile | 500-project stress profile |
+| --- | ---: | ---: |
+| Correct answers | **4/4 → 4/4** | **4/4 → 4/4** |
+| Files inspected | **64 → 6** (−90.63%) | **256 → 6** (−97.66%) |
+| Repository bytes inspected | **1.0 MiB → 24.3 KiB** (−97.62%) | **8.0 MiB → 111.8 KiB** (−98.63%) |
+| Median elapsed time | **16.620 → 11.117 ms** (−33.11%) | **63.934 → 42.664 ms** (−33.27%) |
+| Broad repository search | **Yes → No** | **Yes → No** |
+| Cross-project leakage | **0** | **0** |
 
 The benchmark suite measures retrieval efficiency, determinism, project isolation, and runtime overhead. It does **not** claim universal improvement in LLM reasoning quality. See the full [benchmark results](docs/benchmarks.md), [performance methodology](docs/performance.md), and [paired evaluation design](docs/evaluation.md).
 
-The fixed routing cost is not a universal latency win: fresh 25-sample tests on
-repositories with only 8–16 tiny documents were 18.82–138.46% slower than a
+The fixed routing cost is not a universal latency win. Fresh 25-sample tests on
+repositories with only 8–16 tiny documents were **18.82–138.46% slower** than a
 successful direct scan, even though Lodestar still inspected fewer files and
-bytes. The measured advantage appears as repository size and ambiguity grow.
+bytes. The measured advantage appears as repository size and ambiguity grow;
+timings are observational and machine-specific.
 
 ## Context is not a prompt. It is an operating layer.
 
