@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -31,6 +32,7 @@ import { refreshProjects } from "../tools/refresh-projects.mjs";
 import { rollbackCodex } from "../tools/rollback-codex.mjs";
 import { run } from "../agentctx.mjs";
 import { ContextStore } from "../lib/context-store.mjs";
+import { nativeProjectPath } from "../lib/native-path.mjs";
 import { initializeStateHome } from "../lib/state-home.mjs";
 import { withStoreFixture } from "./helpers/store-fixture.mjs";
 
@@ -585,23 +587,28 @@ test("refresh discovery deduplicates Windows and WSL roots by physical identity"
       projectRoot,
     };
   }, async ({ home, source }) => {
+    const physicalProjectRoot = await realpath(source.projectRoot);
+    const simulatedRuntime = {
+      platform: "linux",
+      env: { WSL_DISTRO_NAME: "Ubuntu" },
+      release: "6.8.0-microsoft-standard-WSL2",
+    };
+    const translatedProjectRoot = nativeProjectPath(physicalProjectRoot, {
+      ...simulatedRuntime,
+      cwd: physicalProjectRoot,
+      pathApi: path.posix,
+    });
     const result = await refreshProjects({
       home,
       discoverRoots: [source.projectRoot],
       confirm: true,
-      platform: "linux",
-      env: { WSL_DISTRO_NAME: "Ubuntu" },
-      release: "6.8.0-microsoft-standard-WSL2",
+      ...simulatedRuntime,
       fsApi: {
         realpath: async (value) =>
           value === "/mnt/c/Users/Alex/Project"
-            || (
-              process.platform === "win32"
-              && String(value).startsWith("/mnt/c/")
-            )
-            ? source.projectRoot
-            : import("node:fs/promises").then(({ realpath }) =>
-              realpath(value)),
+            || value === translatedProjectRoot
+            ? physicalProjectRoot
+            : realpath(value),
       },
     });
     assert.equal(result.added, 0);

@@ -301,13 +301,25 @@ test("CLI exposes put, doctor, coverage, and ask as JSON commands", async () => 
   });
 });
 
-test("CLI reports missing ask arguments without leaking an internal TypeError", async () => {
-  const errors = [];
-  const code = await run(["ask"], {
-    stderr: (line) => errors.push(JSON.parse(line)),
-    stdout: () => assert.fail("missing arguments must not produce output"),
+test("CLI validates required arguments before opening the state home", async () => {
+  await withStoreFixture(paritySource, async ({ home }) => {
+    const cases = [
+      { args: ["get"], argument: "id" },
+      { args: ["find"], argument: "query" },
+      { args: ["resolve"], argument: "id" },
+      { args: ["ask"], argument: "intent" },
+      { args: ["ask", "project.path"], argument: "project" },
+    ];
+    for (const entry of cases) {
+      const errors = [];
+      const code = await run(entry.args, {
+        home: path.join(home, "missing"),
+        stderr: (line) => errors.push(JSON.parse(line)),
+        stdout: () => assert.fail("missing arguments must not produce output"),
+      });
+      assert.equal(code, 1);
+      assert.equal(errors[0].error.code, "missing-argument");
+      assert.equal(errors[0].error.detail.argument, entry.argument);
+    }
   });
-  assert.equal(code, 1);
-  assert.equal(errors[0].error.code, "missing-argument");
-  assert.equal(errors[0].error.detail.argument, "intent");
 });

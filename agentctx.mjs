@@ -160,6 +160,29 @@ export async function run(
         : nativeProjectPath(value, { env, cwd });
     const commandCwd = nativePath(optionValue(args, "--cwd", cwd));
     const project = optionValue(args, "--project", null);
+    const positional = positionalValues(
+      args,
+      OPTIONS_BY_COMMAND[command]?.values,
+    );
+    const requiredArgument = command === "find"
+      ? "query"
+      : command === "ask"
+        ? "intent"
+        : ["get", "resolve"].includes(command)
+          ? "id"
+          : null;
+    if (requiredArgument && !positional[0]) {
+      throw new ContextError("missing-argument", {
+        command,
+        argument: requiredArgument,
+      });
+    }
+    if (command === "ask" && !positional[1] && !project) {
+      throw new ContextError("missing-argument", {
+        command,
+        argument: "project",
+      });
+    }
     let result;
     if (command === "init") {
       const initialized = await initializeStateHome({ destination: stateHome });
@@ -301,35 +324,13 @@ export async function run(
       cwd: commandCwd,
       project,
     });
-    const positional = positionalValues(
-      args,
-      OPTIONS_BY_COMMAND[command]?.values,
-    );
     if (command === "start") {
       result = await store.start();
     } else if (command === "get") {
-      if (!positional[0]) {
-        throw new ContextError("missing-argument", {
-          command,
-          argument: "id",
-        });
-      }
       result = await store.get(positional[0]);
     } else if (command === "find") {
-      if (positional.length === 0) {
-        throw new ContextError("missing-argument", {
-          command,
-          argument: "query",
-        });
-      }
       result = await store.find(positional.join(" "));
     } else if (command === "resolve") {
-      if (!positional[0]) {
-        throw new ContextError("missing-argument", {
-          command,
-          argument: "id",
-        });
-      }
       const depth = optionValue(args, "--depth", null);
       result = await store.resolve(positional[0], {
         ...(depth === null ? {} : { depth: Number(depth) }),
@@ -375,19 +376,7 @@ export async function run(
         project: optionValue(args, "--project", null),
       });
     } else if (command === "ask") {
-      if (!positional[0]) {
-        throw new ContextError("missing-argument", {
-          command,
-          argument: "intent",
-        });
-      }
       const askProject = positional[1] ?? project;
-      if (!askProject) {
-        throw new ContextError("missing-argument", {
-          command,
-          argument: "project",
-        });
-      }
       result = await store.ask(positional[0], askProject);
     }
     stdout(JSON.stringify(result));

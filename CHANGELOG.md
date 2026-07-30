@@ -12,6 +12,8 @@ All notable changes to Lodestar are documented here.
   protect generated ownership, and record prior/next hashes.
 - Reject duplicate project IDs before legacy migration can collapse shards.
 - Reject unknown CLI options and make refresh/profile dry runs non-mutating.
+- Validate required exact-lookup and `ask` arguments before opening the state
+  store so clean installations return actionable input errors.
 - Deduplicate Windows/WSL roots by physical identity and recheck discovery
   candidates inside the writer lock.
 - Add fail-closed standalone doctor diagnostics and explicit current-pointer and
