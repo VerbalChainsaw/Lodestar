@@ -166,7 +166,7 @@ Installed packages also expose the public `lodestar-benchmark` and `lodestar-per
 
 At the v0.7.0 release candidate:
 
-- WSL/Linux: 203/203 substantive tests pass with no skips.
+- WSL/Linux: 204/204 substantive tests pass with no skips.
 - The prior v0.6.1 native-Windows baseline was 198 pass, 0 fail, with three
   intentional platform-specific skips; the tagged v0.7.0 workflow must earn a
   new result before publication.
