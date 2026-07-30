@@ -90,12 +90,12 @@ test("installer dry-run inspects npm root and returns a complete plan", async ()
       "--skip-codex",
     ], {
       spawn: (_command, args) => {
-        assert.deepEqual(args, [
+        assert.deepEqual(args.slice(-4, -1), [
           "root",
           "--global",
           "--prefix",
-          prefix,
         ]);
+        assert.equal(path.resolve(args.at(-1)), path.resolve(prefix));
         return { status: 0, stdout: npmRoot, stderr: "" };
       },
       stdout: (line) => output.push(JSON.parse(line)),
