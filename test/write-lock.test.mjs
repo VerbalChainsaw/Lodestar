@@ -257,6 +257,37 @@ test("competing acquisitions produce one owner", async () => {
   });
 });
 
+test("default contention budget lets a healthy slow writer finish", async () => {
+  await fixture(async (home) => {
+    let time = 0;
+    let released = false;
+    const owner = await acquireWriteLock(options(home, {
+      now: () => time,
+      nonce: () => "slow-owner",
+    }));
+    const contender = await acquireWriteLock({
+      home,
+      staleGraceMs: 30_000,
+      retryMs: 1_000,
+      now: () => time,
+      sleep: async (milliseconds) => {
+        time += milliseconds;
+        if (time >= 3_000 && !released) {
+          await owner.release();
+          released = true;
+        }
+      },
+      hostname: "test-host",
+      pid: 200,
+      isProcessAlive: () => true,
+      nonce: () => "patient-contender",
+    });
+    assert.equal(contender.nonce, "patient-contender");
+    assert.equal(time, 3_000);
+    await contender.release();
+  });
+});
+
 test("withWriteLock releases after success and failure", async () => {
   await fixture(async (home) => {
     assert.equal(

@@ -7,23 +7,28 @@ The benchmark suites are intentionally separated into two questions:
 1. **Material lift:** Can Lodestar preserve answer correctness while reducing the amount of repository material an agent must inspect?
 2. **Runtime overhead:** How quickly does Lodestar start, retrieve exact records, resolve linked context, and search its bounded index as the project catalog grows?
 
-## Unreleased payload/payback pass
+## v0.7.0 payload/payback release
 
-The v0.7 working tree was measured on 2026-07-30 before any version bump or
-release tag. The real 71-project canonical startup packet fell from 16,300 to
-4,879 bytes, a 70.1% reduction, while retaining all six required records and
-explicitly reporting omitted optional IDs.
+The v0.7.0 release candidate was measured on 2026-07-30. The real 71-project
+canonical startup packet fell from 16,300 to 4,879 bytes, a 70.1% reduction,
+while retaining all six required records and explicitly reporting omitted
+optional IDs.
 
-Three fresh 10/100/500-project performance runs passed every correctness,
+The final fresh 10/100/500-project performance run passed every correctness,
 determinism, scope, broad-search, inspected-byte, and 5 KiB startup-payload
-gate. Median elapsed-time reductions across those runs were 33.47%, 34.58%,
-and 33.87%, respectively. The synthetic fixture's startup packet was 1,482
-bytes in every scale profile.
+gate. Median elapsed-time reductions were 35.51%, 34.39%, and 33.62%,
+respectively. The synthetic fixture's startup packet was 1,482 bytes in every
+scale profile.
+
+At 100 projects, Lodestar avoided 1,023,653 inspected bytes while adding 3,234
+evidence bytes and saving 5.305 ms at the median. At 500 projects, it avoided
+8,274,085 inspected bytes and saved 21.045 ms. These are measured work
+observations, not inferred token or dollar savings.
 
 An immediate three-run comparison against commit `6851f9c` measured these
 operation p50 medians on the same machine:
 
-| Operation | `6851f9c` | v0.7 working tree |
+| Operation | `6851f9c` | v0.7.0 |
 | --- | ---: | ---: |
 | Fresh-store startup | 11.593 ms | 10.842 ms |
 | Warm startup | 0.050 ms | 0.047 ms |
@@ -56,10 +61,20 @@ repository question produced:
 | Reported input tokens | 69,535 | 71,821 |
 
 This smoke validates the lean command path and a five-file focus improvement,
-but it does not prove payback: Lodestar added 3.585 seconds and 2,286 reported
-input tokens in the single contaminated pair. A randomized, repeated,
-invocation-isolated run is still required before making a live-agent economic
-claim or publishing a v0.7 tag.
+but it does not prove live-agent payback: Lodestar added 3.585 seconds and
+2,286 reported input tokens in the single contaminated pair. A randomized,
+repeated, invocation-isolated run is still required before making a
+provider-level economic claim.
+
+### Deep-audit optimization
+
+The same 55-generation Windows-backed canonical store was audited before and
+after bounded-concurrent generation inspection. Deep doctor fell from 48.87
+seconds to 18.74 seconds, a 61.7% code-level reduction, with deterministic
+issue ordering and the same integrity findings. After a verified snapshot,
+71-project refresh, locator repair, and recoverable retention maintenance, the
+canonical store retained one active sealed generation and deep doctor completed
+in 3.75 seconds with zero issues—a 92.3% end-to-end reduction.
 
 ## Headline results
 
@@ -74,11 +89,11 @@ The paired benchmark asks the same four repository questions with and without Lo
 | Bytes inspected | 1.0 MiB | 24–28 KiB |
 | Broad search | Yes | No |
 | Cross-project leakage | N/A | 0 |
-| Median time improvement | — | 33% in the fresh v0.6.1 WSL run |
+| Median time improvement | — | 34.39% in the fresh v0.7.0 WSL run |
 
 That is approximately **90.6% fewer files inspected** and **97% fewer bytes
 inspected** on both Windows and WSL, while preserving the measured 4/4 answer
-correctness. A fresh 15-sample v0.6.1 WSL run measured a 33.11% median elapsed
+correctness. The fresh v0.7.0 WSL release run measured a 34.39% median elapsed
 time improvement.
 
 ### Scale profiles
@@ -149,22 +164,21 @@ Installed packages also expose the public `lodestar-benchmark` and `lodestar-per
 
 ## Regression coverage
 
-At the v0.6.1 snapshot:
+At the v0.7.0 release candidate:
 
-- WSL/Linux: 201/201 substantive tests pass with no skips.
-- Native Windows: 198 pass, 0 fail, with three intentional
-  platform-specific skips (two privileged directory-symlink cases and one
-  npm command-shim case).
-- The real `0.6.0` tarball passes isolated installation, installed-binary
+- WSL/Linux: 204/204 substantive tests pass with no skips.
+- The prior v0.6.1 native-Windows baseline was 198 pass, 0 fail, with three
+  intentional platform-specific skips; the tagged v0.7.0 workflow must earn a
+  new result before publication.
+- The packed release candidate passes isolated installation, installed-binary
   startup, deep doctor, snapshot creation and verification, restore,
   restored-store deep doctor, and maintenance preview.
 - JSON consumers and structured invalid-option behavior pass.
 - The 500-project gate passes with 4/4 answer parity, no broad search, zero
   cross-project records, 97.66% fewer files inspected, and 98.63% fewer bytes
   inspected in the recorded WSL run.
-- The v0.6.0 release passed its hosted Windows, Ubuntu, macOS, CodeQL,
-  checksum, and provenance gates. Every later tag must independently pass the
-  same release workflow before publication.
+- Every release tag must independently pass hosted Windows, Ubuntu, macOS,
+  CodeQL, checksum, packed-lifecycle, and provenance gates before publication.
 
 ## v0.5 project-readiness regression snapshot
 

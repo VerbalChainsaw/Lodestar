@@ -13,6 +13,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+        with:
+          languages: javascript-typescript
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - run: npm test
+      - name: Analyze
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+
   verify:
     strategy:
       fail-fast: false
@@ -46,7 +64,9 @@ jobs:
       - run: npm --prefix .package-smoke exec -- lodestar-performance --quick --iterations 3 --warmups 1 --json
 
   publish:
-    needs: verify
+    needs:
+      - codeql
+      - verify
     runs-on: ubuntu-latest
     permissions:
       contents: write

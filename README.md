@@ -31,20 +31,20 @@
   >
 </p>
 
-## v0.6.1 is live
+## v0.7.0 is live
 
-**Trustworthy context, verified recovery, and a release path you can audit.**
+**Less payload. Less wandering. Measured payback. Zero local noise.**
 
-Lodestar v0.6.1 is the finished v0.6 trust-and-recovery release. It adds
-cryptographically sealed generations, deep integrity checks, verified
-snapshot/restore, recoverable maintenance, safer installation, bounded storage,
-and cross-platform release verification—without changing the deterministic,
-local-first retrieval model.
+Lodestar v0.7.0 keeps required context complete while shrinking the real
+71-project startup packet by **70.1%**, exposes package and PATH drift before
+installation, accelerates deep audits, and removes false locator/root noise.
+It stays local-first, dependency-free, deterministic, and compatible with the
+version 1 store.
 
 <p align="center">
-  <a href="https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.6.1"><strong>Download v0.6.1</strong></a>
+  <a href="https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.7.0"><strong>Download v0.7.0</strong></a>
   ·
-  <a href="docs/releases/v0.6.1.md">Read the release notes</a>
+  <a href="docs/releases/v0.7.0.md">Read the release notes</a>
   ·
   <a href="docs/benchmarks.md">Inspect the benchmarks</a>
   ·
@@ -53,49 +53,53 @@ local-first retrieval model.
 
 ### Why this version matters
 
-v0.6.1 turns Lodestar from fast context retrieval into dependable context
-infrastructure. Agents do less repeated discovery, projects stay isolated, and
-operators gain a verified path through corruption, interrupted writes, and
-routine maintenance.
+v0.7.0 makes the context plane cheaper to use and easier to trust. Agents
+receive complete rules plus compact optional routes, operators can see package
+transitions before setup changes anything, and diagnostics focus on actionable
+failures instead of harmless alternate paths or absent build outputs.
 
 | Advantage | What it means in practice |
 | --- | --- |
+| Smaller hand-off | The real canonical startup packet fell from **16,300 to 4,879 bytes** while preserving all six required records |
 | Less agent wandering | Exact routing replaced broad search while inspecting **90.63% fewer files** and **97.62% fewer bytes** in the standard profile |
+| Measured payback | The final 100-project run saved **5.305 ms** and avoided **1,023,653 inspected bytes** while adding 3,234 evidence bytes |
 | Predictable context | Stable IDs, deterministic indexes, and bounded evidence give agents the same scoped answer path every time |
 | Strong project isolation | Retrieval returned **zero cross-project records**, even in the 500-project stress profile |
-| Safer automation | Atomic publication, path confinement, collision checks, and rollback-aware setup reduce damaging partial outcomes |
+| Faster maintenance | Bounded-concurrent deep inspection was **61.7% faster** on the same retained history; repaired local audit was **92.3% faster** end to end |
+| Safer upgrades | Preflight exposes installed/target versions, transition, active command, and PATH shadowing and refuses accidental downgrade |
 | Recovery you can verify | Integrity seals, deep diagnostics, snapshots, restore, and recoverable quarantine provide a tested route back |
-| Confidence at scale | The 500-project profile preserved **4/4 answers** while inspecting **97.66% fewer files** and **98.63% fewer bytes** |
-| An auditable release | The public package is checksum-verified, provenance-attested, zero-dependency, and lifecycle-tested across platforms |
+| Confidence at scale | The 500-project profile preserved **4/4 answers**, inspected **98.63% fewer bytes**, and saved **21.045 ms** at the median |
 
 ### What shipped
 
-| Area | v0.6.1 capability |
+| Area | v0.7.0 capability |
 | --- | --- |
-| Integrity | SHA-256-sealed generations and deep verification of committed state |
-| Recovery | Verified snapshots, restore into a new home, and explicit recovery from interrupted writes |
-| Maintenance | Dry-run-first cleanup, recoverable quarantine, audit checkpoints, and bounded retention |
-| Safety | Path confinement, collision detection, race-safe publication, and rollback-complete setup |
-| Portability | One zero-dependency package tested through full lifecycles on Ubuntu, macOS, Windows, and WSL |
-| Supply chain | Checksum and SLSA-provenance-attested release artifacts from a protected tag |
+| Startup | 5 KiB hard ceiling, complete required context, compact optional routing cards |
+| Installation | Visible transition and command-path drift with downgrade protection |
+| Diagnostics | Runtime versions, actionable root semantics, bounded-concurrent deep audit |
+| Profiling | Existing, project-relative generated locators; side-effect-free help and real dry-run |
+| Recovery | Sealed generations, verified snapshots, restore, and recoverable quarantine |
+| Compatibility | Version 1 store, exact retrieval, no daemon, no telemetry, zero runtime dependencies |
 
 ### Release scorecard
 
 | Gate | Verified result |
 | --- | ---: |
-| Linux/WSL test suite | **201/201 passed** |
-| Native Windows test suite | **198 passed, 0 failed** |
-| Hosted lifecycle matrices | **Ubuntu + macOS + Windows passed** |
-| CodeQL | **Passed, 0 open alerts** |
-| Published package | **Checksum + provenance verified** |
+| Linux/WSL test suite | **204/204 passed** |
+| Canonical deep doctor | **0 errors · 0 warnings · 0 blockers** |
+| Real startup packet | **4,879 / 5,120 bytes** |
+| Runtime dependencies | **0** |
 | Retrieval correctness | **4/4 answers preserved** |
 | Project isolation | **0 cross-project records** |
-| Stress profile | **500 projects passed** |
+| Normal-scale payoff | **1,023,653 bytes + 5.305 ms saved** |
+| Stress-scale payoff | **8,274,085 bytes + 21.045 ms saved** |
+| Release publication gate | **Ubuntu + macOS + Windows + CodeQL + provenance** |
 
-The three native Windows skips are intentional platform-specific cases. The
-published tarball passed install, startup, deep diagnostics, snapshot,
-verification, restore, maintenance, and performance checks. See the
-[v0.6.1 verification record](docs/releases/v0.6.1.md) for the complete scope.
+The GitHub release is created only after its exact tagged commit passes hosted
+install, startup, deep diagnostics, snapshot, restore, maintenance, performance,
+CodeQL, checksum, and provenance gates. See the
+[v0.7.0 verification record](docs/releases/v0.7.0.md) for the complete scope
+and honest claim boundary.
 
 ## Benchmark results
 
@@ -106,7 +110,7 @@ Lodestar is designed to reduce environmental work around coding-agent reasoning 
 | Correct answers | **4/4 → 4/4** | **4/4 → 4/4** |
 | Files inspected | **64 → 6** (−90.63%) | **256 → 6** (−97.66%) |
 | Repository bytes inspected | **1.0 MiB → 24.3 KiB** (−97.62%) | **8.0 MiB → 111.8 KiB** (−98.63%) |
-| Median elapsed time | **16.620 → 11.117 ms** (−33.11%) | **63.934 → 42.664 ms** (−33.27%) |
+| Median elapsed time | **15.424 → 10.119 ms** (−34.39%) | **62.596 → 41.551 ms** (−33.62%) |
 | Broad repository search | **Yes → No** | **Yes → No** |
 | Cross-project leakage | **0** | **0** |
 
@@ -285,9 +289,10 @@ Release evidence and local/native test totals are recorded in
 [docs/benchmarks.md](docs/benchmarks.md). The release workflow will not publish
 until Windows, Ubuntu, and macOS checks pass on the exact tagged commit.
 
-Current local evidence is 201/201 WSL/Linux tests, 198 native Windows passes
-with zero failures and three intentional platform skips, a complete isolated
-packed lifecycle, and a passing 500-project stress gate.
+Current local evidence is 204/204 WSL/Linux tests, zero canonical deep-doctor
+issues, a complete isolated packed lifecycle, and passing 10, 100, and
+500-project gates. Every published tag independently earns its native Windows
+and hosted lifecycle result.
 
 Run the comparison yourself:
 
@@ -364,13 +369,13 @@ The same package and store format are used on every supported platform.
 
 ## Quick start
 
-Download `lodestar-agent-context-0.6.1.tgz` and
+Download `lodestar-agent-context-0.7.0.tgz` and
 `SHA256SUMS.txt` from the
-[v0.6.1 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.6.1),
+[v0.7.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v0.7.0),
 verify the checksum, and install:
 
 ```sh
-npm install --global ./lodestar-agent-context-0.6.1.tgz
+npm install --global ./lodestar-agent-context-0.7.0.tgz
 agentctx --version
 agentctx --help
 agentctx init
@@ -755,10 +760,10 @@ snapshot to a new state home rather than editing a generation in place.
 
 ### Missing project roots or locators
 
-`doctor` reports unavailable roots and known-broken locator status as warnings.
-Mount the drive or correct the curated record, then run `agentctx refresh` and
-`agentctx doctor`. A warning for an intentionally offline project does not
-expose its records to the active project.
+`doctor` reports a root issue only when none of a project's cataloged roots is
+reachable. Mount the drive or correct the project, then run `agentctx refresh`
+and `agentctx doctor`. Unavailable alternate roots remain visible in generated
+project hazards without turning a healthy multi-machine project into a warning.
 
 ## Development and releases
 
@@ -776,7 +781,7 @@ an artifact provenance attestation, and publishes both assets to a GitHub
 release.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and
-[docs/releases/v0.6.1.md](docs/releases/v0.6.1.md) for this release's notes.
+[docs/releases/v0.7.0.md](docs/releases/v0.7.0.md) for this release's notes.
 
 ## License
 

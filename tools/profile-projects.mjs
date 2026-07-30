@@ -23,7 +23,21 @@ import {
   nativeProjectPath,
 } from "../lib/native-path.mjs";
 import { resolveStateHome } from "../lib/state-home.mjs";
+import { ContextError } from "../lib/validation.mjs";
 import { readStoreSource, updateStore } from "./tool-store.mjs";
+
+const HELP = [
+  "Usage: agentctx-profile-projects [--project <id>] [--home <path>] [--dry-run]",
+  "",
+  "Refresh bounded generated context for selected projects or the full catalog.",
+  "",
+  "Options:",
+  "  --project <id>  Refresh one project; repeat to select multiple projects",
+  "  --home <path>   Override the Lodestar state home",
+  "  --dry-run       Profile without publishing a generation",
+  "  -h, --help      Show this help",
+  "",
+].join("\n");
 
 const ignored = new Set([
   ".git",
@@ -212,6 +226,30 @@ function unique(values, limit = Infinity) {
   return output;
 }
 
+function manifestRelativePath(manifest, value) {
+  if (
+    typeof value !== "string"
+    || !value.trim()
+    || value.includes("\0")
+    || /^[a-zA-Z]:/.test(value)
+  ) {
+    return null;
+  }
+  const portable = value.replaceAll("\\", "/");
+  if (path.posix.isAbsolute(portable)) return null;
+  const candidate = path.posix.normalize(
+    path.posix.join(path.posix.dirname(manifest), portable),
+  );
+  if (
+    candidate === "."
+    || candidate === ".."
+    || candidate.startsWith("../")
+  ) {
+    return null;
+  }
+  return candidate.replace(/^\.\//, "");
+}
+
 function generatedRecord(project, suffix, value) {
   return {
     v: 1,
@@ -255,7 +293,7 @@ export async function inspectProject(
     .slice(0, 40);
   const commands = { ...(project.commands ?? {}) };
   const identities = [];
-  const declaredEntrypoints = [];
+  const declaredEntrypointCandidates = [];
 
   for (const manifest of manifests) {
     const name = path.posix.basename(manifest);
@@ -278,19 +316,20 @@ export async function inspectProject(
           if (Object.keys(commands).length < 40) commands[key] = command;
         }
         for (const value of [parsed.main, parsed.module]) {
-          if (typeof value === "string") declaredEntrypoints.push(value);
+          const candidate = manifestRelativePath(manifest, value);
+          if (candidate) declaredEntrypointCandidates.push(candidate);
         }
         if (typeof parsed.bin === "string") {
-          declaredEntrypoints.push(parsed.bin);
+          const candidate = manifestRelativePath(manifest, parsed.bin);
+          if (candidate) declaredEntrypointCandidates.push(candidate);
         } else {
-          declaredEntrypoints.push(
-            ...Object.values(parsed.bin ?? {}).filter(
-              (value) => typeof value === "string",
-            ),
-          );
+          for (const value of Object.values(parsed.bin ?? {})) {
+            const candidate = manifestRelativePath(manifest, value);
+            if (candidate) declaredEntrypointCandidates.push(candidate);
+          }
         }
       } catch {
-        // The locator remains visible even when a recognized manifest is invalid.
+        // The manifest remains visible even when its recognized fields are invalid.
       }
     } else if (name === "pyproject.toml") {
       const parsed = parsePyproject(text);
@@ -332,6 +371,13 @@ export async function inspectProject(
       .digest("hex"),
   };
   const base = project.id;
+  const declaredEntrypoints = (await Promise.all(
+    unique(declaredEntrypointCandidates, 50).map(async (candidate) =>
+      await exists(path.join(root, ...candidate.split("/")))
+        ? candidate
+        : null
+    ),
+  )).filter(Boolean);
   const locators = unique([...entrypoints, ...declaredEntrypoints], 50)
     .map((locatorPath) => ({ type: "file", path: locatorPath }));
 
@@ -627,22 +673,52 @@ export async function profileProjects({
   };
 }
 
-if (isMainModule(import.meta.url)) {
-  const args = process.argv.slice(2);
+export async function run(args = process.argv.slice(2), io = {}) {
+  const stdout = io.stdout ?? ((value) => process.stdout.write(value));
+  const stderr = io.stderr ?? ((value) => process.stderr.write(value));
   try {
+    if (args.length === 1 && ["--help", "-h"].includes(args[0])) {
+      stdout(HELP);
+      return 0;
+    }
+    const values = new Set(["--home", "--project"]);
+    const flags = new Set(["--dry-run"]);
+    for (let index = 0; index < args.length; index += 1) {
+      const argument = args[index];
+      if (flags.has(argument)) continue;
+      if (!values.has(argument)) {
+        throw new ContextError("invalid-option", {
+          command: "profile-projects",
+          option: argument,
+          reason: "unknown",
+        });
+      }
+      if (index + 1 >= args.length || args[index + 1].startsWith("--")) {
+        throw new ContextError("missing-option-value", {
+          command: "profile-projects",
+          option: argument,
+        });
+      }
+      index += 1;
+    }
     const result = await profileProjects({
       home: resolveStateHome({
         explicit: optionValue(args, "--home"),
       }),
       projectIds: optionValues(args, "--project"),
+      dryRun: args.includes("--dry-run"),
     });
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-    if (!result.ok) process.exitCode = 1;
+    stdout(`${JSON.stringify(result)}\n`);
+    return result.ok ? 0 : 1;
   } catch (error) {
     const failure = errorResult(error);
-    process.stderr.write(
+    stderr(
       `${JSON.stringify({ ok: false, error: failure })}\n`,
     );
-    process.exitCode = 2;
+    return 2;
   }
+}
+
+if (isMainModule(import.meta.url)) {
+  process.exitCode = await run();
 }
