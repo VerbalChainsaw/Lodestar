@@ -27,6 +27,7 @@ import {
 import {
   nativePath,
   profileProjects,
+  run as runProfileProjects,
 } from "../tools/profile-projects.mjs";
 import { refreshProjects } from "../tools/refresh-projects.mjs";
 import { rollbackCodex } from "../tools/rollback-codex.mjs";
@@ -674,6 +675,7 @@ test("bounded profiler preserves curated records and never reads env values", as
       description: "Demo package",
       scripts: { test: "node --test" },
       main: "src/index.js",
+      bin: "dist/missing.js",
     }));
     await writeFile(path.join(projectRoot, ".env.example"), "TOKEN=do-not-read");
     await writeFile(path.join(projectRoot, "src", "index.js"), "secret-source");
@@ -715,11 +717,47 @@ test("bounded profiler preserves curated records and never reads env values", as
       environment.facts.configuration_locators,
       [".env.example"],
     );
+    assert.deepEqual(
+      (await store.get("p:demo:profile:index")).locators
+        .map(({ type, path: locatorPath }) => ({ type, path: locatorPath })),
+      [{ type: "file", path: "src/index.js" }],
+    );
     const snapshot = JSON.stringify(await store.sourceSnapshot());
     assert.equal(snapshot.includes("do-not-read"), false);
     assert.equal(snapshot.includes("secret-source"), false);
     assert.equal(result.profiled, 1);
+
+    const generation = store.generation.id;
+    const output = [];
+    assert.equal(await runProfileProjects([
+      "--home",
+      home,
+      "--project",
+      "p:demo",
+      "--dry-run",
+    ], {
+      stdout: (value) => output.push(value),
+    }), 0);
+    assert.equal(JSON.parse(output.join("")).dry_run, true);
+    assert.equal(
+      (await ContextStore.open({ home, cwd: source.projectRoot })).generation.id,
+      generation,
+    );
   });
+});
+
+test("standalone profiler help is side-effect free", async () => {
+  const output = [];
+  assert.equal(await runProfileProjects(["--help"], {
+    stdout: (value) => output.push(value),
+  }), 0);
+  assert.match(output.join(""), /Usage: agentctx-profile-projects/);
+
+  const errors = [];
+  assert.equal(await runProfileProjects(["--unknown"], {
+    stderr: (value) => errors.push(value),
+  }), 2);
+  assert.equal(JSON.parse(errors.join("")).error.code, "invalid-option");
 });
 
 test("refresh discovery adds only explicit-root projects and profiles them", async () => {

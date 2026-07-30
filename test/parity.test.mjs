@@ -283,7 +283,7 @@ test("doctor warns about readiness without declaring the store corrupt", async (
   });
 });
 
-test("doctor reports missing roots and broken links without crashing", async () => {
+test("doctor ignores unavailable alternate roots but reports unreachable projects", async () => {
   await withStoreFixture(paritySource, async ({ home, generation, source }) => {
     source.catalog.projects[0].roots.push(path.join(home, "missing-root"));
     await writeFile(
@@ -312,9 +312,28 @@ test("doctor reports missing roots and broken links without crashing", async () 
       cwd: source.root,
     })).doctor();
     assert.equal(result.ok, false);
-    assert.ok(result.issues.some(({ code }) => code === "missing-root"));
+    assert.equal(
+      result.issues.some(({ code }) => code === "missing-root"),
+      false,
+    );
     assert.ok(result.issues.some(({ code }) => code === "broken-link"));
     assert.ok(result.issues.some(({ code }) => code === "broken-route"));
+
+    source.catalog.projects[0].roots = [
+      path.join(home, "missing-root"),
+      path.join(home, "also-missing"),
+    ];
+    await writeFile(
+      path.join(generation.root, "catalog.json"),
+      JSON.stringify(source.catalog),
+    );
+    const unreachable = await (await ContextStore.open({
+      home,
+      cwd: source.root,
+    })).doctor();
+    const issue = unreachable.issues.find(({ code }) => code === "missing-root");
+    assert.equal(issue.severity, "error");
+    assert.deepEqual(issue.roots, source.catalog.projects[0].roots);
   });
 });
 
