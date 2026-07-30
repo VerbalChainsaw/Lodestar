@@ -131,7 +131,8 @@ function promptFor(request) {
       "This is a Lodestar-enabled repository.",
       "Your first repository-context action MUST be this exact bootstrap command:",
       request.lodestar.boot.map((part) => JSON.stringify(part)).join(" "),
-      "Apply required[] and follow exact Lodestar links before repository search.",
+      "Apply required[] directly; do not fetch IDs already returned in required[].",
+      "Use exact Lodestar retrieval for a relevant available[] card before repository search.",
       "If Lodestar reports a context miss, inspect only targeted repository files.",
     ].join("\n")
     : [

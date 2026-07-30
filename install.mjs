@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   rmdir,
   stat,
@@ -43,6 +44,7 @@ const VALUE_OPTIONS = Object.freeze([
 ]);
 
 const BOOLEAN_OPTIONS = new Set([
+  "--allow-downgrade",
   "--dry-run",
   "--skip-codex",
 ]);
@@ -68,7 +70,8 @@ export function installerHelpText() {
     "  --legacy-home <path>  Legacy flat store to migrate",
     "  --codex-home <path>   Codex home; repeat for multiple homes",
     "  --skip-codex          Do not install the managed Codex block",
-    "  --dry-run             Validate inputs and print the install plan",
+    "  --allow-downgrade     Permit an older or unrecognized version replacement",
+    "  --dry-run             Inspect current state and print the install plan",
     "  -h, --help            Show this help",
     "  -v, --version         Show the installer version",
   ].join("\n");
@@ -336,6 +339,137 @@ function validatedPackageMetadata(value, packageSource) {
     throw new Error(`expected package ${PACKAGE_NAME} with a version`);
   }
   return { name: value.name, version: value.version };
+}
+
+function parsedVersion(version) {
+  const match = String(version).match(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/,
+  );
+  if (!match) return null;
+  const prerelease = match[4] ?? null;
+  if (prerelease?.split(".").some((part) =>
+    part.length === 0 || (/^\d+$/.test(part) && part.length > 1 && part[0] === "0"))) {
+    return null;
+  }
+  return {
+    core: match.slice(1, 4).map(Number),
+    prerelease: prerelease?.split(".") ?? null,
+  };
+}
+
+function comparePrerelease(left, right) {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = left[index];
+    const rightPart = right[index];
+    if (leftPart === undefined) return -1;
+    if (rightPart === undefined) return 1;
+    if (leftPart === rightPart) continue;
+    const leftNumeric = /^\d+$/.test(leftPart);
+    const rightNumeric = /^\d+$/.test(rightPart);
+    if (leftNumeric && rightNumeric) {
+      return Number(leftPart) > Number(rightPart) ? 1 : -1;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart > rightPart ? 1 : -1;
+  }
+  return 0;
+}
+
+export function packageTransition(installedVersion, targetVersion) {
+  if (installedVersion === null) return "install";
+  const installed = parsedVersion(installedVersion);
+  const target = parsedVersion(targetVersion);
+  if (!installed || !target) return "replace-unknown";
+  for (let index = 0; index < installed.core.length; index += 1) {
+    if (target.core[index] > installed.core[index]) return "upgrade";
+    if (target.core[index] < installed.core[index]) return "downgrade";
+  }
+  const prereleaseOrder = comparePrerelease(target.prerelease, installed.prerelease);
+  if (prereleaseOrder > 0) return "upgrade";
+  if (prereleaseOrder < 0) return "downgrade";
+  return "reinstall";
+}
+
+async function installedPackageMetadata(npmRoot, pathApi) {
+  const packageFile = pathApi.join(npmRoot, PACKAGE_NAME, "package.json");
+  let text;
+  try {
+    text = await readFileLimited(packageFile, {
+      maximum: 1024 * 1024,
+      encoding: "utf8",
+      resource: "installed-package-metadata-bytes",
+    });
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw wrapError(
+      error,
+      "installer-existing-package-unreadable",
+      "Unable to inspect the existing Lodestar installation",
+      { package: packageFile },
+    );
+  }
+  try {
+    return validatedPackageMetadata(JSON.parse(text), packageFile);
+  } catch (error) {
+    throw wrapError(
+      error,
+      "installer-existing-package-invalid",
+      "The existing Lodestar installation has invalid package metadata",
+      { package: packageFile },
+    );
+  }
+}
+
+async function activeAgentctxCommand({ env, platform, pathApi }) {
+  const names = platform === "win32"
+    ? ["agentctx.exe", "agentctx.cmd", "agentctx.ps1", "agentctx"]
+    : ["agentctx"];
+  for (const directory of String(env.PATH ?? "")
+    .split(pathApi.delimiter).filter(Boolean)) {
+    for (const name of names) {
+      const command = pathApi.join(directory, name);
+      try {
+        const info = await lstat(command);
+        if (!info.isFile() && !info.isSymbolicLink()) continue;
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw wrapError(
+          error,
+          "installer-active-command-unreadable",
+          "Unable to inspect the active agentctx command",
+          { command },
+        );
+      }
+      let resolved = command;
+      try {
+        resolved = await realpath(command);
+      } catch {
+        // Windows command shims are ordinary files and need no resolution.
+      }
+      let version = null;
+      if (pathApi.basename(resolved).toLowerCase() === "agentctx.mjs") {
+        try {
+          version = (await packageMetadata(pathApi.dirname(resolved))).version;
+        } catch {
+          // A nonstandard launcher remains useful as path-drift evidence.
+        }
+      }
+      return { command, resolved, version };
+    }
+  }
+  return null;
+}
+
+function sameDirectory(left, right, { platform, pathApi }) {
+  const normalize = (value) => {
+    const resolved = pathApi.resolve(value);
+    return platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  return normalize(left) === normalize(right);
 }
 
 async function tarballPackageJson(packageSource) {
@@ -653,11 +787,78 @@ export async function installLodestar(
     ...(prefix ? ["--prefix", prefix] : []),
     packageSource,
   ];
+  const npmRoot = runProcess(npm.command, [
+    ...npm.argsPrefix,
+    "root",
+    "--global",
+    ...(prefix ? ["--prefix", prefix] : []),
+  ], {
+    cwd: packageRoot,
+    spawn,
+    env,
+    displayCommand: npm.displayCommand,
+  });
+  const installedMetadata = await installedPackageMetadata(npmRoot, pathApi);
+  const transition = packageTransition(
+    installedMetadata?.version ?? null,
+    metadata.version,
+  );
+  if (
+    (transition === "downgrade" || transition === "replace-unknown")
+    && !args.includes("--allow-downgrade")
+  ) {
+    const unknown = transition === "replace-unknown";
+    throw new LodestarError(
+      unknown
+        ? "installer-version-replacement-refused"
+        : "installer-downgrade-refused",
+      unknown
+        ? `Refusing to replace unrecognized Lodestar version ${installedMetadata.version} with ${metadata.version}`
+        : `Refusing to replace Lodestar ${installedMetadata.version} with older version ${metadata.version}`,
+      {
+        detail: {
+          installed_version: installedMetadata.version,
+          target_version: metadata.version,
+          repair:
+            "Use --allow-downgrade only after confirming the replacement is required.",
+        },
+      },
+    );
+  }
+  const npmPrefix = prefix ?? runProcess(npm.command, [
+    ...npm.argsPrefix,
+    "prefix",
+    "--global",
+  ], {
+    cwd: packageRoot,
+    spawn,
+    env,
+    displayCommand: npm.displayCommand,
+  });
+  const standardBin = platform === "win32"
+    ? npmPrefix
+    : pathApi.join(npmPrefix, "bin");
+  const activeCommand = await activeAgentctxCommand({
+    env,
+    platform,
+    pathApi,
+  });
+  const activeCommandMatchesTarget = activeCommand === null
+    ? null
+    : sameDirectory(pathApi.dirname(activeCommand.command), standardBin, {
+      platform,
+      pathApi,
+    });
   const plan = {
     v: 1,
     package: packageSource,
     package_name: metadata.name,
     package_version: metadata.version,
+    installed_version: installedMetadata?.version ?? null,
+    transition,
+    target_bin: standardBin,
+    active_command: activeCommand,
+    active_command_matches_target: activeCommandMatchesTarget,
     prefix: prefix ?? null,
     state_home: stateHome ?? null,
     legacy_home: legacyHome ?? null,
@@ -674,27 +875,6 @@ export async function installLodestar(
     return result;
   }
 
-  const npmRoot = runProcess(npm.command, [
-    ...npm.argsPrefix,
-    "root",
-    "--global",
-    ...(prefix ? ["--prefix", prefix] : []),
-  ], {
-    cwd: packageRoot,
-    spawn,
-    env,
-    displayCommand: npm.displayCommand,
-  });
-  const npmPrefix = prefix ?? runProcess(npm.command, [
-    ...npm.argsPrefix,
-    "prefix",
-    "--global",
-  ], {
-    cwd: packageRoot,
-    spawn,
-    env,
-    displayCommand: npm.displayCommand,
-  });
   const backup = await snapshotInstalledPackage({
     npm,
     npmRoot,
@@ -806,9 +986,6 @@ export async function installLodestar(
       }), "Codex adapter installation");
     }
 
-    const standardBin = platform === "win32"
-      ? npmPrefix
-      : pathApi.join(npmPrefix, "bin");
     const standardConfigured = pathConfigured(standardBin, {
       env,
       platform,
@@ -824,6 +1001,18 @@ export async function installLodestar(
     const binDirectory = standardConfigured || !compatibilityConfigured
       ? standardBin
       : compatibility.bin;
+    const postInstallActiveCommand = await activeAgentctxCommand({
+      env,
+      platform,
+      pathApi,
+    });
+    const commandMatchesInstall = postInstallActiveCommand === null
+      ? null
+      : sameDirectory(
+        pathApi.dirname(postInstallActiveCommand.command),
+        binDirectory,
+        { platform, pathApi },
+      );
     const result = {
       ok: true,
       package: {
@@ -831,6 +1020,10 @@ export async function installLodestar(
         version: metadata.version,
         source: packageSource,
       },
+      previous_package: installedMetadata,
+      transition,
+      active_command: postInstallActiveCommand,
+      command_matches_install: commandMatchesInstall,
       prefix: npmPrefix,
       bin: binDirectory,
       compatibility_bin: compatibility?.bin ?? null,
