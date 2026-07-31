@@ -164,6 +164,70 @@ test("doctor detects invalid knowledge and source states inserted around checks"
   );
 });
 
+test("doctor applies the complete stored semantic contract", async (t) => {
+  const file = await fixture(t);
+  let nested = true;
+  for (let index = 0; index < 130; index += 1) nested = { nested };
+  const raw = new DatabaseSync(file);
+  const insertRecord = raw.prepare(
+    "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  insertRecord.run(
+    "record:invalid-semantics",
+    "note",
+    "e\u0301",
+    "global",
+    JSON.stringify({ state: "known", value: nested }),
+    "2026-07-30T10:00:00.000Z",
+    "2026-07-30T10:00:00.000Z",
+  );
+  insertRecord.run(
+    "record:peer",
+    "note",
+    "Peer",
+    "global",
+    '{"state":"known"}',
+    "2026-07-30T10:00:00.000Z",
+    "2026-07-30T10:00:00.000Z",
+  );
+  raw.prepare(
+    "INSERT INTO aliases(alias, record_id) VALUES (?, ?)",
+  ).run("alias:e\u0301", "record:invalid-semantics");
+  raw.prepare(
+    "INSERT INTO links(from_id, relationship, to_id, created_at) "
+      + "VALUES (?, ?, ?, ?)",
+  ).run(
+    "record:invalid-semantics",
+    "bad\nrelationship",
+    "record:peer",
+    "2026-07-30T10:00:00.000Z",
+  );
+  raw.prepare(
+    "INSERT INTO sources(record_id, origin, freshness, metadata_json) "
+      + "VALUES (?, ?, ?, ?)",
+  ).run(
+    "record:invalid-semantics",
+    "origin:e\u0301",
+    "current",
+    JSON.stringify({ inspection: "inspected", value: nested }),
+  );
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, false);
+  for (const code of [
+    "record_fields_invalid",
+    "record_content_invalid",
+    "alias_invalid",
+    "link_invalid",
+    "source_metadata_invalid",
+  ]) {
+    assert.ok(report.issues.some((issue) => issue.code === code), code);
+  }
+});
+
 test("doctor reports incompatible columns without querying through them", async (t) => {
   const file = await fixture(t);
   const raw = new DatabaseSync(file);
