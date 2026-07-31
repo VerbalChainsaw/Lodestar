@@ -142,6 +142,7 @@ src/
   legacy-v070/
     convert.mjs
     integrity.mjs
+    locator-health.mjs
     mapping.mjs
     parse.mjs
     read.mjs
@@ -149,14 +150,17 @@ src/
   queries.mjs
   records.mjs
   schema.mjs
+  stored-semantics.mjs
   validate.mjs
 
 test/
   cli.test.mjs
+  concurrency.test.mjs
   database.test.mjs
   doctor.test.mjs
   import-v070.test.mjs
   json.test.mjs
+  legacy-v070.test.mjs
   package.test.mjs
   queries.test.mjs
   records.test.mjs
@@ -183,7 +187,9 @@ Responsibilities are direct:
   migration framework.
 - `records.mjs` implements put, get, alias resolution, and delete.
 - `queries.mjs` implements bounded find, one-hop links, and export.
-- `doctor.mjs` implements read-only database checks.
+- `doctor.mjs` implements read-only database checks, while
+  `stored-semantics.mjs` applies the public value contract to stored rows with
+  bounded queries and diagnostics.
 - `validate.mjs` owns the current input and knowledge-state contract.
 - `json.mjs` owns canonical JSON and size measurement.
 - `paths.mjs` resolves the database path and confines the legacy source.
@@ -192,6 +198,8 @@ Responsibilities are direct:
   generation without writing to it.
 - `legacy-v070/integrity.mjs` verifies a present v0.7 integrity manifest and
   its bounded file set.
+- `legacy-v070/locator-health.mjs` assigns each legacy path observation to one
+  accepted source or one bounded migration-report disposition.
 - `legacy-v070/mapping.mjs` maps legacy field, knowledge, scope, and source
   semantics while reporting lossy conversions.
 - `legacy-v070/parse.mjs` performs strict UTF-8 JSON and bounded JSONL parsing.
@@ -380,6 +388,9 @@ silently interpreted as `not_inspected`.
   query storage remains in memory.
 - A new database target is reserved with no-replace creation before SQLite
   initialization, so concurrent creators do not overwrite one another.
+- Once a reservation is visible, Lodestar never deletes it as failure cleanup.
+  A zero-byte reservation is resumable, and a losing initializer recognizes a
+  valid database completed concurrently instead of removing the winner.
 - Help and version handling complete before database-path resolution.
 
 Node 24 exposes read-only connections, busy timeouts, foreign-key enforcement,
@@ -674,7 +685,7 @@ conversion.
 | Old untyped `links` | Directed `related` links. |
 | Old `routes` entries | Directed links named `route:<route-name>`. |
 | Old `locators` | Source rows keyed by locator path, up to the source limit. |
-| Locator-health index | Preserve exact path-probe observations without claiming that file content was inspected. |
+| Locator-health index | Preserve an observation only when it is uniquely attributable and retained on an accepted source; report ambiguous, orphaned, or unretained evidence exactly once without claiming that file content was inspected. |
 | `ownership`, `generated_by`, `source_key`, and `verified` | Source metadata, together with generation and source-file location. |
 | `verified` evidence | `inspection: "inspected"` or `inspected_no_value`; freshness remains `unknown` unless the old payload contains an explicit freshness assertion. |
 | No inspection evidence | `inspection: "unknown"`, never `not_inspected`. |
@@ -692,6 +703,9 @@ and represented by bounded report entries and exact omission counts.
   conversion, runs doctor checks, and emits the report.
 - A real import reserves a missing destination without replacement or accepts
   an existing empty, singly linked version-1 destination.
+- A published zero-byte reservation is preserved after a definite failure so a
+  later invocation can resume it; failure cleanup never unlinks a destination
+  another process may have completed.
 - A destination containing any records is rejected. There is no merge,
   overwrite, dual write, or resume state machine.
 - Schema creation and all imported rows are committed in one transaction.
@@ -702,8 +716,10 @@ and represented by bounded report entries and exact omission counts.
 - If that post-commit reopen detects a new failure, the error explicitly
   reports `committed: true`; the importer never pretends it can roll back an
   already committed SQLite transaction.
-- If SQLite does not confirm the commit outcome, the importer preserves the
-  destination and reports `committed: "unknown"` for read-only diagnosis.
+- If `COMMIT` raises while SQLite still reports an active transaction, the
+  importer rolls back and reports a definite database error. If SQLite has
+  ended the transaction without confirming the call, the importer preserves
+  the destination and reports `committed: "unknown"` for read-only diagnosis.
 
 ### Migration report
 
@@ -818,8 +834,9 @@ LodestarLite will guarantee:
     directories, journals, or metadata.
 11. `--help` and `--version` do not resolve, open, initialize, or mutate a
     database.
-12. Doctor can detect unsupported schemas, SQLite integrity errors, foreign-key
-    violations, malformed knowledge envelopes, and alias ambiguity.
+12. Doctor can detect unsupported or unexpected schema objects, SQLite
+    integrity errors, foreign-key violations, alias ambiguity, and every
+    stored-value semantic violation rejected by public reads.
 13. The legacy importer never writes within its source and reports imported
     counts, bounded skipped/unsupported/remapped details, and exact omitted
     report-entry counts.
@@ -876,26 +893,28 @@ Measured after phases 1 through 5:
 
 | Area | Actual lines |
 | --- | ---: |
-| Core `src/` modules excluding the legacy importer | 3,545 |
+| Core `src/` modules excluding the legacy importer | 3,919 |
 | `lodestar.mjs` executable | 5 |
-| Import coordinator and isolated `legacy-v070/` modules | 2,031 |
-| **Total shipped JavaScript** | **5,581** |
+| Import coordinator and isolated `legacy-v070/` modules | 2,164 |
+| **Total shipped JavaScript** | **6,088** |
 
-The core is 3,550 lines including the executable, below the
+The core is 3,924 lines including the executable, below the
 4,000-line design pressure. No runtime file exceeds 500 lines.
 
-Relative to the 14,969-line v0.7 shipped-JavaScript baseline, 9,388 lines were
-removed, a 62.7% reduction. The total is above the original estimate because
+Relative to the 14,969-line v0.7 shipped-JavaScript baseline, 8,881 lines were
+removed, a 59.3% reduction. The total is above the original estimate because
 the adversarial pass retained explicit sealed-store verification, physical
 path confinement, hard read/report bounds, source-change detection, exact
-v0.7 shard compatibility, locator-source mapping, and deterministic loss
-reporting. That complexity is isolated from all operational commands and has
-one current consumer.
+v0.7 shard compatibility, exact locator-evidence accounting, deterministic
+loss reporting, race-safe destination reservation, byte-exact streaming
+interfaces, total diagnostic normalization for in-process callers, and
+doctor/read semantic agreement. Import complexity remains isolated from all
+operational commands and has one current consumer.
 
-The packed artifact fell from 74 to 28 entries and from 574,793 to 177,980
-unpacked bytes, a 69.0% byte reduction. The final tarball is 43,066 bytes.
+The packed artifact fell from 74 to 30 entries and from 574,793 to 193,038
+unpacked bytes, a 66.4% byte reduction. The final tarball is 46,725 bytes.
 
-The adversarially expanded suite passes 51 tests on exact Node.js 24.15.0.
+The adversarially expanded suite passes 79 tests on exact Node.js 24.15.0.
 The installed final tarball exercised all nine commands and ten help contracts;
 hashing proved its read-only commands did not change the database. A sealed
 store produced by the actual v0.7.0 checkout passed dry-run, committed import,

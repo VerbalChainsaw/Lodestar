@@ -16,8 +16,18 @@
   incremental export limits, bounded migration reporting, concurrent imports,
   explicit unknown-commit handling with exact database identifiers, and exact
   v0.7 Unicode shard compatibility.
+- Reject forged SQLite reserved-schema objects, enforce byte-exact streaming
+  through typed-array intrinsic checks, make error normalization total for
+  hostile in-process values, and keep JSON error codes aligned with exit
+  status.
+- Preserve published database reservations across definite failures, separate
+  rollback-confirmed import failures from ambiguous commits, and make doctor
+  apply the complete stored-value contract used by public reads.
 - Preserve legacy locator paths and available locator-health observations as
-  explicit source rows without converting path probes into content claims.
+  explicit source rows without converting path probes into content claims;
+  report every ambiguous, orphaned, or unretained observation exactly once.
+- Validate packaged documentation links and every public help path without
+  touching database state.
 - Remove generations, commit pointers, writer heartbeats, snapshots,
   quarantine, readiness scoring, project discovery, provider experiments,
   installer logic, benchmark commands, and every executable except `lodestar`.
