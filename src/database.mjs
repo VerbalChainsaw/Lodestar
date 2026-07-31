@@ -1,6 +1,7 @@
 import { lstat, mkdir, open as openFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { lodestarError, wrapError } from "./errors.mjs";
 import { createSchema, inspectSchemaDefinitions, SCHEMA_VERSION } from "./schema.mjs";
@@ -225,7 +226,8 @@ export function readMetadata(db, file = null) {
       "The file does not contain Lodestar metadata.",
       {
         identifiers: { database: file },
-        action: "Choose a Lodestar database or run lodestar init on a new path.",
+        action:
+          "Choose a Lodestar database or write the first record to a new path.",
         cause: error,
       },
     );
@@ -290,7 +292,8 @@ export async function openReadDatabase(file) {
       "The Lodestar database does not exist.",
       {
         identifiers: { database: file },
-        action: "Run lodestar init before reading records.",
+        action:
+          "Write the first record with lodestar put or import a legacy store.",
       },
     );
   }
@@ -313,7 +316,8 @@ export async function openDiagnosticDatabase(file) {
       "The Lodestar database does not exist.",
       {
         identifiers: { database: file },
-        action: "Run lodestar init before running diagnostics.",
+        action:
+          "Write the first record with lodestar put before running diagnostics.",
       },
     );
   }
@@ -334,7 +338,8 @@ export async function openWriteDatabase(file) {
       "The Lodestar database does not exist.",
       {
         identifiers: { database: file },
-        action: "Run lodestar init before writing records.",
+        action:
+          "Write the first record with lodestar put or import a legacy store.",
       },
     );
   }
@@ -348,6 +353,19 @@ export async function openWriteDatabase(file) {
     throw error?.name === "LodestarError"
       ? error
       : sqliteError(error, file);
+  }
+}
+
+async function waitForInitializedWriteDatabase(file) {
+  const deadline = Date.now() + DATABASE_BUSY_TIMEOUT_MS;
+  while (true) {
+    try {
+      return await openWriteDatabase(file);
+    } catch (error) {
+      if (!["database_busy", "invalid_database"].includes(error?.code)
+        || Date.now() >= deadline) throw error;
+    }
+    await delay(10);
   }
 }
 
@@ -464,4 +482,16 @@ export async function initializeDatabase(
         },
       );
   }
+}
+
+export async function openOrInitializeWriteDatabase(file) {
+  if (!await existingFile(file) || await databaseFileIsEmpty(file)) {
+    try {
+      await initializeDatabase(file);
+    } catch (error) {
+      if (!["database_busy", "database_conflict", "invalid_database"]
+        .includes(error?.code)) throw error;
+    }
+  }
+  return await waitForInitializedWriteDatabase(file);
 }

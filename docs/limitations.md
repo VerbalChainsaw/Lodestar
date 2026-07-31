@@ -51,16 +51,18 @@ understanding platform.
 - There is one public executable and no plugin or provider framework.
 - Lodestar does not install, configure, or orchestrate agents.
 - There is no background indexing or maintenance process.
-- Writers wait for SQLite's bounded busy timeout and then report contention;
-  Lodestar does not identify or reclaim another process's lock.
+- Writers and overlapping first-use validation wait for the same bounded busy
+  timeout and then report contention; Lodestar does not identify or reclaim
+  another process's lock.
 - Rollback-journal mode favors a simple write-light CLI. It is not tuned as a
   high-throughput database service.
-- Read-only commands never initialize a missing database. Run `lodestar init`
-  explicitly.
+- Read-only commands never initialize a missing database. The first
+  structurally valid `lodestar put` initializes it automatically; `init`
+  remains optional.
 - A definite failure while creating a new database can leave its published
-  zero-byte reservation in place. A later `init` or import can resume that
-  reservation; Lodestar does not unlink it because another process may have
-  completed the same visible path.
+  zero-byte reservation in place. A later `put`, `init`, or import can resume
+  that reservation; Lodestar does not unlink it because another process may
+  have completed the same visible path.
 
 ## Compatibility boundary
 
