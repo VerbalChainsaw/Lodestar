@@ -213,7 +213,7 @@ These are explicit product boundaries, not hidden completeness claims:
 
 Final local gates:
 
-- exact Node.js `v24.15.0`: 79 tests passed, 0 failed;
+- exact Node.js `v24.15.0`: 80 tests passed, 0 failed;
 - built-in coverage: 78.83% lines, 79.08% branches, and 96.06%
   functions;
 - every runtime and test module passed `node --check`;
@@ -222,9 +222,9 @@ Final local gates:
 - dependency tree is empty;
 - runtime has no network, background-worker, provider, installer, benchmark, or
   orchestration imports;
-- final package: 30 entries, 46,725 packed bytes, 193,038 unpacked bytes;
+- final package: 30 entries, 46,785 packed bytes, 193,175 unpacked bytes;
 - two independent final packs were byte-identical at SHA-256
-  `2a8dc3963051150fb4650e1e40bf3d8c939bd69164ee3587bd1b60624299a5f6`;
+  `ca209dd8a4a9ebddc04f46140a9dd65c4ee12d980aacd649c876930609dc5103`;
 - final package declares exactly one executable, `lodestar`;
 - an installed tarball exercised all nine public commands;
 - all nine command help contracts plus top-level help returned JSON without
