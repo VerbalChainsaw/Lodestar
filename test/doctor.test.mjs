@@ -74,6 +74,29 @@ test("doctor detects altered DDL even when object names still match", async (t) 
   );
 });
 
+test("doctor reports objects whose names only resemble SQLite internals", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.exec(
+    "CREATE TRIGGER sqlitehidden AFTER UPDATE ON records "
+      + "BEGIN SELECT 1; END",
+  );
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, false);
+  assert.equal(report.checks.expected_definitions, false);
+  assert.ok(
+    report.issues.some(
+      ({ code, identifiers }) =>
+        code === "schema_definitions_invalid"
+        && identifiers.unexpected.includes("sqlitehidden"),
+    ),
+  );
+});
+
 test("doctor detects invalid knowledge and source states inserted around checks", async (t) => {
   const file = await fixture(t);
   const raw = new DatabaseSync(file);
