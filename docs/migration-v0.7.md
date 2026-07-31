@@ -32,8 +32,11 @@ generations/<active-generation>/records/projects/<project>.jsonl
 ```
 
 `indexes/locator-health.json` is optional. When present and valid, its direct
-path-probe observations are retained with mapped locator sources. Lodestar does
-not reinterpret an existence probe as proof that file contents were inspected.
+path-probe observations are retained only when uniquely attributable to a
+source that survives conversion. Ambiguous, orphaned, or otherwise unretained
+observations are reported exactly once as unsupported migration evidence.
+Lodestar does not reinterpret an existence probe as proof that file contents
+were inspected.
 
 If `integrity.json` exists, its complete file set and SHA-256 digests must
 verify. A missing manifest is reported as `unsealed`; a present invalid
@@ -97,14 +100,17 @@ lodestar import /path/to/v0.7-home --db /path/to/new/lodestar.db
 
 The destination may be absent or an initialized, empty schema-version-1
 database. A missing destination is reserved without replacement; a concurrent
-creator is never overwritten. An existing destination with more than one hard
-link is rejected because it could alias a file in the source tree. A populated
-destination is rejected. Schema creation and imported rows commit in one
-transaction. The importer fingerprints accepted source files before and
-immediately before commit, then reopens and diagnoses the destination
-read-only.
+creator is never overwritten or deleted by losing-process cleanup. A visible
+zero-byte reservation is safe to resume and remains after a definite creation
+failure. An existing destination with more than one hard link is rejected
+because it could alias a file in the source tree. A populated destination is
+rejected. Schema creation and imported rows commit in one transaction. The
+importer fingerprints accepted source files before and immediately before
+commit, then reopens and diagnoses the destination read-only.
 
-If SQLite does not confirm the commit outcome, Lodestar reports
+If `COMMIT` raises while SQLite still reports an active transaction, Lodestar
+rolls it back and reports a definite database error. If SQLite has ended the
+transaction without confirming the call, Lodestar reports
 `import_commit_outcome_unknown` and preserves the destination. Keep both stores
 and run `lodestar doctor`; deleting a possibly committed database would destroy
 evidence.

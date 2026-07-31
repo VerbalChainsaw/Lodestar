@@ -101,7 +101,7 @@ select a database explicitly.
 | `lodestar find <query>` | Return bounded, deterministically ordered summaries. |
 | `lodestar links <id-or-alias>` | Return one hop of incoming and outgoing links. |
 | `lodestar delete <id-or-alias>` | Delete a record and its dependent rows transactionally. |
-| `lodestar doctor` | Check schema, SQLite integrity, foreign keys, and stored envelopes. |
+| `lodestar doctor` | Check schema, SQLite integrity, foreign keys, and complete stored-value semantics. |
 | `lodestar import <path>` | Import one v0.7-compatible store into an empty database. |
 | `lodestar export` | Emit a deterministic JSON representation of the registry. |
 
@@ -147,9 +147,11 @@ The default database is:
 Writes use `BEGIN IMMEDIATE`, foreign keys, a bounded busy timeout, SQLite's
 rollback journal, and `synchronous=FULL`. Read commands use read-only,
 query-only connections with in-memory temporary storage. New database files
-are reserved without replacement before SQLite initializes them. Lodestar does
-not add generations, lock heartbeats,
-snapshots, quarantine, or a second persistence format around SQLite.
+are reserved without replacement before SQLite initializes them. A published
+reservation is never removed as failure cleanup and a zero-byte reservation is
+resumable, so one creator cannot delete another creator's completed database.
+Lodestar does not add generations, lock heartbeats, snapshots, quarantine, or
+a second persistence format around SQLite.
 
 ## Agent use
 
