@@ -13,6 +13,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { runCli } from "../src/cli.mjs";
+import { lodestarError } from "../src/errors.mjs";
 
 function capture(input = "") {
   let stdout = "";
@@ -219,6 +220,27 @@ test("put rejects malformed UTF-8 instead of replacing bytes", async (t) => {
   assert.equal(JSON.parse(result.output().stderr).error.code, "invalid_utf8");
 });
 
+test("put rejects non-byte stream chunks instead of coercing them", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  await invoke(["init", "--db", file]);
+  const input = JSON.stringify({
+    ...inputRecord(),
+    id: "record:coerced",
+    aliases: [],
+  });
+  const result = capture();
+  result.io.stdin = Readable.from([
+    Array.from(Buffer.from(input), (byte) => byte + 256),
+  ]);
+
+  const exitCode = await runCli(["put", "--db", file], result.io);
+  assert.equal(exitCode, 2);
+  assert.equal(JSON.parse(result.output().stderr).error.code, "invalid_input");
+  const missing = await invoke(["get", "record:coerced", "--db", file]);
+  assert.equal(missing.exitCode, 3);
+});
+
 test("CLI argument and error output remain bounded under hostile input", async () => {
   const result = await invoke(["x".repeat(2 * 1024 * 1024)]);
   assert.equal(result.exitCode, 2);
@@ -255,4 +277,29 @@ test("the CLI does not trust or amplify forged Lodestar errors", async () => {
     },
     ok: false,
   });
+});
+
+test("the CLI derives its envelope and exit from one error snapshot", async () => {
+  const changing = lodestarError(
+    "invalid_input",
+    "The injected input is invalid.",
+  );
+  let reads = 0;
+  Object.defineProperty(changing, "code", {
+    get() {
+      reads += 1;
+      return reads === 1 ? "invalid_input" : "database_write_failed";
+    },
+  });
+  const result = capture();
+  result.io.stdin = {
+    async *[Symbol.asyncIterator]() {
+      throw changing;
+    },
+  };
+
+  const exitCode = await runCli(["put"], result.io);
+  assert.equal(exitCode, 2);
+  assert.equal(JSON.parse(result.output().stderr).error.code, "invalid_input");
+  assert.equal(reads, 1);
 });

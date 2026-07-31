@@ -46,9 +46,20 @@ function validStringChunk(value, pendingHigh, resource) {
     }
   }
   return {
-    buffer: Buffer.from(combined.slice(0, end)),
+    text: combined.slice(0, end),
     pendingHigh: nextPending,
   };
+}
+
+function streamByteLimit(resource, bytes, maximum) {
+  return lodestarError(
+    "resource_limit",
+    `${resource} exceeds its byte limit.`,
+    {
+      identifiers: { resource, bytes, maximum },
+      action: "Send a smaller JSON document.",
+    },
+  );
 }
 
 function normalizedJson(value, stack, state, depth) {
@@ -339,16 +350,6 @@ export async function readStreamBounded(
   let chunkCount = 0;
   let pendingHigh = "";
   for await (const chunk of stream) {
-    let buffer;
-    if (typeof chunk === "string") {
-      const validated = validStringChunk(chunk, pendingHigh, resource);
-      buffer = validated.buffer;
-      pendingHigh = validated.pendingHigh;
-    } else {
-      if (pendingHigh) throw invalidUtf8(resource);
-      buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    }
-    if (buffer.length === 0) continue;
     chunkCount += 1;
     if (chunkCount > JSON_LIMITS.streamChunks) {
       throw lodestarError(
@@ -364,16 +365,49 @@ export async function readStreamBounded(
         },
       );
     }
-    bytes += buffer.length;
-    if (bytes > maximum) {
+    let buffer;
+    if (typeof chunk === "string") {
+      const prospectiveBytes = Buffer.byteLength(chunk);
+      if (prospectiveBytes > maximum - bytes) {
+        throw streamByteLimit(
+          resource,
+          bytes + prospectiveBytes,
+          maximum,
+        );
+      }
+      const validated = validStringChunk(chunk, pendingHigh, resource);
+      pendingHigh = validated.pendingHigh;
+      const encodedBytes = Buffer.byteLength(validated.text);
+      if (encodedBytes > maximum - bytes) {
+        throw streamByteLimit(resource, bytes + encodedBytes, maximum);
+      }
+      buffer = Buffer.from(validated.text);
+    } else if (Buffer.isBuffer(chunk)) {
+      if (chunk.length > maximum - bytes) {
+        throw streamByteLimit(resource, bytes + chunk.length, maximum);
+      }
+      if (pendingHigh) throw invalidUtf8(resource);
+      buffer = chunk;
+    } else if (chunk instanceof Uint8Array) {
+      if (chunk.byteLength > maximum - bytes) {
+        throw streamByteLimit(resource, bytes + chunk.byteLength, maximum);
+      }
+      if (pendingHigh) throw invalidUtf8(resource);
+      buffer = Buffer.from(chunk);
+    } else {
       throw lodestarError(
-        "resource_limit",
-        `${resource} exceeds its byte limit.`,
+        "invalid_input",
+        `${resource} yielded a chunk that is not text or bytes.`,
         {
-          identifiers: { resource, bytes, maximum },
-          action: "Send a smaller JSON document.",
+          identifiers: { resource, received_type: typeof chunk },
+          action: "Send JSON through string, Buffer, or Uint8Array chunks.",
         },
       );
+    }
+    if (buffer.length === 0) continue;
+    bytes += buffer.length;
+    if (bytes > maximum) {
+      throw streamByteLimit(resource, bytes, maximum);
     }
     chunks.push(buffer);
   }
