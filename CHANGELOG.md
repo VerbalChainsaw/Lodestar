@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 - Unreleased
+## 1.0.0 - 2026-07-31
 
 - Replace the v0.7 generation platform with one local SQLite database.
 - Publish one JSON-first executable, `lodestar`, with nine commands.

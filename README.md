@@ -16,6 +16,13 @@ project. A missing record means only that Lodestar lacks that knowledge.
 
 The package publishes one executable: `lodestar`.
 
+## Install
+
+```text
+npm install --global lodestar-agent-context
+lodestar --version
+```
+
 ## Quick start
 
 Initialize the default database:

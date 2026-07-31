@@ -30,7 +30,7 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
-      - run: npm install --ignore-scripts --prefix .package-smoke "./${{ env.PACKAGE }}"
+      - run: npm install --ignore-scripts --no-audit --no-fund --prefix .package-smoke "./${{ env.PACKAGE }}"
       - name: Exercise the packed executable
         shell: pwsh
         run: |

@@ -911,10 +911,10 @@ interfaces, total diagnostic normalization for in-process callers, and
 doctor/read semantic agreement. Import complexity remains isolated from all
 operational commands and has one current consumer.
 
-The packed artifact fell from 74 to 30 entries and from 574,793 to 193,038
-unpacked bytes, a 66.4% byte reduction. The final tarball is 46,725 bytes.
+The packed artifact fell from 74 to 30 entries and from 574,793 to 193,175
+unpacked bytes, a 66.4% byte reduction. The final tarball is 46,785 bytes.
 
-The adversarially expanded suite passes 79 tests on exact Node.js 24.15.0.
+The adversarially expanded suite passes 80 tests on exact Node.js 24.15.0.
 The installed final tarball exercised all nine commands and ten help contracts;
 hashing proved its read-only commands did not change the database. A sealed
 store produced by the actual v0.7.0 checkout passed dry-run, committed import,

@@ -25,6 +25,9 @@
   "engines": {
     "node": ">=24.15.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "context",
     "sqlite",
