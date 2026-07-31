@@ -2,6 +2,8 @@ import { boundedDiagnosticValue } from "./diagnostics.mjs";
 
 const DEFAULT_ACTION =
   "Review the identifiers and retry with valid Lodestar input.";
+const INTERNAL_ACTION =
+  "Retry the command. If it fails again, run lodestar doctor.";
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,127}$/u;
 const LODESTAR_ERRORS = new WeakSet();
 
@@ -87,7 +89,7 @@ export function errorPayload(error) {
       ? boundedText(property(error, "action"), DEFAULT_ACTION)
       : known
         ? DEFAULT_ACTION
-        : "Retry the command. If it fails again, run lodestar doctor.",
+        : INTERNAL_ACTION,
   };
 }
 
@@ -138,10 +140,29 @@ export function exitCodeFor(error) {
   return exitCodeForCode(knownCode(error) ?? "internal_error");
 }
 
-export function errorResult(error) {
-  const envelope = errorEnvelope(error);
+export function internalErrorResult() {
   return {
-    envelope,
-    exitCode: exitCodeForCode(envelope.error.code),
+    envelope: {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message: "Lodestar could not complete the operation.",
+        identifiers: {},
+        action: INTERNAL_ACTION,
+      },
+    },
+    exitCode: 1,
   };
+}
+
+export function errorResult(error) {
+  try {
+    const envelope = errorEnvelope(error);
+    return {
+      envelope,
+      exitCode: exitCodeForCode(envelope.error.code),
+    };
+  } catch {
+    return internalErrorResult();
+  }
 }

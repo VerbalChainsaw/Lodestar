@@ -241,6 +241,37 @@ test("put rejects non-byte stream chunks instead of coercing them", async (t) =>
   assert.equal(missing.exitCode, 3);
 });
 
+test("put rejects prototype-spoofed byte chunks without persisting them", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  await invoke(["init", "--db", file]);
+  const input = Buffer.from(JSON.stringify({
+    ...inputRecord(),
+    id: "record:spoofed",
+    aliases: [],
+  }));
+  const spoofed = Object.create(Uint8Array.prototype);
+  Object.defineProperties(spoofed, {
+    byteLength: { value: input.length },
+    length: { value: input.length },
+  });
+  for (const [index, byte] of input.entries()) {
+    spoofed[index] = byte + 256;
+  }
+  const result = capture();
+  result.io.stdin = {
+    async *[Symbol.asyncIterator]() {
+      yield spoofed;
+    },
+  };
+
+  const exitCode = await runCli(["put", "--db", file], result.io);
+  assert.equal(exitCode, 2);
+  assert.equal(JSON.parse(result.output().stderr).error.code, "invalid_input");
+  const missing = await invoke(["get", "record:spoofed", "--db", file]);
+  assert.equal(missing.exitCode, 3);
+});
+
 test("CLI argument and error output remain bounded under hostile input", async () => {
   const result = await invoke(["x".repeat(2 * 1024 * 1024)]);
   assert.equal(result.exitCode, 2);
@@ -302,4 +333,33 @@ test("the CLI derives its envelope and exit from one error snapshot", async () =
   assert.equal(exitCode, 2);
   assert.equal(JSON.parse(result.output().stderr).error.code, "invalid_input");
   assert.equal(reads, 1);
+});
+
+test("the CLI always normalizes unreadable genuine error diagnostics", async () => {
+  const injected = lodestarError(
+    "invalid_input",
+    "The injected input is invalid.",
+  );
+  const revocable = Proxy.revocable({ field: "stdin" }, {});
+  injected.identifiers = revocable.proxy;
+  revocable.revoke();
+  const result = capture();
+  result.io.stdin = {
+    async *[Symbol.asyncIterator]() {
+      throw injected;
+    },
+  };
+
+  const exitCode = await runCli(["put"], result.io);
+  assert.equal(exitCode, 2);
+  assert.equal(result.output().stdout, "");
+  assert.deepEqual(JSON.parse(result.output().stderr), {
+    error: {
+      action: "Review the identifiers and retry with valid Lodestar input.",
+      code: "invalid_input",
+      identifiers: {},
+      message: "The injected input is invalid.",
+    },
+    ok: false,
+  });
 });
