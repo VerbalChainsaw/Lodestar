@@ -10,8 +10,7 @@ import {
 } from "./database.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
 import {
-  errorEnvelope,
-  exitCodeFor,
+  errorResult,
   lodestarError,
 } from "./errors.mjs";
 import {
@@ -468,9 +467,10 @@ export async function runCli(
     writeSuccess(io, data, global.human);
     return command === "doctor" && data.healthy === false ? 4 : 0;
   } catch (error) {
+    const normalized = errorResult(error);
     let text;
     try {
-      text = canonicalStringify(errorEnvelope(error));
+      text = canonicalStringify(normalized.envelope);
     } catch {
       text = JSON.stringify({
         ok: false,
@@ -483,6 +483,6 @@ export async function runCli(
       });
     }
     io.stderr.write(`${text}\n`);
-    return exitCodeFor(error);
+    return normalized.exitCode;
   }
 }

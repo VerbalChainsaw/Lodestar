@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   canonicalStringify,
+  JSON_LIMITS,
   readHandleBounded,
   readStreamBounded,
 } from "../src/json.mjs";
@@ -83,5 +84,64 @@ test("streamed string input preserves a surrogate pair split across chunks", asy
       resource: "test_stream",
     }),
     "\u{1F600}",
+  );
+});
+
+test("stream limits count empty chunks before conversion", async () => {
+  const atLimit = {
+    async *[Symbol.asyncIterator]() {
+      for (let index = 1; index < JSON_LIMITS.streamChunks; index += 1) {
+        yield "";
+      }
+      yield "{}";
+    },
+  };
+  assert.equal(
+    await readStreamBounded(atLimit, {
+      maximum: 16,
+      resource: "test_stream",
+    }),
+    "{}",
+  );
+
+  const overLimit = {
+    async *[Symbol.asyncIterator]() {
+      for (let index = 0; index < JSON_LIMITS.streamChunks; index += 1) {
+        yield Buffer.alloc(0);
+      }
+      yield "{}";
+    },
+  };
+  await assert.rejects(
+    readStreamBounded(overLimit, {
+      maximum: 16,
+      resource: "test_stream",
+    }),
+    ({ code, identifiers }) =>
+      code === "resource_limit"
+      && identifiers.chunks === JSON_LIMITS.streamChunks + 1,
+  );
+});
+
+test("stream input accepts only byte-exact chunk representations", async () => {
+  for (const chunk of [
+    [0x17B, 0x17D],
+    new Uint16Array([0x7B, 0x7D]),
+    new DataView(Uint8Array.from([0x7B, 0x7D]).buffer),
+  ]) {
+    await assert.rejects(
+      readStreamBounded([chunk], {
+        maximum: 16,
+        resource: "test_stream",
+      }),
+      ({ code }) => code === "invalid_input",
+    );
+  }
+  assert.equal(
+    await readStreamBounded([Uint8Array.from([0x7B, 0x7D])], {
+      maximum: 16,
+      resource: "test_stream",
+    }),
+    "{}",
   );
 });
