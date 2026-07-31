@@ -106,6 +106,7 @@ test("package metadata and bootstrap have one source of truth", async () => {
     await readFile(path.join(ROOT, "package.json"), "utf8"),
   );
   assert.deepEqual(packageJson.bin, { lodestar: "lodestar.mjs" });
+  assert.deepEqual(packageJson.publishConfig, { access: "public" });
   assert.equal(packageJson.version, LODESTAR_VERSION);
   for (const field of [
     "dependencies",
