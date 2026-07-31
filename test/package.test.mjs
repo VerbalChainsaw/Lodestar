@@ -41,7 +41,7 @@ const EXPECTED_PACKAGE_FILES = [
   "src/validate.mjs",
 ];
 
-test("the package publishes one executable and only the reduced runtime", () => {
+function packageArtifact() {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const packed = spawnSync(
     npm,
@@ -49,7 +49,29 @@ test("the package publishes one executable and only the reduced runtime", () => 
     { cwd: ROOT, encoding: "utf8" },
   );
   assert.equal(packed.status, 0, packed.stderr);
-  const [artifact] = JSON.parse(packed.stdout);
+  return JSON.parse(packed.stdout)[0];
+}
+
+function relativeMarkdownTargets(text) {
+  const targets = [];
+  const patterns = [
+    /!?\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+[^)]*)?\)/gu,
+    /^\s*\[[^\]]+\]:\s*(<[^>]+>|\S+)/gmu,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const raw = match[1];
+      const target = raw.startsWith("<") ? raw.slice(1, -1) : raw;
+      if (!/^(?:#|\/|[a-z][a-z0-9+.-]*:)/iu.test(target)) {
+        targets.push(target.split(/[?#]/u, 1)[0]);
+      }
+    }
+  }
+  return targets;
+}
+
+test("the package publishes one executable and only the reduced runtime", () => {
+  const artifact = packageArtifact();
   assert.deepEqual(
     artifact.files.map(({ path: file }) => file).sort(),
     [...EXPECTED_PACKAGE_FILES].sort(),
@@ -58,6 +80,23 @@ test("the package publishes one executable and only the reduced runtime", () => 
     artifact.files.find(({ path: file }) => file === "lodestar.mjs").mode,
     0o755,
   );
+});
+
+test("relative links in packaged Markdown resolve inside the artifact", async () => {
+  const artifact = packageArtifact();
+  const files = new Set(artifact.files.map(({ path: file }) => file));
+  const broken = [];
+  for (const file of files) {
+    if (!file.endsWith(".md")) continue;
+    const text = await readFile(path.join(ROOT, file), "utf8");
+    for (const target of relativeMarkdownTargets(text)) {
+      const resolved = path.posix.normalize(
+        path.posix.join(path.posix.dirname(file), target),
+      );
+      if (!files.has(resolved)) broken.push({ file, target, resolved });
+    }
+  }
+  assert.deepEqual(broken, []);
 });
 
 test("package metadata and bootstrap have one source of truth", async () => {
