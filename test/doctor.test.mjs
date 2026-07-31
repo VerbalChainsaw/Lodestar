@@ -1,154 +1,166 @@
 import assert from "node:assert/strict";
-import {
-  access,
-  mkdir,
-  readFile,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { run } from "../agentctx.mjs";
 import {
-  diagnoseStore,
-  repairCurrentGeneration,
-  repairWriterLock,
-} from "../lib/doctor.mjs";
-import { ContextStore } from "../lib/context-store.mjs";
-import { withStoreFixture } from "../test-support/store-fixture.mjs";
+  initializeDatabase,
+  openDiagnosticDatabase,
+} from "../src/database.mjs";
+import { diagnoseDatabase } from "../src/doctor.mjs";
 
-async function source(home) {
-  const projectRoot = path.join(home, "project");
-  await mkdir(projectRoot);
-  return {
-    catalog: {
-      v: 1,
-      projects: [{
-        id: "p:doctor",
-        name: "Doctor",
-        roots: [projectRoot],
-      }],
-    },
-    schema: { v: 1, record_kinds: ["command"] },
-    globalRecords: [],
-    projectRecords: {
-      "p:doctor": [{
-        v: 1,
-        id: "p:doctor:commands",
-        kind: "command",
-        priority: 900,
-        scope: ["project:p:doctor"],
-        links: [],
-        commands: { test: "node --test" },
-      }],
-    },
-    projectRoot,
-  };
+async function fixture(t) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-doctor-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "lodestar.db");
+  await initializeDatabase(file, {
+    now: () => new Date("2026-07-30T10:00:00.000Z"),
+  });
+  return file;
 }
 
-test("doctor fails closed when a required search index is missing", async () => {
-  await withStoreFixture(source, async ({ home, generation, source: value }) => {
-    await unlink(path.join(
-      generation.root,
-      "indexes",
-      "search",
-      "p-doctor.json",
-    ));
-    const report = await diagnoseStore({ home, cwd: value.projectRoot });
-    assert.equal(report.ok, false);
-    assert.ok(report.issues.some(({ code, generation: id }) =>
-      code === "generation-invalid" && id === generation.id));
-
-    const stdout = [];
-    const stderr = [];
-    const exit = await run([
-      "doctor",
-      "--home",
-      home,
-      "--cwd",
-      value.projectRoot,
-    ], {
-      stdout: (line) => stdout.push(JSON.parse(line)),
-      stderr: (line) => stderr.push(JSON.parse(line)),
-    });
-    assert.equal(exit, 1);
-    assert.equal(stdout[0].ok, false);
-    assert.equal(stdout[0].runtime.package_version, "0.7.0");
-    assert.equal(stdout[0].runtime.node_version, process.versions.node);
-    assert.deepEqual(stderr, []);
+test("doctor reports a healthy schema without writing", async (t) => {
+  const file = await fixture(t);
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, true);
+  assert.deepEqual(report.checks, {
+    integrity: "ok",
+    foreign_key_violations: 0,
+    expected_tables: true,
+    expected_indexes: true,
+    expected_definitions: true,
   });
 });
 
-test("doctor diagnoses and explicitly repairs an invalid current pointer", async () => {
-  await withStoreFixture(source, async ({ home, generation, source: value }) => {
-    await writeFile(path.join(home, "current.json"), "{not json");
-    const before = await diagnoseStore({ home, cwd: value.projectRoot });
-    assert.equal(before.ok, false);
-    assert.deepEqual(before.valid_generations, [generation.id]);
-    assert.ok(before.issues.some(({ code }) =>
-      ["invalid-json", "active-generation-invalid"].includes(code)));
-
-    const repaired = await repairCurrentGeneration({
-      home,
-      generation: generation.id,
-    });
-    assert.equal(repaired.generation, generation.id);
-    const after = await diagnoseStore({ home, cwd: value.projectRoot });
-    assert.equal(after.ok, true);
-    assert.equal(
-      (await ContextStore.open({ home, cwd: value.projectRoot })).generation.id,
-      generation.id,
-    );
+test("doctor detects foreign-key and schema-shape problems", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file, {
+    enableForeignKeyConstraints: false,
   });
+  raw.exec("CREATE TABLE unexpected(value TEXT) STRICT");
+  raw.prepare(
+    "INSERT INTO aliases(alias, record_id) VALUES (?, ?)",
+  ).run("orphan", "record:missing");
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, false);
+  assert.equal(report.checks.expected_tables, false);
+  assert.equal(report.checks.foreign_key_violations, 1);
+  assert.ok(report.issues.some(({ code }) => code === "schema_tables_invalid"));
+  assert.ok(report.issues.some(({ code }) => code === "foreign_key_violation"));
 });
 
-test("doctor treats blocker-level root failures as unhealthy", async () => {
-  await withStoreFixture(source, async ({ home, generation, source: value }) => {
-    const catalogPath = path.join(generation.root, "catalog.json");
-    const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
-    catalog.projects[0].status = "blocked-missing-root";
-    catalog.projects[0].roots = [path.join(home, "missing")];
-    await writeFile(catalogPath, JSON.stringify(catalog));
-    const store = await ContextStore.open({
-      home,
-      cwd: value.projectRoot,
-      project: "p:doctor",
-    });
-    const report = await store.doctor();
-    assert.equal(report.blockers, 1);
-    assert.equal(report.ok, false);
-  });
+test("doctor detects altered DDL even when object names still match", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.exec("DROP INDEX aliases_record_id");
+  raw.exec("CREATE INDEX aliases_record_id ON aliases(alias)");
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.checks.expected_indexes, true);
+  assert.equal(report.checks.expected_definitions, false);
+  assert.ok(
+    report.issues.some(({ code }) => code === "schema_definitions_invalid"),
+  );
 });
 
-test("stale lock repair requires force and quarantines instead of deleting", async () => {
-  await withStoreFixture(source, async ({ home }) => {
-    const lock = path.join(home, ".write-lock");
-    await mkdir(lock);
-    await writeFile(path.join(lock, "owner.json"), JSON.stringify({
-      v: 1,
-      nonce: "abandoned",
-      pid: 42,
-      hostname: "Gigaflex",
-      runtime: "linux",
-      started_at: 0,
-    }));
-    await writeFile(path.join(lock, "heartbeat.json"), JSON.stringify({
-      v: 1,
-      nonce: "abandoned",
-      at: 0,
-    }));
-    await assert.rejects(
-      repairWriterLock({ home, now: () => 60_000 }),
-      { code: "repair-force-required" },
-    );
-    const repaired = await repairWriterLock({
-      home,
-      force: true,
-      now: () => 60_000,
-    });
-    await assert.rejects(access(lock));
-    await access(repaired.quarantine);
-    assert.match(repaired.quarantine, /\.write-lock\.repaired-/);
-  });
+test("doctor detects invalid knowledge and source states inserted around checks", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.exec("PRAGMA ignore_check_constraints = ON");
+  raw.prepare(
+    "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    "record:invalid",
+    "note",
+    "Invalid",
+    "global",
+    '{"value":"state is absent"}',
+    "2026-07-30T10:00:00.000Z",
+    "2026-07-30T10:00:00.000Z",
+  );
+  raw.prepare(
+    "INSERT INTO sources VALUES (?, ?, ?, ?)",
+  ).run(
+    "record:invalid",
+    "fixture",
+    "invented",
+    "{}",
+  );
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.ok(
+    report.issues.some(({ code }) => code === "record_content_invalid"),
+  );
+  assert.ok(
+    report.issues.some(({ code }) => code === "source_metadata_invalid"),
+  );
+});
+
+test("doctor reports incompatible columns without querying through them", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.exec("ALTER TABLE records RENAME COLUMN content_json TO payload_json");
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, false);
+  assert.ok(
+    report.issues.some(({ code }) => code === "schema_columns_invalid"),
+  );
+  assert.ok(
+    report.issues.some(({ code }) => code === "schema_definitions_invalid"),
+  );
+});
+
+test("doctor serializes invalid metadata and detects ownership limits", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.prepare(
+    "UPDATE metadata SET value = ? WHERE key = 'schema_version'",
+  ).run("future");
+  raw.prepare(
+    "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    "record:many-aliases",
+    "note",
+    "Many aliases",
+    "global",
+    '{"state":"known"}',
+    "2026-07-30T10:00:00.000Z",
+    "2026-07-30T10:00:00.000Z",
+  );
+  const insertAlias = raw.prepare(
+    "INSERT INTO aliases(alias, record_id) VALUES (?, ?)",
+  );
+  for (let index = 0; index < 65; index += 1) {
+    insertAlias.run(`alias:${String(index).padStart(2, "0")}`, "record:many-aliases");
+  }
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, false);
+  assert.equal(report.schema_version, "future");
+  assert.doesNotThrow(() => JSON.stringify(report));
+  assert.ok(report.issues.some(({ code }) => code === "unsupported_schema"));
+  assert.ok(
+    report.issues.some(({ code }) => code === "owned_row_limit_exceeded"),
+  );
 });

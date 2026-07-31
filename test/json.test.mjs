@@ -1,0 +1,55 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  canonicalStringify,
+  readHandleBounded,
+} from "../src/json.mjs";
+
+test("canonical JSON preserves prototype-shaped keys without pollution", () => {
+  const value = JSON.parse(
+    '{"constructor":{"safe":true},"state":"known","__proto__":{"safe":true}}',
+  );
+  const text = canonicalStringify(value);
+  assert.equal(
+    text,
+    '{"__proto__":{"safe":true},"constructor":{"safe":true},"state":"known"}',
+  );
+  const parsed = JSON.parse(text);
+  assert.equal(Object.hasOwn(parsed, "__proto__"), true);
+  assert.equal({}.safe, undefined);
+});
+
+test("canonical JSON rejects adversarial depth and sparse arrays", () => {
+  let value = { state: "known" };
+  for (let index = 0; index < 130; index += 1) value = { nested: value };
+  assert.throws(
+    () => canonicalStringify(value),
+    ({ code }) => code === "resource_limit",
+  );
+  const sparse = [];
+  sparse.length = 2;
+  assert.throws(
+    () => canonicalStringify(sparse),
+    ({ code }) => code === "invalid_json",
+  );
+});
+
+test("bounded handle reads stop when a file grows past its limit", async () => {
+  const values = [Buffer.from("1234"), Buffer.from("5")];
+  const handle = {
+    async read(buffer, offset, length) {
+      const value = values.shift() ?? Buffer.alloc(0);
+      const selected = value.subarray(0, length);
+      selected.copy(buffer, offset);
+      return { bytesRead: selected.length, buffer };
+    },
+  };
+  await assert.rejects(
+    readHandleBounded(handle, {
+      maximum: 4,
+      resource: "growing_file",
+    }),
+    ({ code }) => code === "resource_limit",
+  );
+});
