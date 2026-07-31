@@ -4,6 +4,7 @@ import path from "node:path";
 import { AGENT_BOOTSTRAP } from "./bootstrap.mjs";
 import {
   initializeDatabase,
+  openOrInitializeWriteDatabase,
   openDiagnosticDatabase,
   openReadDatabase,
   openWriteDatabase,
@@ -32,9 +33,9 @@ import {
   getRecord,
   putRecord,
 } from "./records.mjs";
-import { LIMITS } from "./validate.mjs";
+import { LIMITS, validatePutInput } from "./validate.mjs";
 
-export const LODESTAR_VERSION = "1.0.0";
+export const LODESTAR_VERSION = "1.0.1";
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
 
 const COMMANDS = Object.freeze({
@@ -47,7 +48,7 @@ const COMMANDS = Object.freeze({
   },
   put: {
     usage: "lodestar put [--file <path>] [--db <path>]",
-    summary: "Insert or replace one record snapshot.",
+    summary: "Insert or replace one record, initializing on first write.",
     values: ["--file"],
     booleans: [],
     positionals: 0,
@@ -300,7 +301,8 @@ async function dispatch(command, parsed, database, io) {
       maximum: LIMITS.putInputBytes,
       resource: "put_input",
     });
-    return await withDatabase(openWriteDatabase, database, (db) =>
+    validatePutInput(value);
+    return await withDatabase(openOrInitializeWriteDatabase, database, (db) =>
       putRecord(db, value, { database }));
   }
   if (command === "get") {

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-test("release metadata and publication workflow agree on version 1.0.0", async () => {
+test("release metadata and publication workflow agree on the package version", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(ROOT, "package.json"), "utf8"),
   );

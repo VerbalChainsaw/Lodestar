@@ -40,7 +40,6 @@ jobs:
           '{"id":"smoke","type":"note","name":"Smoke","scope":"global","content":{"state":"known","value":"packed"},"aliases":["packed smoke"],"links":[],"sources":[]}' |
             Set-Content -NoNewline -Encoding utf8 .package-smoke-record.json
           npm --prefix .package-smoke exec -- lodestar --help
-          npm --prefix .package-smoke exec -- lodestar init --db "$database"
           npm --prefix .package-smoke exec -- lodestar put --file .package-smoke-record.json --db "$database"
           npm --prefix .package-smoke exec -- lodestar get "packed smoke" --db "$database"
           npm --prefix .package-smoke exec -- lodestar find packed --db "$database"

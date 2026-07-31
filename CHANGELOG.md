@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.1 - 2026-07-31
+
+- Remove the mandatory first-run setup step: the first structurally valid
+  `lodestar put` now initializes an absent or resumable zero-byte database
+  before writing.
+- Keep invalid first writes, every read-only command, help, version, and
+  deletion against a missing registry side-effect free.
+- Reuse the existing exclusive reservation, bounded busy window, and SQLite
+  transactions so concurrent first writers preserve every record without
+  another lock or storage mechanism.
+- Keep `lodestar init` as an optional idempotent command for deliberately
+  creating an empty registry or retrieving the bootstrap contract.
+
 ## 1.0.0 - 2026-07-31
 
 - Replace the v0.7 generation platform with one local SQLite database.

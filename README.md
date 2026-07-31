@@ -25,11 +25,10 @@ lodestar --version
 
 ## Quick start
 
-Initialize the default database:
-
-```text
-lodestar init
-```
+No setup command is required. The first valid `lodestar put` creates and
+initializes the default database automatically. `lodestar import` likewise
+creates its destination. `lodestar init` remains available when a caller
+deliberately wants an empty registry or the bootstrap response.
 
 Create `record.json`:
 
@@ -102,8 +101,8 @@ select a database explicitly.
 
 | Command | Purpose |
 | --- | --- |
-| `lodestar init` | Create schema version 1 and return the agent bootstrap contract. |
-| `lodestar put` | Insert or replace one complete record snapshot from JSON. |
+| `lodestar init` | Optionally create an empty schema and return the bootstrap contract. |
+| `lodestar put` | Insert or replace one record, initializing on the first valid write. |
 | `lodestar get <id-or-alias>` | Resolve an exact ID or alias. |
 | `lodestar find <query>` | Return bounded, deterministically ordered summaries. |
 | `lodestar links <id-or-alias>` | Return one hop of incoming and outgoing links. |
@@ -162,9 +161,10 @@ a second persistence format around SQLite.
 
 ## Agent use
 
-`lodestar init` returns this short provider-neutral contract:
+The package documents this short provider-neutral contract; optional
+`lodestar init` also returns it:
 
-1. Use Lodestar before recursively searching a project.
+1. Use Lodestar before recursively searching; the first put initializes it.
 2. Retrieve records through stable IDs or aliases.
 3. Follow explicit links for related context.
 4. Treat a missing record as missing knowledge, not proof that nothing exists.
