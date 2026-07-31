@@ -80,6 +80,70 @@ test("locator-health evidence without a matching locator is reported", () => {
   ));
 });
 
+test("locator health uses the same key normalization for non-string IDs", () => {
+  const converted = convertV070(sourceWith([
+    legacyRecord({
+      id: 7,
+      locators: [{ type: "file", path: "numeric.txt" }],
+    }),
+  ], {
+    v: 1,
+    generation: GENERATION,
+    locators: {
+      "7#0": {
+        status: "ok",
+        checked_path: "/project/numeric.txt",
+      },
+    },
+  }));
+  const locatorSource = converted.records[0].sources.find(
+    ({ origin }) => origin === "numeric.txt",
+  );
+
+  assert.equal(locatorSource.metadata.legacy.health.status, "ok");
+  assert.equal(
+    converted.report.unsupported.some(
+      ({ identifier, reason }) =>
+        identifier === "7#0" && reason === "orphan_locator_health",
+    ),
+    false,
+  );
+});
+
+test("ambiguous locator health is not copied across duplicate IDs", () => {
+  const converted = convertV070(sourceWith([
+    legacyRecord({
+      id: "duplicate:id",
+      locators: [{ type: "file", path: "first.txt" }],
+    }),
+    legacyRecord({
+      id: "duplicate:id",
+      locators: [{ type: "file", path: "second.txt" }],
+    }),
+  ], {
+    v: 1,
+    generation: GENERATION,
+    locators: {
+      "duplicate:id#0": {
+        status: "ok",
+        checked_path: "/project/first.txt",
+      },
+    },
+  }));
+  const attached = converted.records.flatMap(({ sources }) =>
+    sources.filter(({ metadata }) => metadata.legacy.health !== undefined)
+  );
+
+  assert.equal(attached.length, 0);
+  assert.ok(converted.report.unsupported.some((entry) =>
+    entry.kind === "locator_health"
+    && entry.identifier === "duplicate:id#0"
+    && entry.reason === "ambiguous_locator_health"
+    && entry.owners === 2
+    && entry.disposition === "not_imported"
+  ));
+});
+
 test("the v0.7 reader rejects a different current-pointer version", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-pointer-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
