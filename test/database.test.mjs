@@ -97,6 +97,53 @@ test("schema validation rejects names that only resemble SQLite internals", asyn
   );
 });
 
+test("schema validation rejects forged reserved-prefix objects", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  await initializeDatabase(file);
+  const raw = new DatabaseSync(file);
+  raw.enableDefensive(false);
+  raw.exec(
+    "CREATE TRIGGER schema_probe AFTER UPDATE ON records "
+      + "BEGIN SELECT 1; END",
+  );
+  raw.exec(
+    "PRAGMA writable_schema = ON; "
+      + "UPDATE sqlite_schema SET name = 'sqlite_hidden', "
+      + "sql = replace(sql, 'schema_probe', 'sqlite_hidden') "
+      + "WHERE type = 'trigger' AND name = 'schema_probe'; "
+      + "PRAGMA writable_schema = OFF",
+  );
+  raw.close();
+
+  for (const openDatabase of [openReadDatabase, openWriteDatabase]) {
+    await assert.rejects(
+      openDatabase(file),
+      ({ code, identifiers }) =>
+        code === "invalid_database"
+        && identifiers.unexpected.includes("sqlite_hidden"),
+    );
+  }
+});
+
+test("schema validation permits SQLite's inert statistics table", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  await initializeDatabase(file);
+  const raw = new DatabaseSync(file);
+  raw.exec("ANALYZE");
+  raw.close();
+
+  const db = await openReadDatabase(file);
+  assert.equal(
+    db.prepare(
+      "SELECT type FROM sqlite_schema WHERE name = 'sqlite_stat1'",
+    ).get().type,
+    "table",
+  );
+  db.close();
+});
+
 test("a failed transaction leaves no partial records", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");

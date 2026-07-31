@@ -97,6 +97,37 @@ test("doctor reports objects whose names only resemble SQLite internals", async 
   );
 });
 
+test("doctor reports forged objects inside SQLite's reserved namespace", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.enableDefensive(false);
+  raw.exec(
+    "CREATE TRIGGER schema_probe AFTER UPDATE ON records "
+      + "BEGIN SELECT 1; END",
+  );
+  raw.exec(
+    "PRAGMA writable_schema = ON; "
+      + "UPDATE sqlite_schema SET name = 'sqlite_hidden', "
+      + "sql = replace(sql, 'schema_probe', 'sqlite_hidden') "
+      + "WHERE type = 'trigger' AND name = 'schema_probe'; "
+      + "PRAGMA writable_schema = OFF",
+  );
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, false);
+  assert.equal(report.checks.expected_definitions, false);
+  assert.ok(
+    report.issues.some(
+      ({ code, identifiers }) =>
+        code === "schema_definitions_invalid"
+        && identifiers.unexpected.includes("sqlite_hidden"),
+    ),
+  );
+});
+
 test("doctor detects invalid knowledge and source states inserted around checks", async (t) => {
   const file = await fixture(t);
   const raw = new DatabaseSync(file);
