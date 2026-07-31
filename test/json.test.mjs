@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   canonicalStringify,
   readHandleBounded,
+  readStreamBounded,
 } from "../src/json.mjs";
 
 test("canonical JSON preserves prototype-shaped keys without pollution", () => {
@@ -51,5 +52,36 @@ test("bounded handle reads stop when a file grows past its limit", async () => {
       resource: "growing_file",
     }),
     ({ code }) => code === "resource_limit",
+  );
+});
+
+test("streamed string input rejects unpaired Unicode surrogates", async () => {
+  const chunks = {
+    async *[Symbol.asyncIterator]() {
+      yield "\uD800";
+    },
+  };
+  await assert.rejects(
+    readStreamBounded(chunks, {
+      maximum: 16,
+      resource: "test_stream",
+    }),
+    ({ code }) => code === "invalid_utf8",
+  );
+});
+
+test("streamed string input preserves a surrogate pair split across chunks", async () => {
+  const chunks = {
+    async *[Symbol.asyncIterator]() {
+      yield "\uD83D";
+      yield "\uDE00";
+    },
+  };
+  assert.equal(
+    await readStreamBounded(chunks, {
+      maximum: 16,
+      resource: "test_stream",
+    }),
+    "\u{1F600}",
   );
 });

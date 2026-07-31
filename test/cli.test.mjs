@@ -228,3 +228,31 @@ test("CLI argument and error output remain bounded under hostile input", async (
   assert.equal(error.code, "resource_limit");
   assert.equal(error.identifiers.maximum, 16 * 1024);
 });
+
+test("the CLI does not trust or amplify forged Lodestar errors", async () => {
+  const forged = new Error("x".repeat(100_000));
+  forged.name = "LodestarError";
+  forged.code = { not: "a stable error code" };
+  forged.identifiers = { value: "y".repeat(100_000) };
+  forged.action = "z".repeat(100_000);
+  const result = capture();
+  result.io.stdin = {
+    async *[Symbol.asyncIterator]() {
+      throw forged;
+    },
+  };
+
+  const exitCode = await runCli(["put"], result.io);
+  assert.equal(exitCode, 1);
+  assert.equal(result.output().stdout, "");
+  assert.ok(Buffer.byteLength(result.output().stderr, "utf8") < 4096);
+  assert.deepEqual(JSON.parse(result.output().stderr), {
+    error: {
+      action: "Retry the command. If it fails again, run lodestar doctor.",
+      code: "internal_error",
+      identifiers: {},
+      message: "Lodestar could not complete the operation.",
+    },
+    ok: false,
+  });
+});

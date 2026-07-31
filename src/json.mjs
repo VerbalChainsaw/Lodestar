@@ -12,6 +12,45 @@ export const JSON_LIMITS = Object.freeze({
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
+function invalidUtf8(resource, identifiers = {}, cause = undefined) {
+  return lodestarError(
+    "invalid_utf8",
+    `${resource} is not valid UTF-8.`,
+    {
+      identifiers: { ...identifiers, resource },
+      action: "Encode the JSON input as valid UTF-8 and retry.",
+      cause,
+    },
+  );
+}
+
+function validStringChunk(value, pendingHigh, resource) {
+  const combined = `${pendingHigh}${value}`;
+  let end = combined.length;
+  let nextPending = "";
+  const last = combined.charCodeAt(end - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) {
+    nextPending = combined[end - 1];
+    end -= 1;
+  }
+  for (let index = 0; index < end; index += 1) {
+    const code = combined.charCodeAt(index);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const following = combined.charCodeAt(index + 1);
+      if (following < 0xDC00 || following > 0xDFFF) {
+        throw invalidUtf8(resource);
+      }
+      index += 1;
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      throw invalidUtf8(resource);
+    }
+  }
+  return {
+    buffer: Buffer.from(combined.slice(0, end)),
+    pendingHigh: nextPending,
+  };
+}
+
 function normalizedJson(value, stack, state, depth) {
   state.nodes += 1;
   if (state.nodes > JSON_LIMITS.nodes) {
@@ -140,15 +179,7 @@ export function decodeUtf8(
       ignoreBOM: true,
     }).decode(value);
   } catch (error) {
-    throw lodestarError(
-      "invalid_utf8",
-      `${resource} is not valid UTF-8.`,
-      {
-        identifiers: { ...identifiers, resource },
-        action: "Encode the JSON input as valid UTF-8 and retry.",
-        cause: error,
-      },
-    );
+    throw invalidUtf8(resource, identifiers, error);
   }
 }
 
@@ -306,8 +337,17 @@ export async function readStreamBounded(
   const chunks = [];
   let bytes = 0;
   let chunkCount = 0;
+  let pendingHigh = "";
   for await (const chunk of stream) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    let buffer;
+    if (typeof chunk === "string") {
+      const validated = validStringChunk(chunk, pendingHigh, resource);
+      buffer = validated.buffer;
+      pendingHigh = validated.pendingHigh;
+    } else {
+      if (pendingHigh) throw invalidUtf8(resource);
+      buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    }
     if (buffer.length === 0) continue;
     chunkCount += 1;
     if (chunkCount > JSON_LIMITS.streamChunks) {
@@ -337,5 +377,6 @@ export async function readStreamBounded(
     }
     chunks.push(buffer);
   }
+  if (pendingHigh) throw invalidUtf8(resource);
   return decodeUtf8(Buffer.concat(chunks), { resource });
 }
