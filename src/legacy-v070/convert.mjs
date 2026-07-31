@@ -8,6 +8,7 @@ import {
   LIMITS,
   validatePutInput,
 } from "../validate.mjs";
+import { selectLocatorHealth } from "./locator-health.mjs";
 import { locationText, mapCandidate } from "./mapping.mjs";
 
 const CONTROL = /[\u0000-\u001f\u007f]/gu;
@@ -182,48 +183,13 @@ function candidateList(source) {
   });
 }
 
-function reportOrphanLocatorHealth(source, candidates, report) {
-  const locatorCounts = new Map();
-  for (const { payload } of candidates) {
-    if (
-      payload
-      && typeof payload === "object"
-      && !Array.isArray(payload)
-      && typeof payload.id === "string"
-      && Array.isArray(payload.locators)
-    ) {
-      locatorCounts.set(
-        payload.id,
-        Math.max(locatorCounts.get(payload.id) ?? 0, payload.locators.length),
-      );
-    }
-  }
-  for (const key of Object.keys(source.locatorHealth?.locators ?? {}).sort()) {
-    const separator = key.lastIndexOf("#");
-    const indexText = key.slice(separator + 1);
-    const index = /^\d+$/u.test(indexText) ? Number(indexText) : -1;
-    const represented = separator >= 0
-      && Number.isSafeInteger(index)
-      && String(index) === indexText
-      && index < (locatorCounts.get(key.slice(0, separator)) ?? 0);
-    if (!represented) {
-      report.unsupported.push({
-        kind: "locator_health",
-        identifier: key,
-        source: "indexes/locator-health.json",
-        reason: "orphan_locator_health",
-        disposition: "not_imported",
-      });
-    }
-  }
-}
-
 export function convertV070(source) {
   const report = conversionReport();
   const usedIds = new Set();
   const primaryByOriginal = new Map();
   const converted = [];
   const candidates = candidateList(source);
+  const selectedHealth = selectLocatorHealth(source, candidates);
   const reservedIds = new Set(candidates
     .map(({ payload }) => payload?.id)
     .filter((id) => identifierIsValid(id)));
@@ -249,7 +215,7 @@ export function convertV070(source) {
     try {
       bundle = {
         id,
-        ...mapCandidate(source, candidate, id, report),
+        ...mapCandidate(selectedHealth.source, candidate, id, report),
         aliases: [],
         links: [],
       };
@@ -469,7 +435,9 @@ export function convertV070(source) {
   converted.sort((left, right) =>
     left.bundle.id < right.bundle.id ? -1 : left.bundle.id > right.bundle.id ? 1 : 0
   );
-  reportOrphanLocatorHealth(source, candidates, report);
+  for (const entry of selectedHealth.unsupported) {
+    report.unsupported.push(entry);
+  }
   return {
     records: converted.map(({ bundle }) => bundle),
     report: finalizeReport(report),

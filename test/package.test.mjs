@@ -31,6 +31,7 @@ const EXPECTED_PACKAGE_FILES = [
   "src/json.mjs",
   "src/legacy-v070/convert.mjs",
   "src/legacy-v070/integrity.mjs",
+  "src/legacy-v070/locator-health.mjs",
   "src/legacy-v070/mapping.mjs",
   "src/legacy-v070/parse.mjs",
   "src/legacy-v070/read.mjs",

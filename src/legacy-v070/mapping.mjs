@@ -8,6 +8,7 @@ import {
   LIMITS,
   truncateUtf8,
 } from "../validate.mjs";
+import { selectedLocatorHealth } from "./locator-health.mjs";
 
 const CONTROL = /[\u0000-\u001f\u007f]/gu;
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/gu;
@@ -452,10 +453,7 @@ function mappedSources(source, payload, location, report) {
     }
     origins.add(origin);
     const healthKey = `${payload.id}#${index}`;
-    const healthMap = source.locatorHealth?.locators;
-    const health = healthMap && Object.hasOwn(healthMap, healthKey)
-      ? healthMap[healthKey]
-      : undefined;
+    const health = selectedLocatorHealth(source, healthKey);
     sources.push({
       origin,
       freshness,
