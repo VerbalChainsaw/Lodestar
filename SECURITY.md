@@ -33,10 +33,13 @@ Writes use SQLite transactions, foreign keys, rollback journaling, and full
 synchronous mode. These protect normal commits and interrupted transactions;
 they do not defend against malicious file replacement, faulty storage, or
 loss. New targets are reserved with no-replace file creation and restrictive
-POSIX permissions before SQLite initialization. Inputs, diagnostics, and
-migration details are bounded. `lodestar doctor` detects supported schema,
-referential, envelope, ownership-limit, and SQLite integrity problems but does
-not repair them. If SQLite cannot confirm a transaction's commit outcome,
+POSIX permissions before SQLite initialization. Published reservations are
+never removed as failure cleanup because another process may have completed
+the visible path; zero-byte reservations are resumable. Inputs, diagnostics,
+and migration details are bounded, including hostile in-process stream and
+error objects. `lodestar doctor` detects supported schema, referential,
+complete stored-semantic, ownership-limit, and SQLite integrity problems but
+does not repair them. If SQLite cannot confirm a transaction's commit outcome,
 Lodestar reports `database_commit_outcome_unknown` and preserves a newly
 initialized database for read-only diagnosis instead of deleting evidence.
 
@@ -45,6 +48,7 @@ paths, confines reads to the selected store, verifies a present integrity
 manifest, fingerprints accepted inputs, and rejects a destination inside the
 source tree. An existing destination with more than one hard link is also
 rejected so it cannot alias a source file through another path. The importer
-preserves a new destination if a commit outcome cannot be confirmed. Keep an
+rolls back when transaction state proves a pre-commit failure and preserves a
+new destination when the outcome genuinely cannot be confirmed. Keep an
 independent copy of legacy data until migration has been validated, including
 the report's emitted and omitted-entry counts.

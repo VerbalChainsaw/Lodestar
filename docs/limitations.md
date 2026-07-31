@@ -57,6 +57,10 @@ understanding platform.
   high-throughput database service.
 - Read-only commands never initialize a missing database. Run `lodestar init`
   explicitly.
+- A definite failure while creating a new database can leave its published
+  zero-byte reservation in place. A later `init` or import can resume that
+  reservation; Lodestar does not unlink it because another process may have
+  completed the same visible path.
 
 ## Compatibility boundary
 
@@ -75,6 +79,9 @@ understanding platform.
 - If SQLite cannot confirm an import commit, Lodestar preserves the destination
   and reports an unknown commit outcome for read-only diagnosis instead of
   deleting possibly committed data.
+- An import `COMMIT` exception is definite when SQLite still reports an active
+  transaction and rollback succeeds; only an ended transaction with an
+  unconfirmed commit call is reported as unknown.
 - Other writes likewise report `database_commit_outcome_unknown` when SQLite
   has ended the transaction without confirming the commit call. Initialization
   preserves the database in this state; inspect it read-only before retrying.

@@ -11,12 +11,13 @@ Baseline reviewed: the architectural reduction from v0.7.0 at
 
 ## Audit-tool availability
 
-The requested `center-audit` capability was not present when the initial
-adversarial review began, so findings A-01 through A-18 came from a direct
-review. At the user's direction, `center-audit` was then obtained from
+The initial direct review produced A-01 through A-18. The requested
+`center-audit` capability was then obtained from
 `VerbalChainsaw/center-audit`, installed locally, and used for a bounded
-follow-up on transaction-error truthfulness. That CENTER v2.5.1 pass confirmed
-one additional defect, A-19, and independently reproduced it before repair.
+follow-up on transaction-error truthfulness; that pass confirmed A-19.
+Persistence, machine-interface, package, and legacy-migration lenses then
+challenged the committed repairs four times. Those passes confirmed H-01
+through H-21 and required independent terminal reproductions before edits.
 
 ## Scope and invariants
 
@@ -73,6 +74,38 @@ below. The tests deliberately include direct database bypass, injected
 post-commit failure, concurrent creators, changing files, Unicode shard names,
 symlink and hard-link aliases, and oversized migration reports.
 
+### Multi-angle findings
+
+The follow-up codeplan records the complete repair contracts and red/green
+sequence. The closing dispositions are:
+
+| ID | Severity | Confirmed defect | Closing disposition |
+| --- | --- | --- | --- |
+| H-01 | high | Schema enumeration confused `_` in `LIKE` with a literal underscore. | Match the literal SQLite namespace and use an independent test oracle. |
+| H-02 | medium | Arbitrary thrown values could forge or overflow the public error contract. | Trust only constructed Lodestar errors and normalize one bounded snapshot. |
+| H-03 | medium | Search filters accepted values impossible for stored type and scope fields. | Apply the corresponding stored-field validator. |
+| H-04 | medium | String stream chunks could silently replace unpaired UTF-16 surrogates. | Validate surrogate continuity across chunks before UTF-8 encoding. |
+| H-05 | medium | A generated migration ID could consume a later valid original ID. | Reserve all valid original identifiers before allocation. |
+| H-06 | medium | The importer ignored the v0.7 pointer version. | Require the documented `current.json.v === 1` contract. |
+| H-07 | medium | Orphan locator-health evidence disappeared from migration reports. | Report every unowned observation as bounded unsupported evidence. |
+| H-08 | low | The package shipped a README link whose target was omitted. | Remove the artifact-relative dependency and validate all packaged relative Markdown links. |
+| H-09 | high | A corrupt reserved-prefix trigger could be mistaken for SQLite-maintained state. | Allow only exact inert statistics-table definitions; reject every other reserved object. |
+| H-10 | medium | Empty chunks bypassed stream-count bounds and oversized chunks were copied first. | Count every chunk and reject prospective byte excess before copying. |
+| H-11 | medium | Non-byte typed input was silently coerced into JSON bytes. | Accept only string, Buffer, and byte-exact Uint8Array chunks. |
+| H-12 | medium | A mutable error code could disagree between JSON and process exit status. | Derive both signals from the same immutable bounded snapshot. |
+| H-13 | high | Duplicate or non-string legacy IDs could duplicate or misreport locator health. | Resolve normalized ownership once and give each observation one disposition. |
+| H-14 | high | Failed reservation cleanup could unlink a database completed by another process. | Never unlink a published reservation; safely resume zero-byte targets and recognize a completed winner. |
+| H-15 | medium | Import called a definite pre-commit failure an unknown commit outcome. | Use SQLite transaction state to distinguish rollback-confirmed failure from ambiguity. |
+| H-16 | medium | Doctor could approve stored values that public reads rejected. | Apply the complete bounded public semantic contract to every stored table. |
+| H-17 | medium | Find and links summaries omitted validation of `created_at`. | Select and validate both record timestamps. |
+| H-18 | medium | Unique locator-health evidence was consumed before its source survived conversion. | Consume it only after an accepted source retains it; otherwise report it once. |
+| H-19 | medium | A revoked proxy in a genuine error could make normalization throw without JSON or an exit result. | Make diagnostic reflection total and retain a fixed `runCli` internal-error fallback. |
+| H-20 | medium | A `Uint8Array` subclass could underreport its length before a large copy. | Read identity and byte length through cached typed-array intrinsics before copying. |
+| H-21 | medium | A prototype-spoofed byte object could be truncated into valid JSON and persisted. | Require genuine `Uint8Array` internal slots and reject the spoof before conversion. |
+
+The detailed implementation plan is
+[the multi-angle hardening codeplan](2026-07-31-lodestar-lite-multi-angle-hardening-codeplan.md).
+
 ## CENTER follow-up result
 
 The bounded center-out trajectory was:
@@ -106,6 +139,46 @@ The smallest safe repair was to pass `file` through
 cleanup behavior changed. The repair revalidation result was
 `INVARIANT_HOLDS` at both the database and public CLI boundaries.
 
+## Closing multi-angle result
+
+The final repaired-head challenge followed only proven edges around three
+high-consequence boundaries:
+
+```text
+database reservation -> SQLite transaction state -> failure cleanup
+stored row -> doctor validator -> public read validator
+legacy health key -> candidate source -> accepted row or migration report
+programmatic chunk/error -> intrinsic or total normalization -> JSON result
+```
+
+A forced concurrent interleaving proved the old cleanup race before H-14 was
+repaired: one process reserved the path, another completed the visible
+zero-byte reservation, and the first process then unlinked the healthy winner.
+The repaired path preserves published reservations and recognizes a valid
+concurrent result. Pre-commit and post-commit injections now distinguish
+rollback-confirmed failure from a genuinely unknown outcome.
+
+Direct schema-valid row changes proved H-16 and H-17 before repair. The closing
+doctor matrix now applies the same bounded Unicode, byte, JSON-depth,
+knowledge-state, and timestamp rules as `get`, `find`, `links`, and `export`.
+
+The migration lens independently exercised accepted, duplicate-owner,
+non-string-owner, rejected-record, invalid-locator, duplicate-origin,
+source-limit, and metadata-compaction cases. In every case each
+locator-health observation was either persisted once or reported once. A
+2,505-observation stress case retained deterministic order and reported exact
+2,000 emitted and 505 omitted details.
+
+The installed-interface lens then confirmed H-19 through H-21. The repaired
+boundary does not trust `instanceof`, an overrideable typed-array property, or
+successful reflection on caller-controlled diagnostics. Genuine Buffer and
+`Uint8Array` chunks remain accepted; spoofed or unreadable objects fail with a
+bounded JSON result before persistence.
+
+No defect was confirmed after those repairs. Confidence is high within the
+reviewed same-user, accepted-input, local-filesystem boundary; this remains a
+bounded audit rather than a formal proof.
+
 ## Residual risks and non-guarantees
 
 These are explicit product boundaries, not hidden completeness claims:
@@ -119,6 +192,10 @@ These are explicit product boundaries, not hidden completeness claims:
   replacement, or an untrustworthy operating system.
 - The v0.7 store format proves a compatible layout and available integrity
   evidence, not the exact npm package version that created every generation.
+- The importer fingerprints the documented accepted source-file set. Added
+  unrelated files, same-content same-user path replacement, and an unsealed
+  generation whose recorded hash disagrees with its directory name are policy
+  boundaries rather than silently invented corruption claims.
 - Migration reports are bounded. A report with omitted entries remains
   unresolved evidence and must be reviewed before discarding the old store.
 - Search uses deterministic SQLite/JavaScript behavior with documented ASCII
@@ -136,30 +213,40 @@ These are explicit product boundaries, not hidden completeness claims:
 
 Final local gates:
 
-- exact Node.js `v24.15.0`: 51 tests passed, 0 failed;
+- exact Node.js `v24.15.0`: 79 tests passed, 0 failed;
+- built-in coverage: 78.83% lines, 79.08% branches, and 96.06%
+  functions;
 - every runtime and test module passed `node --check`;
 - YAML parsing succeeded for all retained workflows and Dependabot config;
 - `git diff --check` passed;
 - dependency tree is empty;
 - runtime has no network, background-worker, provider, installer, benchmark, or
   orchestration imports;
-- final package: 28 entries, 43,066 packed bytes, 177,980 unpacked bytes;
+- final package: 30 entries, 46,725 packed bytes, 193,038 unpacked bytes;
+- two independent final packs were byte-identical at SHA-256
+  `2a8dc3963051150fb4650e1e40bf3d8c939bd69164ee3587bd1b60624299a5f6`;
 - final package declares exactly one executable, `lodestar`;
 - an installed tarball exercised all nine public commands;
 - all nine command help contracts plus top-level help returned JSON without
   creating the requested database;
 - database hashing was unchanged across packaged `get`, `find`, `links`,
   `doctor`, and `export`;
+- installed programmatic probes rejected revoked diagnostics, underreported
+  typed-array subclasses, and prototype spoofs before persistence while
+  accepting genuine Buffer and `Uint8Array` chunks;
 - an actual sealed v0.7.0 checkout store passed dry-run and committed import,
   doctor was healthy, alias retrieval succeeded, and before/after source
   content and tree hashes matched;
 - the largest runtime module is below 500 physical lines;
 - the operational core, including the executable and excluding the isolated
-  one-way importer, is 3,550 lines.
+  one-way importer, is 3,924 lines;
+- total shipped JavaScript is 6,088 lines, 8,881 fewer than v0.7.0 (59.3%).
 
 ## Conclusion
 
-The reduced runtime meets the stated local-registry boundary. The mechanisms
+The 40 confirmed findings are closed, with no known high- or medium-severity
+defect remaining in the reviewed scope. The reduced runtime meets the stated
+local-registry boundary. The mechanisms
 that remain complex directly protect transaction truth, bounded machine
 interfaces, stored-data integrity, or one-way migration. The audit found no
 justification to restore generations, custom locks, snapshots, provider
