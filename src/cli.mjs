@@ -35,7 +35,7 @@ import {
 } from "./records.mjs";
 import { LIMITS, validatePutInput } from "./validate.mjs";
 
-export const LODESTAR_VERSION = "1.0.2";
+export const LODESTAR_VERSION = "1.0.3";
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
 
 const COMMANDS = Object.freeze({

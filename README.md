@@ -27,6 +27,34 @@ Lodestar does not inspect repositories, infer readiness, orchestrate agents,
 run services, contact providers, or claim that its records fully describe a
 project. A missing record means only that Lodestar lacks that knowledge.
 
+## Why 1.0 is the better Lodestar
+
+The original Lodestar proved that stable, structured project context was
+useful. It also taught me where the product had become more complicated than
+its job required.
+
+I believe Lodestar 1.0 is the stronger product. It does less, but it does the
+important part with a smaller contract and fewer custom mechanisms to operate,
+debug, and maintain.
+
+| Original Lodestar | Lodestar 1.0 |
+| --- | --- |
+| Generation trees, commit pointers, heartbeat locks, snapshots, and custom rollback | SQLite transactions and normal SQLite durability |
+| Multiple executables and installer-specific behavior | One `lodestar` executable and no installer runtime |
+| Project discovery, readiness scoring, and completeness claims | Direct records and source facts; unknown stays unknown |
+| Provider experiments and agent-specific integration | Provider-neutral JSON with no orchestration layer |
+| A required setup path before normal writes | The first valid `put` initializes the registry automatically |
+| A broad context-management platform | A focused local registry with no runtime dependencies or background service |
+
+The reduction did not throw away the parts that mattered. Lodestar keeps
+deterministic behavior, structured JSON, explicit schemas, stable identifiers,
+bounded inputs and outputs, careful paths, cross-platform support, actionable
+diagnostics, atomic transactions, and honest uncertainty.
+
+For the job Lodestar now claims—store, retrieve, relate, validate, and migrate
+project context—1.0 is simpler to understand and safer to operate. It is the
+version I recommend.
+
 ## Why Lodestar
 
 Agents often start by recursively searching a repository and rebuilding

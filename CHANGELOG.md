@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.3 - 2026-07-31
+
+- Put the central original-to-1.0 product comparison near the top of the
+  GitHub and npm front page.
+- Credit the original Lodestar for proving structured project context while
+  explaining, in first person, why the reduced SQLite architecture is the
+  stronger product for Lodestar's current job.
+- Show the concrete reduction from custom generations, lifecycle machinery,
+  installers, readiness claims, provider experiments, and multiple executables
+  to one database, one CLI, direct facts, and provider-neutral JSON.
+- Keep every runtime command, schema, database behavior, migration contract,
+  package file, dependency boundary, and executable identical to 1.0.2.
+
 ## 1.0.2 - 2026-07-31
 
 - Publish a clearer GitHub and npm front page with an honest product summary,

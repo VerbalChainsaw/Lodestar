@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Small offline SQLite context registry for humans and software agents",
   "type": "module",
   "bin": {
