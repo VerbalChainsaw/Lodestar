@@ -202,8 +202,8 @@ npm run pack:check
 ```
 
 The core is plain JavaScript using Node's built-in SQLite API. The architecture
-and its deliberate deletions are recorded in the
-[architectural reduction report](docs/plans/2026-07-30-lodestar-lite-architectural-reduction.md).
+and its deliberate deletions are recorded in the source repository's
+architectural reduction report.
 
 Lodestar is licensed under the [MIT License](LICENSE). Security reports should
 follow [SECURITY.md](SECURITY.md).
