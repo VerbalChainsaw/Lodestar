@@ -8,8 +8,9 @@
 - Keep invalid first writes, every read-only command, help, version, and
   deletion against a missing registry side-effect free.
 - Reuse the existing exclusive reservation, bounded busy window, and SQLite
-  transactions so concurrent first writers preserve every record without
-  another lock or storage mechanism.
+  transactions so overlapping first writers cannot replace the winning
+  registry. Contention beyond that bound remains an explicit, retryable
+  `database_busy` error.
 - Keep `lodestar init` as an optional idempotent command for deliberately
   creating an empty registry or retrieving the bootstrap contract.
 

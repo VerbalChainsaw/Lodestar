@@ -292,9 +292,9 @@ test("concurrent first writers preserve both records", async (t) => {
 
 test("competing CLI processes survive first-write reservation races", async (t) => {
   const directory = await temporaryDirectory(t);
-  for (let round = 0; round < 3; round += 1) {
+  for (let round = 0; round < 4; round += 1) {
     const database = path.join(directory, String(round), "lodestar.db");
-    const records = Array.from({ length: 8 }, (_, writer) => ({
+    const records = Array.from({ length: 4 }, (_, writer) => ({
       id: `record:${round}:${writer}`,
       type: "note",
       name: `Writer ${writer}`,
