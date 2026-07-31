@@ -2,6 +2,37 @@ import { boundedDiagnosticValue } from "./diagnostics.mjs";
 
 const DEFAULT_ACTION =
   "Review the identifiers and retry with valid Lodestar input.";
+const ERROR_CODE = /^[a-z][a-z0-9_]{0,127}$/u;
+const LODESTAR_ERRORS = new WeakSet();
+
+function property(value, key) {
+  try {
+    return value?.[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function knownCode(error) {
+  if (!LODESTAR_ERRORS.has(error)) return null;
+  const code = property(error, "code");
+  return typeof code === "string" && ERROR_CODE.test(code) ? code : null;
+}
+
+function boundedText(value, fallback) {
+  if (typeof value !== "string") return fallback;
+  const bounded = boundedDiagnosticValue(value, { maximumBytes: 2048 });
+  return typeof bounded === "string" ? bounded : fallback;
+}
+
+function boundedIdentifiers(value) {
+  const bounded = boundedDiagnosticValue(value);
+  return bounded !== null
+    && typeof bounded === "object"
+    && !Array.isArray(bounded)
+    ? bounded
+    : {};
+}
 
 export function lodestarError(
   code,
@@ -17,6 +48,7 @@ export function lodestarError(
   error.code = code;
   error.identifiers = boundedDiagnosticValue(identifiers);
   if (action) error.action = action;
+  LODESTAR_ERRORS.add(error);
   return error;
 }
 
@@ -29,7 +61,7 @@ export function wrapError(
     action,
   } = {},
 ) {
-  if (error?.name === "LodestarError") return error;
+  if (LODESTAR_ERRORS.has(error)) return error;
   return lodestarError(code, message, {
     identifiers,
     action,
@@ -38,17 +70,21 @@ export function wrapError(
 }
 
 export function errorPayload(error) {
-  const known = error?.name === "LodestarError";
+  const code = knownCode(error);
+  const known = code !== null;
   return {
-    code: known ? error.code : "internal_error",
+    code: known ? code : "internal_error",
     message: known
-      ? error.message
+      ? boundedText(
+        property(error, "message"),
+        "Lodestar could not complete the operation.",
+      )
       : "Lodestar could not complete the operation.",
-    identifiers: known && error.identifiers
-      ? error.identifiers
+    identifiers: known
+      ? boundedIdentifiers(property(error, "identifiers"))
       : {},
-    action: known && error.action
-      ? error.action
+    action: known && property(error, "action")
+      ? boundedText(property(error, "action"), DEFAULT_ACTION)
       : known
         ? DEFAULT_ACTION
         : "Retry the command. If it fails again, run lodestar doctor.",
@@ -63,7 +99,7 @@ export function errorEnvelope(error) {
 }
 
 export function exitCodeFor(error) {
-  const code = error?.code ?? "internal_error";
+  const code = knownCode(error) ?? "internal_error";
   if (
     code.endsWith("_not_found")
     || code.endsWith("_conflict")

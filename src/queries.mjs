@@ -121,12 +121,12 @@ export function findRecords(
     $limit: selectedLimit + 1,
   };
   if (scope !== undefined) {
-    validateQuery(scope);
+    validateScope(scope);
     clauses.push("r.scope = $scope");
     parameters.$scope = scope;
   }
   if (type !== undefined) {
-    validateQuery(type);
+    validateType(type);
     clauses.push("r.type = $type");
     parameters.$type = type;
   }

@@ -78,6 +78,13 @@ test("find is bounded, filtered, and totally ordered by documented rank", () => 
     () => findRecords(db, "needle", { limit: "1e2" }),
     ({ code }) => code === "invalid_input",
   );
+  assert.throws(
+    () => findRecords(db, "needle", { type: "t".repeat(65) }),
+    ({ code, identifiers }) =>
+      code === "resource_limit"
+      && identifiers.field === "type"
+      && identifiers.maximum === 64,
+  );
   db.close();
 });
 
