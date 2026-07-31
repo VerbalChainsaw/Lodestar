@@ -277,7 +277,7 @@ export async function readV070Store(sourcePath) {
     await readConfinedBuffer(source, "current.json", state),
     "current.json",
   );
-  if (!GENERATION_ID.test(current?.generation ?? "")) {
+  if (current?.v !== 1 || !GENERATION_ID.test(current?.generation ?? "")) {
     throw lodestarError(
       "legacy_source_invalid",
       "The v0.7 current generation pointer is invalid.",

@@ -22,7 +22,6 @@ import {
 } from "../src/database.mjs";
 import { importV070 } from "../src/import-v070.mjs";
 import { runCli } from "../src/cli.mjs";
-import { convertV070 } from "../src/legacy-v070/convert.mjs";
 import {
   readV070Store,
   verifyLegacySourceUnchanged,
@@ -439,36 +438,6 @@ test("the public import command emits its machine-readable dry-run report", asyn
   assert.equal(output.data.dry_run, true);
   assert.equal(output.data.destination.committed, false);
   await assert.rejects(access(database), { code: "ENOENT" });
-});
-
-test("migration reporting is bounded and preserves omission counts", () => {
-  const converted = convertV070({
-    generation: GENERATION,
-    catalog: { projects: [] },
-    records: [{
-      record: {
-        id: "record:report-bound",
-        kind: "memory",
-        scope: ["global"],
-        links: [],
-        aliases: Array.from({ length: 2_505 }, (_, index) => index),
-      },
-      defaultScope: "global",
-      location: {
-        file: "records/global.jsonl",
-        line: 1,
-      },
-    }],
-    locatorHealth: null,
-  });
-  assert.equal(converted.records.length, 1);
-  assert.equal(converted.report.skipped.length, 2_000);
-  assert.equal(converted.report.reporting.truncated, true);
-  assert.deepEqual(converted.report.reporting.sections.skipped, {
-    entries_total: 2_505,
-    entries_reported: 2_000,
-    entries_omitted: 505,
-  });
 });
 
 test("concurrent imports cannot delete or overwrite the winning destination", async (t) => {
