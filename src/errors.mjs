@@ -98,8 +98,7 @@ export function errorEnvelope(error) {
   };
 }
 
-export function exitCodeFor(error) {
-  const code = knownCode(error) ?? "internal_error";
+function exitCodeForCode(code) {
   if (
     code.endsWith("_not_found")
     || code.endsWith("_conflict")
@@ -133,4 +132,16 @@ export function exitCodeFor(error) {
     return 2;
   }
   return 1;
+}
+
+export function exitCodeFor(error) {
+  return exitCodeForCode(knownCode(error) ?? "internal_error");
+}
+
+export function errorResult(error) {
+  const envelope = errorEnvelope(error);
+  return {
+    envelope,
+    exitCode: exitCodeForCode(envelope.error.code),
+  };
 }
