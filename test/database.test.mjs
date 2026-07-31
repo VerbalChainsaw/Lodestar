@@ -59,9 +59,10 @@ test("initializes exactly the five-table schema and is read-only when repeated",
   const db = await openReadDatabase(file);
   assert.deepEqual(
     db.prepare(
-      "SELECT name FROM sqlite_schema "
-        + "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-    ).all().map(({ name }) => name),
+      "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name",
+    ).all()
+      .map(({ name }) => name)
+      .filter((name) => !name.toLowerCase().startsWith("sqlite_")),
     ["aliases", "links", "metadata", "records", "sources"],
   );
   assert.deepEqual(
@@ -75,6 +76,25 @@ test("initializes exactly the five-table schema and is read-only when repeated",
     },
   );
   db.close();
+});
+
+test("schema validation rejects names that only resemble SQLite internals", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  await initializeDatabase(file);
+  const raw = new DatabaseSync(file);
+  raw.exec(
+    "CREATE TRIGGER sqlitehidden AFTER UPDATE ON records "
+      + "BEGIN SELECT 1; END",
+  );
+  raw.close();
+
+  await assert.rejects(
+    openReadDatabase(file),
+    ({ code, identifiers }) =>
+      code === "invalid_database"
+      && identifiers.unexpected.includes("sqlitehidden"),
+  );
 });
 
 test("a failed transaction leaves no partial records", async (t) => {

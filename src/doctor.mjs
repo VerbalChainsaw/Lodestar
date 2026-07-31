@@ -13,7 +13,8 @@ const MAX_ISSUES = 100;
 function orderedNames(db, type) {
   return db.prepare(
     "SELECT name FROM sqlite_schema "
-      + "WHERE type = ? AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      + "WHERE type = ? "
+      + "AND lower(substr(name, 1, 7)) <> 'sqlite_' ORDER BY name",
   ).all(type).map(({ name }) => name);
 }
 

@@ -155,7 +155,7 @@ export function inspectSchemaDefinitions(db) {
   const rows = db.prepare(
     "SELECT type, name, sql FROM sqlite_schema "
       + "WHERE type IN ('table', 'index', 'trigger', 'view') "
-      + "AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      + "AND lower(substr(name, 1, 7)) <> 'sqlite_' ORDER BY name",
   ).all();
   const actual = Object.fromEntries(rows.map(({ type, name, sql }) => [
     name,
