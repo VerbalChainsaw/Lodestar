@@ -37,6 +37,27 @@ Every repair follows the same gate:
 | H-07 | medium | Valid locator-health observations not referenced by any imported locator disappear without an imported, skipped, or unsupported report entry. | Report every residual locator-health key as bounded unsupported evidence; do not synthesize source rows. |
 | H-08 | low | The shipped README contains a relative link to an architectural report omitted from the package. | Remove the artifact-relative dependency and test every packaged Markdown relative link against the package manifest. |
 
+## Post-repair challenge findings
+
+The first repair set was committed and then challenged again through the same
+persistence, interface, and migration lenses. Five adjacent defects reached
+independent terminal reproductions at commit `86d3306`:
+
+| ID | Severity | Defect | Smallest safe repair |
+| --- | --- | --- | --- |
+| H-09 | high | A trigger renamed into the literal `sqlite_` namespace through SQLite's writable-schema escape hatch is treated as internal; open and doctor can accept executable corrupt schema. | Ignore only exact, inert SQLite-maintained statistics-table definitions. Treat every other reserved-prefix row as an unexpected schema object. |
+| H-10 | medium | Empty yielded stdin chunks bypass the declared chunk-count limit, and oversized string/typed chunks are copied before their prospective byte size is rejected. | Count every yielded chunk before conversion and reject prospectively oversized chunks before materializing a copy. |
+| H-11 | medium | Arrays and non-byte typed arrays are silently coerced and truncated by `Buffer.from`, allowing byte values the caller did not supply to become accepted JSON. | Accept only strings, Buffer, and byte-exact Uint8Array chunks; reject every other chunk representation. |
+| H-12 | medium | A genuine Lodestar error's mutable code is sampled once for JSON and again for exit classification, so the two machine signals can disagree. | Normalize one bounded error snapshot and derive both the envelope and exit status from that snapshot. |
+| H-13 | high | Duplicate source IDs can attach one locator-health observation to multiple records; non-string IDs can attach an observation while reporting it `not_imported`. | Normalize the legacy key once, attach health only when exactly one candidate owns it, and report ambiguous, orphan, or imported evidence exactly once. |
+
+The follow-up also rechecked source-file additions and same-content parent-path
+replacement during import. Those remain explicit nonfindings: the documented
+fingerprint covers the accepted source-file set, and same-user replacement
+without changed accepted bytes is outside Lodestar's filesystem trust
+boundary. Expanding that policy would add a bounded re-enumeration subsystem
+without changing imported data.
+
 ## Repair sequence
 
 ### 1. SQLite schema-object validation
@@ -67,6 +88,14 @@ Remove the broken packaged link and add an artifact-manifest link check. Extend
 the adversarial audit with the eight findings, update measured verification
 figures, and update the canonical Lodestar context records only after all
 gates pass.
+
+### 5. Post-repair boundary closure
+
+Add failing regressions for reserved-prefix schema corruption, empty and
+non-byte stream chunks, changing genuine error codes, duplicate locator-health
+ownership, and non-string legacy identifiers. Admit only inert exact SQLite
+statistics tables, enforce a byte-exact stdin contract, normalize caught
+errors once, and select locator health through one shared ownership map.
 
 ## Verification matrix
 
