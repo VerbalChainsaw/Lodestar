@@ -33,6 +33,7 @@ compatibility layers.
 | R-05 | The README identifies the executable but does not tell a new user how to install the npm package. | Add the exact global installation command before quick start. |
 | R-06 | Release metadata still says `Unreleased`. | Date the 1.0.0 changelog entry at the release commit. |
 | R-07 | Local GitHub and npm credentials are expired or absent. | Complete interactive owner authentication without recording credentials in the repository or command output. |
+| R-08 | Hosted Windows reached `npm.cmd` through `spawnSync` without a command-shell or npm CLI entry path, so both package-manifest tests failed before npm started. | Invoke the npm CLI JavaScript entry through the current Node executable when `npm_execpath` is available, with a Windows shell fallback for direct test invocation. |
 
 ## Release workflow contract
 
