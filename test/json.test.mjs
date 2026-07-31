@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import test from "node:test";
 
 import {
@@ -143,5 +144,55 @@ test("stream input accepts only byte-exact chunk representations", async () => {
       resource: "test_stream",
     }),
     "{}",
+  );
+});
+
+test("stream bounds use intrinsic byte length before copying typed arrays", async (t) => {
+  class UnderreportingBytes extends Uint8Array {
+    get byteLength() {
+      return 0;
+    }
+  }
+  const chunk = new UnderreportingBytes(1024);
+  const originalFrom = Buffer.from;
+  let copiedAttackerChunk = false;
+  Buffer.from = function instrumentedFrom(value, ...rest) {
+    if (value === chunk) copiedAttackerChunk = true;
+    return originalFrom.call(this, value, ...rest);
+  };
+  t.after(() => {
+    Buffer.from = originalFrom;
+  });
+
+  await assert.rejects(
+    readStreamBounded([chunk], {
+      maximum: 4,
+      resource: "test_stream",
+    }),
+    ({ code, identifiers }) =>
+      code === "resource_limit"
+      && identifiers.bytes === 1024
+      && identifiers.maximum === 4,
+  );
+  assert.equal(copiedAttackerChunk, false);
+});
+
+test("stream input rejects prototype-spoofed Uint8Array objects", async () => {
+  const bytes = Buffer.from("{}");
+  const spoofed = Object.create(Uint8Array.prototype);
+  Object.defineProperties(spoofed, {
+    byteLength: { value: bytes.length },
+    length: { value: bytes.length },
+  });
+  for (const [index, byte] of bytes.entries()) {
+    spoofed[index] = byte + 256;
+  }
+
+  await assert.rejects(
+    readStreamBounded([spoofed], {
+      maximum: 16,
+      resource: "test_stream",
+    }),
+    ({ code }) => code === "invalid_input",
   );
 });

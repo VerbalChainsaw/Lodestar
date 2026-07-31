@@ -10,10 +10,11 @@ Baseline: `main` at `27d61c3c71ed1896b6ef0828e446bf959f96221f`
 
 ## Purpose
 
-This plan closes eight defects independently reproduced after the initial
+This plan closes defects independently reproduced after the initial
 LodestarLite reduction was committed. The audit used persistence, interface,
-legacy-migration, and package lenses. Repairs remain inside the existing
-one-database, one-executable architecture.
+legacy-migration, and package lenses through repeated repaired-head
+challenges. Repairs remain inside the existing one-database, one-executable
+architecture.
 
 Every repair follows the same gate:
 
@@ -80,6 +81,25 @@ schema-valid direct row changes and observed contradictory doctor/read
 outcomes. H-18 was independently reproduced at both conversion and committed
 import boundaries.
 
+## Installed-interface closing challenge
+
+An independent installed-tarball pass at `101742e` confirmed that all shell
+interfaces, package contents, read-only behavior, and migration paths held. It
+also reached three programmatic machine-boundary defects with hostile
+JavaScript objects:
+
+| ID | Severity | Defect | Smallest safe repair |
+| --- | --- | --- | --- |
+| H-19 | medium | Replacing a genuine Lodestar error's identifiers with a revoked proxy made diagnostic normalization throw, so `runCli` returned no exit code and emitted no JSON error. | Make diagnostic traversal total under reflection failure and give `runCli` a fixed internal-error result if normalization itself ever throws. |
+| H-20 | medium | A genuine `Uint8Array` subclass could override `byteLength`, causing the prospective bound to inspect zero and copy a much larger chunk before eventual rejection. | Read typed-array identity and byte length through cached intrinsic accessors before allocating the copy. |
+| H-21 | medium | An ordinary object inheriting `Uint8Array.prototype` passed `instanceof`; `Buffer.from` truncated attacker-supplied values into valid JSON that `put` persisted. | Require genuine byte-view internal slots and the intrinsic `Uint8Array` tag; reject prototype-spoofed objects before conversion. |
+
+The blast radius is limited to programmatic `runCli` and `readStreamBounded`
+callers able to supply hostile in-process objects. Ordinary stdin bytes and
+installed executable behavior passed. These are nevertheless violations of
+the deterministic fail-closed machine interface and therefore remain release
+blocking.
+
 ## Repair sequence
 
 ### 1. SQLite schema-object validation
@@ -128,6 +148,15 @@ committed source. Remove destructive reservation cleanup, classify commit
 truth from SQLite state, share stored-value validators with doctor, validate
 complete summary rows, and finalize health accounting only after record
 acceptance.
+
+### 7. Programmatic boundary closure
+
+Add failing regressions for revoked diagnostic proxies, underreporting
+`Uint8Array` subclasses, and prototype-spoofed byte objects. Cache and call the
+typed-array intrinsic accessors so validation cannot be redirected through
+user properties; copy only after the true byte length passes. Make diagnostic
+normalization return bounded fresh data or a fixed internal-error fallback
+under every reflection failure.
 
 ## Verification matrix
 

@@ -11,6 +11,7 @@ import {
 import { diagnoseDatabase } from "./doctor.mjs";
 import {
   errorResult,
+  internalErrorResult,
   lodestarError,
 } from "./errors.mjs";
 import {
@@ -467,7 +468,12 @@ export async function runCli(
     writeSuccess(io, data, global.human);
     return command === "doctor" && data.healthy === false ? 4 : 0;
   } catch (error) {
-    const normalized = errorResult(error);
+    let normalized;
+    try {
+      normalized = errorResult(error);
+    } catch {
+      normalized = internalErrorResult();
+    }
     let text;
     try {
       text = canonicalStringify(normalized.envelope);
