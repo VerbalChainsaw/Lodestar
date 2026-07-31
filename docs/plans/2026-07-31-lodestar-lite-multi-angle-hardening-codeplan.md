@@ -58,6 +58,28 @@ without changed accepted bytes is outside Lodestar's filesystem trust
 boundary. Expanding that policy would add a bounded re-enumeration subsystem
 without changing imported data.
 
+## Final repaired-head challenge findings
+
+The committed second repair set was challenged once more at `098d5f8`. Five
+additional defects reached deterministic terminal reproductions:
+
+| ID | Severity | Defect | Smallest safe repair |
+| --- | --- | --- | --- |
+| H-14 | high | A process that reserved a new zero-byte destination could delete a valid database committed by another initializer or importer that resumed the visible reservation. | Never unlink a published reservation during failure cleanup. Preserve it for safe zero-byte resumption, and make a losing initializer recognize a concurrently completed valid database. |
+| H-15 | medium | The importer classified every `COMMIT` exception as an unknown outcome, even when SQLite still reported an active transaction and rollback made the failure definite. | Use SQLite transaction state to distinguish definite pre-commit failure from post-commit ambiguity; preserve only genuinely ambiguous destinations. |
+| H-16 | medium | `doctor` could report `healthy: true` for stored values that public reads rejected, including non-NFC schema fields and JSON beyond the structural-depth limit. | Apply the same bounded application validators to stored records, aliases, links, and sources during diagnosis. |
+| H-17 | medium | `find` and `links` validated a summarized record's update timestamp but silently accepted an invalid creation timestamp in the same stored row. | Select and validate both record timestamps before emitting any summary. |
+| H-18 | medium | A uniquely owned locator-health observation was treated as accounted for before its source and record survived conversion, so candidate rejection, invalid locators, duplicate origins, source limits, or metadata compaction could erase the evidence without a report entry. | Mark health evidence consumed only after it is retained on a source in an accepted record; report every other unique key once as `not_imported`. |
+
+H-14 was reproduced with a forced but ordinary interleaving: process A
+reserved and opened the destination, process B resumed and committed it, then
+process A's failure cleanup unlinked B's healthy database. H-15 left a
+zero-byte destination while claiming an unknown commit even though
+`db.isTransaction` proved that the commit had not occurred. H-16 and H-17 used
+schema-valid direct row changes and observed contradictory doctor/read
+outcomes. H-18 was independently reproduced at both conversion and committed
+import boundaries.
+
 ## Repair sequence
 
 ### 1. SQLite schema-object validation
@@ -97,6 +119,16 @@ ownership, and non-string legacy identifiers. Admit only inert exact SQLite
 statistics tables, enforce a byte-exact stdin contract, normalize caught
 errors once, and select locator health through one shared ownership map.
 
+### 6. Final repaired-head closure
+
+Add deterministic interleaving tests for initialization and import, injected
+pre- and post-commit failures, direct stored-semantic violations, invalid
+summary timestamps, and locator-health evidence that fails to reach a
+committed source. Remove destructive reservation cleanup, classify commit
+truth from SQLite state, share stored-value validators with doctor, validate
+complete summary rows, and finalize health accounting only after record
+acceptance.
+
 ## Verification matrix
 
 - focused red/green regression for every finding;
@@ -109,6 +141,10 @@ errors once, and select locator health through one shared ownership map.
 - installed-tarball execution of all public commands and help contracts;
 - database hashes unchanged across read-only commands;
 - v0.7 dry-run and committed import with source-tree hashes unchanged;
+- forced concurrent reservation interleavings that preserve the winner;
+- definite and ambiguous import commit-failure classification;
+- doctor/read agreement for every stored semantic validator;
+- exactly-once locator-health accounting after skipped conversion paths;
 - core and per-file source-line limits;
 - one executable, one runtime database, and no removed runtime framework.
 
