@@ -97,17 +97,31 @@ function boundedLegacyItems(values, field, report, item) {
   return values.slice(0, LIMITS.legacyFieldItems);
 }
 
-function assignedId(source, candidate, used, report) {
+function availableGeneratedId(source, candidate, used, reserved) {
+  const base = generatedId(source, candidate.location);
+  const location = locationText(candidate.location);
+  const maximumAttempts = used.size + reserved.size + 1;
+  for (let attempt = 0; attempt <= maximumAttempts; attempt += 1) {
+    const id = attempt === 0
+      ? base
+      : `legacy:${hash(
+        attempt === 1
+          ? `${base}\0${location}`
+          : `${base}\0${location}\0${attempt - 1}`,
+      )}`;
+    if (!used.has(id) && !reserved.has(id)) return id;
+  }
+  throw new Error("Deterministic legacy identifier allocation was exhausted.");
+}
+
+function assignedId(source, candidate, used, reserved, report) {
   const original = candidate.payload.id;
   let id = original;
   let reason = null;
   if (!identifierIsValid(id)) reason = original ? "invalid_id" : "missing_id";
   else if (used.has(id)) reason = "duplicate_id";
   if (reason) {
-    id = generatedId(source, candidate.location);
-    if (used.has(id)) {
-      id = `legacy:${hash(`${id}\0${locationText(candidate.location)}`)}`;
-    }
+    id = availableGeneratedId(source, candidate, used, reserved);
     report.id_mappings.push({
       source_id: original ?? null,
       record_id: id,
@@ -168,13 +182,53 @@ function candidateList(source) {
   });
 }
 
+function reportOrphanLocatorHealth(source, candidates, report) {
+  const locatorCounts = new Map();
+  for (const { payload } of candidates) {
+    if (
+      payload
+      && typeof payload === "object"
+      && !Array.isArray(payload)
+      && typeof payload.id === "string"
+      && Array.isArray(payload.locators)
+    ) {
+      locatorCounts.set(
+        payload.id,
+        Math.max(locatorCounts.get(payload.id) ?? 0, payload.locators.length),
+      );
+    }
+  }
+  for (const key of Object.keys(source.locatorHealth?.locators ?? {}).sort()) {
+    const separator = key.lastIndexOf("#");
+    const indexText = key.slice(separator + 1);
+    const index = /^\d+$/u.test(indexText) ? Number(indexText) : -1;
+    const represented = separator >= 0
+      && Number.isSafeInteger(index)
+      && String(index) === indexText
+      && index < (locatorCounts.get(key.slice(0, separator)) ?? 0);
+    if (!represented) {
+      report.unsupported.push({
+        kind: "locator_health",
+        identifier: key,
+        source: "indexes/locator-health.json",
+        reason: "orphan_locator_health",
+        disposition: "not_imported",
+      });
+    }
+  }
+}
+
 export function convertV070(source) {
   const report = conversionReport();
   const usedIds = new Set();
   const primaryByOriginal = new Map();
   const converted = [];
+  const candidates = candidateList(source);
+  const reservedIds = new Set(candidates
+    .map(({ payload }) => payload?.id)
+    .filter((id) => identifierIsValid(id)));
 
-  for (const candidate of candidateList(source)) {
+  for (const candidate of candidates) {
     const payload = candidate.payload;
     if (
       payload === null
@@ -190,7 +244,7 @@ export function convertV070(source) {
       });
       continue;
     }
-    const id = assignedId(source, candidate, usedIds, report);
+    const id = assignedId(source, candidate, usedIds, reservedIds, report);
     let bundle;
     try {
       bundle = {
@@ -415,6 +469,7 @@ export function convertV070(source) {
   converted.sort((left, right) =>
     left.bundle.id < right.bundle.id ? -1 : left.bundle.id > right.bundle.id ? 1 : 0
   );
+  reportOrphanLocatorHealth(source, candidates, report);
   return {
     records: converted.map(({ bundle }) => bundle),
     report: finalizeReport(report),
