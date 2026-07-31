@@ -11,6 +11,53 @@ export const JSON_LIMITS = Object.freeze({
 });
 
 const READ_CHUNK_BYTES = 64 * 1024;
+const ARRAY_BUFFER_IS_VIEW = ArrayBuffer.isView;
+const UINT8_ARRAY = Uint8Array;
+const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype);
+const TYPED_ARRAY_BUFFER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "buffer",
+).get;
+const TYPED_ARRAY_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "byteLength",
+).get;
+const TYPED_ARRAY_BYTE_OFFSET = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "byteOffset",
+).get;
+const TYPED_ARRAY_TAG = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  Symbol.toStringTag,
+).get;
+
+function byteView(value) {
+  try {
+    if (
+      !ARRAY_BUFFER_IS_VIEW(value)
+      || TYPED_ARRAY_TAG.call(value) !== "Uint8Array"
+    ) {
+      return null;
+    }
+    return {
+      buffer: TYPED_ARRAY_BUFFER.call(value),
+      byteLength: TYPED_ARRAY_BYTE_LENGTH.call(value),
+      byteOffset: TYPED_ARRAY_BYTE_OFFSET.call(value),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function copyByteView(view) {
+  try {
+    return Buffer.from(
+      new UINT8_ARRAY(view.buffer, view.byteOffset, view.byteLength),
+    );
+  } catch {
+    return null;
+  }
+}
 
 function invalidUtf8(resource, identifiers = {}, cause = undefined) {
   return lodestarError(
@@ -382,27 +429,29 @@ export async function readStreamBounded(
         throw streamByteLimit(resource, bytes + encodedBytes, maximum);
       }
       buffer = Buffer.from(validated.text);
-    } else if (Buffer.isBuffer(chunk)) {
-      if (chunk.length > maximum - bytes) {
-        throw streamByteLimit(resource, bytes + chunk.length, maximum);
-      }
-      if (pendingHigh) throw invalidUtf8(resource);
-      buffer = chunk;
-    } else if (chunk instanceof Uint8Array) {
-      if (chunk.byteLength > maximum - bytes) {
-        throw streamByteLimit(resource, bytes + chunk.byteLength, maximum);
-      }
-      if (pendingHigh) throw invalidUtf8(resource);
-      buffer = Buffer.from(chunk);
     } else {
-      throw lodestarError(
-        "invalid_input",
-        `${resource} yielded a chunk that is not text or bytes.`,
-        {
-          identifiers: { resource, received_type: typeof chunk },
-          action: "Send JSON through string, Buffer, or Uint8Array chunks.",
-        },
-      );
+      const view = byteView(chunk);
+      if (view !== null) {
+        if (view.byteLength > maximum - bytes) {
+          throw streamByteLimit(
+            resource,
+            bytes + view.byteLength,
+            maximum,
+          );
+        }
+        if (pendingHigh) throw invalidUtf8(resource);
+        buffer = copyByteView(view);
+      }
+      if (buffer === null || buffer === undefined) {
+        throw lodestarError(
+          "invalid_input",
+          `${resource} yielded a chunk that is not text or bytes.`,
+          {
+            identifiers: { resource, received_type: typeof chunk },
+            action: "Send JSON through string, Buffer, or Uint8Array chunks.",
+          },
+        );
+      }
     }
     if (buffer.length === 0) continue;
     bytes += buffer.length;

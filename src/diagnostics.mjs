@@ -5,9 +5,17 @@ const MAXIMUM_DEPTH = 6;
 const MAXIMUM_ITEMS = 32;
 const MAXIMUM_NODES = 256;
 
+function arrayKind(value) {
+  try {
+    return Array.isArray(value);
+  } catch {
+    return null;
+  }
+}
+
 function valueType(value) {
   if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
+  if (arrayKind(value) === true) return "array";
   return typeof value;
 }
 
@@ -25,10 +33,20 @@ function truncateString(value, maximum) {
 
 export function boundedDiagnosticValue(
   value,
-  {
-    maximumBytes = DEFAULT_MAXIMUM_BYTES,
-  } = {},
+  options = {},
 ) {
+  let maximumBytes = DEFAULT_MAXIMUM_BYTES;
+  try {
+    if (
+      typeof options?.maximumBytes === "number"
+      && Number.isFinite(options.maximumBytes)
+      && options.maximumBytes > 0
+    ) {
+      maximumBytes = Math.floor(options.maximumBytes);
+    }
+  } catch {
+    // Retain the fixed default when options cannot be inspected.
+  }
   const seen = new Set();
   const state = {
     nodes: 0,
@@ -69,13 +87,35 @@ export function boundedDiagnosticValue(
 
     seen.add(current);
     let result;
-    if (Array.isArray(current)) {
+    const isArray = arrayKind(current);
+    if (isArray === null) {
+      seen.delete(current);
+      return "[unreadable diagnostic value]";
+    }
+    if (isArray) {
       result = [];
-      const selected = current.slice(0, MAXIMUM_ITEMS);
-      for (const entry of selected) result.push(visit(entry, depth + 1));
-      if (current.length > selected.length) {
+      let length;
+      try {
+        length = current.length;
+      } catch {
+        seen.delete(current);
+        return "[unreadable diagnostic value]";
+      }
+      if (!Number.isSafeInteger(length) || length < 0) {
+        seen.delete(current);
+        return "[unreadable diagnostic value]";
+      }
+      const selectedLength = Math.min(length, MAXIMUM_ITEMS);
+      for (let index = 0; index < selectedLength; index += 1) {
+        try {
+          result.push(visit(current[index], depth + 1));
+        } catch {
+          result.push("[unreadable diagnostic value]");
+        }
+      }
+      if (length > selectedLength) {
         result.push({
-          diagnostic_omitted_items: current.length - selected.length,
+          diagnostic_omitted_items: length - selectedLength,
         });
       }
     } else {
