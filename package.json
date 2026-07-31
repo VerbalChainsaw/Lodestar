@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Small local SQLite registry for structured project context",
   "type": "module",
   "bin": {

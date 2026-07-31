@@ -6,6 +6,7 @@ import {
   readFile,
   readdir,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import { Readable } from "node:stream";
 import os from "node:os";
@@ -85,6 +86,99 @@ test("CLI initializes, writes, reads, searches, diagnoses, and exports JSON", as
 
   const exported = await invoke(["export", ...common]);
   assert.equal(JSON.parse(exported.stdout).data.records.length, 1);
+});
+
+test("the first valid put initializes its database without a setup command", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "missing", "lodestar.db");
+
+  const put = await invoke(
+    ["put", "--db", file],
+    JSON.stringify(inputRecord()),
+  );
+  assert.equal(put.exitCode, 0, put.stderr);
+  assert.equal(JSON.parse(put.stdout).data.id, "record:cli");
+
+  const get = await invoke(["get", "cli alias", "--db", file]);
+  assert.equal(get.exitCode, 0, get.stderr);
+  assert.equal(JSON.parse(get.stdout).data.id, "record:cli");
+});
+
+test("the first valid put resumes a zero-byte database reservation", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  await writeFile(file, "");
+
+  const put = await invoke(
+    ["put", "--db", file],
+    JSON.stringify(inputRecord()),
+  );
+  assert.equal(put.exitCode, 0, put.stderr);
+
+  const get = await invoke(["get", "record:cli", "--db", file]);
+  assert.equal(get.exitCode, 0, get.stderr);
+  assert.equal(JSON.parse(get.stdout).data.id, "record:cli");
+});
+
+test("invalid first puts and missing reads remain side-effect free", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "missing", "lodestar.db");
+  const invalid = await invoke(
+    ["put", "--db", file],
+    JSON.stringify({ id: "invalid" }),
+  );
+  assert.equal(invalid.exitCode, 2);
+  assert.equal(JSON.parse(invalid.stderr).error.code, "invalid_input");
+  await assert.rejects(access(path.dirname(file)), { code: "ENOENT" });
+
+  for (const args of [
+    ["get", "missing", "--db", file],
+    ["find", "missing", "--db", file],
+    ["links", "missing", "--db", file],
+    ["doctor", "--db", file],
+    ["export", "--db", file],
+  ]) {
+    const result = await invoke(args);
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stderr).error.code, "database_not_found");
+    await assert.rejects(access(path.dirname(file)), { code: "ENOENT" });
+  }
+});
+
+test("a first put never replaces an existing non-Lodestar file", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "owned.db");
+  const sentinel = Buffer.from("not a Lodestar database");
+  await writeFile(file, sentinel);
+
+  const put = await invoke(
+    ["put", "--db", file],
+    JSON.stringify(inputRecord()),
+  );
+  assert.notEqual(put.exitCode, 0);
+  assert.equal(put.stdout, "");
+  assert.deepEqual(await readFile(file), sentinel);
+});
+
+test("concurrent first puts preserve both valid records", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "missing", "lodestar.db");
+  const records = ["first", "second"].map((suffix) => ({
+    ...inputRecord(),
+    id: `record:${suffix}`,
+    name: `Record ${suffix}`,
+    aliases: [`alias ${suffix}`],
+  }));
+
+  const puts = await Promise.all(records.map((record) =>
+    invoke(["put", "--db", file], JSON.stringify(record))
+  ));
+  for (const put of puts) assert.equal(put.exitCode, 0, put.stderr);
+  for (const record of records) {
+    const get = await invoke(["get", record.id, "--db", file]);
+    assert.equal(get.exitCode, 0, get.stderr);
+    assert.equal(JSON.parse(get.stdout).data.id, record.id);
+  }
 });
 
 test("every public command help path is JSON and side-effect free", async (t) => {
