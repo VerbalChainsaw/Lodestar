@@ -1,7 +1,7 @@
 {
   "name": "lodestar-agent-context",
-  "version": "1.0.1",
-  "description": "Small local SQLite registry for structured project context",
+  "version": "1.0.2",
+  "description": "Small offline SQLite context registry for humans and software agents",
   "type": "module",
   "bin": {
     "lodestar": "lodestar.mjs"
@@ -29,10 +29,14 @@
     "access": "public"
   },
   "keywords": [
+    "agents",
     "context",
+    "context-registry",
     "sqlite",
     "cli",
     "local-first",
+    "offline",
+    "json",
     "machine-readable"
   ],
   "author": "VerbalChainsaw",

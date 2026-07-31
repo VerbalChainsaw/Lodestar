@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.2 - 2026-07-31
+
+- Publish a clearer GitHub and npm front page with an honest product summary,
+  direct install path, current verification badges, and the zero-setup first
+  write contract above the fold.
+- Add original launch hero and social-card artwork plus reusable announcement
+  copy.
+- Attach both launch graphics to the GitHub release alongside the exact npm
+  tarball and checksums.
+- Improve npm discovery metadata without adding dependencies, executables, or
+  runtime behavior.
+- Keep the database schema, storage behavior, CLI commands, migration contract,
+  and all other runtime semantics identical to 1.0.1.
+
 ## 1.0.1 - 2026-07-31
 
 - Remove the mandatory first-run setup step: the first structurally valid
