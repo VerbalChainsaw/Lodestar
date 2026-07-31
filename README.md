@@ -1,12 +1,45 @@
 # Lodestar
 
-Lodestar is a small, local context registry for humans and software agents.
-It stores structured project knowledge in one SQLite database and retrieves it
-through stable IDs, exact aliases, bounded search, and explicit links.
+<p align="center">
+  <img
+    src="https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-launch-hero.png"
+    alt="Lodestar: local context, one database, one CLI, small by design"
+    width="100%"
+  />
+</p>
+
+<p align="center">
+  <strong>A small, durable, machine-first local context registry.</strong>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/lodestar-agent-context"><img alt="npm version" src="https://img.shields.io/npm/v/lodestar-agent-context?style=flat-square"></a>
+  <a href="https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml"><img alt="cross-platform checks" src="https://img.shields.io/github/actions/workflow/status/VerbalChainsaw/Lodestar/ci.yml?branch=main&style=flat-square&label=checks"></a>
+  <a href="https://github.com/VerbalChainsaw/Lodestar/blob/main/LICENSE"><img alt="MIT license" src="https://img.shields.io/npm/l/lodestar-agent-context?style=flat-square"></a>
+</p>
+
+Lodestar stores compact, structured project knowledge in one local SQLite
+database and retrieves it through stable IDs, exact aliases, bounded search,
+and explicit links. JSON is the primary interface, so humans and agents use
+the same predictable contract.
 
 Lodestar does not inspect repositories, infer readiness, orchestrate agents,
 run services, contact providers, or claim that its records fully describe a
 project. A missing record means only that Lodestar lacks that knowledge.
+
+## Why Lodestar
+
+Agents often start by recursively searching a repository and rebuilding
+context that a project already knows. Lodestar gives them a smaller first
+move:
+
+- retrieve a known fact by stable ID or exact alias;
+- follow explicit relationships instead of inferring them;
+- distinguish known, empty, unavailable, unknown, and stale knowledge;
+- fall back to normal repository inspection when the registry is insufficient.
+
+The result is deliberately plain: one executable, one database, no background
+service, no plugins, and no network requirement at runtime.
 
 ## Requirements
 
