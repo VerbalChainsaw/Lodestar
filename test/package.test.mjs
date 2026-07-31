@@ -44,13 +44,23 @@ const EXPECTED_PACKAGE_FILES = [
 ];
 
 function packageArtifact() {
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npmCli = process.env.npm_execpath;
+  const command = npmCli
+    ? process.execPath
+    : process.platform === "win32"
+      ? "npm.cmd"
+      : "npm";
+  const args = ["pack", "--dry-run", "--json", "--ignore-scripts"];
   const packed = spawnSync(
-    npm,
-    ["pack", "--dry-run", "--json", "--ignore-scripts"],
-    { cwd: ROOT, encoding: "utf8" },
+    command,
+    npmCli ? [npmCli, ...args] : args,
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      shell: !npmCli && process.platform === "win32",
+    },
   );
-  assert.equal(packed.status, 0, packed.stderr);
+  assert.equal(packed.status, 0, packed.stderr || packed.error?.stack);
   return JSON.parse(packed.stdout)[0];
 }
 
