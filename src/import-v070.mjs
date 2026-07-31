@@ -4,7 +4,6 @@ import path from "node:path";
 
 import {
   beginImmediate,
-  cleanupNewDatabase,
   commit,
   databaseFileIsEmpty,
   openConnection,
@@ -150,7 +149,6 @@ async function convertInsideTransaction({
   timestamp,
   create,
   dryRun,
-  noteCommitAttempt = () => {},
 }) {
   beginImmediate(db, database);
   try {
@@ -184,10 +182,13 @@ async function convertInsideTransaction({
     assertReportBound(report);
     if (dryRun) rollback(db);
     else {
-      noteCommitAttempt();
       try {
         commit(db, database);
       } catch (error) {
+        if (db.isTransaction === true) {
+          rollback(db);
+          throw error;
+        }
         throw lodestarError(
           "import_commit_outcome_unknown",
           "SQLite did not confirm the legacy import commit outcome.",
@@ -265,8 +266,6 @@ export async function importV070({
     : false;
   let db;
   let committed = false;
-  let commitAttempted = false;
-  let reserved = false;
   try {
     if (!existed) {
       await mkdir(path.dirname(database), { recursive: true });
@@ -275,7 +274,6 @@ export async function importV070({
         database,
       });
       await reserveNewDatabase(database);
-      reserved = true;
     }
     db = existed
       ? resumableEmptyFile
@@ -290,9 +288,6 @@ export async function importV070({
       timestamp,
       create: !existed || resumableEmptyFile,
       dryRun: false,
-      noteCommitAttempt: () => {
-        commitAttempted = true;
-      },
     });
     committed = true;
     db.close();
@@ -333,19 +328,6 @@ export async function importV070({
       db?.close();
     } catch {
       // The import error remains authoritative.
-    }
-    if (reserved && !committed && !commitAttempted) {
-      await cleanupNewDatabase(database).catch((cleanupError) => {
-        throw lodestarError(
-          "import_cleanup_failed",
-          "Import failed and its new destination could not be removed.",
-          {
-            identifiers: { database, committed: false },
-            action: "Inspect and remove only the reported destination files.",
-            cause: new AggregateError([error, cleanupError]),
-          },
-        );
-      });
     }
     throw error?.name === "LodestarError"
       ? error

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-  access,
   readFile,
   readdir,
   rm,
@@ -204,7 +203,7 @@ test("commit ambiguity is explicit and preserves a possibly committed init", asy
   db.close();
 });
 
-test("definite init commit failure identifies and cleans its destination", async (t) => {
+test("definite init commit failure preserves a resumable reservation", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");
   const originalExec = DatabaseSync.prototype.exec;
@@ -226,7 +225,16 @@ test("definite init commit failure identifies and cleans its destination", async
   } finally {
     DatabaseSync.prototype.exec = originalExec;
   }
-  await assert.rejects(access(file), { code: "ENOENT" });
+  assert.equal((await stat(file)).size, 0);
+  const resumed = await initializeDatabase(file);
+  assert.equal(resumed.created, true);
+  const db = await openReadDatabase(file);
+  assert.equal(
+    db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
+      .get().value,
+    "1",
+  );
+  db.close();
 });
 
 test("SQLite rolls back an interrupted uncommitted transaction", async (t) => {

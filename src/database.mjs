@@ -1,4 +1,4 @@
-import { lstat, mkdir, open as openFile, unlink } from "node:fs/promises";
+import { lstat, mkdir, open as openFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -370,7 +370,6 @@ export async function reserveNewDatabase(file) {
         },
       );
     }
-    if (handle) await unlink(file).catch(() => {});
     throw wrapError(
       error,
       "database_write_failed",
@@ -380,19 +379,6 @@ export async function reserveNewDatabase(file) {
         action: "Check the destination directory and retry.",
       },
     );
-  }
-}
-
-export async function cleanupNewDatabase(file) {
-  for (const candidate of [
-    file,
-    `${file}-journal`,
-    `${file}-wal`,
-    `${file}-shm`,
-  ]) {
-    await unlink(candidate).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-    });
   }
 }
 
@@ -427,12 +413,10 @@ export async function initializeDatabase(
 
   const createdAt = now().toISOString();
   let db;
-  let reserved = false;
   try {
     await mkdir(path.dirname(file), { recursive: true });
     if (!resumableEmptyFile) {
       await reserveNewDatabase(file);
-      reserved = true;
     }
     db = openConnection(file);
     initializeConnection(db, { createdAt, database: file });
@@ -452,36 +436,21 @@ export async function initializeDatabase(
     }
     const commitOutcomeUnknown =
       error?.code === "database_commit_outcome_unknown";
-    try {
-      if (reserved && !commitOutcomeUnknown) {
-        await cleanupNewDatabase(file);
-      }
-    } catch (cleanupError) {
-      throw lodestarError(
-        "database_init_cleanup_failed",
-        "Database initialization failed and the new file could not be removed.",
-        {
-          identifiers: { database: file },
-          action: "Inspect and remove only the reported new database files.",
-          cause: new AggregateError([error, cleanupError]),
-        },
-      );
-    }
     if (commitOutcomeUnknown) throw error;
-    if (resumableEmptyFile) {
-      try {
-        const existing = await openReadDatabase(file);
-        const metadata = readMetadata(existing, file);
-        existing.close();
-        return {
-          database: file,
-          schema_version: SCHEMA_VERSION,
-          created: false,
-          created_at: metadata.created_at,
-        };
-      } catch {
-        // Preserve the initialization error when no concurrent creator won.
-      }
+    let existing;
+    try {
+      existing = await openReadDatabase(file);
+      const metadata = readMetadata(existing, file);
+      return {
+        database: file,
+        schema_version: SCHEMA_VERSION,
+        created: false,
+        created_at: metadata.created_at,
+      };
+    } catch {
+      // Preserve the initialization error when no concurrent creator won.
+    } finally {
+      existing?.close();
     }
     throw error?.name === "LodestarError"
       ? error
