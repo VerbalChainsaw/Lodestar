@@ -39,6 +39,7 @@ const EXPECTED_PACKAGE_FILES = [
   "src/queries.mjs",
   "src/records.mjs",
   "src/schema.mjs",
+  "src/stored-semantics.mjs",
   "src/validate.mjs",
 ];
 

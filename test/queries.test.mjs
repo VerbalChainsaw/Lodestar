@@ -116,6 +116,28 @@ test("links reports deterministic one-hop incoming and outgoing peers", () => {
   db.close();
 });
 
+test("summary reads reject invalid record creation timestamps", () => {
+  const db = memoryDatabase();
+  const now = () => new Date("2026-07-30T10:00:00.000Z");
+  putRecord(db, record("r:target"), { now });
+  putRecord(db, record("r:owner", {
+    links: [{ relationship: "points_to", to_id: "r:target" }],
+  }), { now });
+  db.exec("PRAGMA ignore_check_constraints = ON");
+  db.prepare("UPDATE records SET created_at = ? WHERE id = ?")
+    .run("invalid", "r:target");
+
+  assert.throws(
+    () => findRecords(db, "r:target"),
+    ({ code }) => code === "database_integrity",
+  );
+  assert.throws(
+    () => linkedRecords(db, "r:owner"),
+    ({ code }) => code === "database_integrity",
+  );
+  db.close();
+});
+
 test("export is canonical, complete, and free of volatile export metadata", () => {
   const db = memoryDatabase();
   putRecord(db, record("r:one", { aliases: ["one"] }), {

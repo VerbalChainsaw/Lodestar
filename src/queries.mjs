@@ -61,6 +61,7 @@ function recordFields(row) {
     validateType(row.type);
     validateName(row.name);
     validateScope(row.scope);
+    validateTimestamp(row.created_at, "records.created_at");
     validateTimestamp(row.updated_at, "records.updated_at");
     return parseStoredContent(row.content_json, { id: row.id });
   } catch (error) {
@@ -137,6 +138,7 @@ export function findRecords(
       r.name,
       r.scope,
       r.content_json,
+      r.created_at,
       r.updated_at,
       CASE
         WHEN r.id = $query
@@ -198,6 +200,7 @@ export function linkedRecords(
       peer.name,
       peer.scope,
       peer.content_json,
+      peer.created_at,
       peer.updated_at
     FROM links l
     JOIN records peer ON peer.id = l.to_id
@@ -215,6 +218,7 @@ export function linkedRecords(
       peer.name,
       peer.scope,
       peer.content_json,
+      peer.created_at,
       peer.updated_at
     FROM links l
     JOIN records peer ON peer.id = l.from_id

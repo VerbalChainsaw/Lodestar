@@ -6,6 +6,7 @@ import {
   SCHEMA_VERSION,
 } from "./schema.mjs";
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
+import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { LIMITS, validateTimestamp } from "./validate.mjs";
 
 const MAX_ISSUES = 100;
@@ -29,7 +30,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   const add = (code, message, identifiers = {}, action = undefined) => {
     if (issues.length >= MAX_ISSUES) {
       omittedIssues += 1;
-      return;
+      return false;
     }
     issues.push({
       code,
@@ -39,6 +40,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       }),
       ...(action ? { action } : {}),
     });
+    return true;
   };
 
   let integrity = [];
@@ -247,156 +249,8 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     if (groups.length > 100) omittedIssues += 1;
   }
 
-  if (validColumns.records) {
-    const malformed = db.prepare(String.raw`
-      SELECT id FROM records
-      WHERE length(CAST(content_json AS BLOB)) > ${LIMITS.contentBytes}
-        OR CASE
-        WHEN json_valid(content_json)
-          THEN (
-            json_type(content_json) <> 'object'
-            OR COALESCE(json_type(content_json, '$.state'), '') <> 'text'
-            OR json_extract(content_json, '$.state') NOT IN
-              ('known', 'known_empty', 'unavailable', 'unknown', 'stale')
-          )
-        ELSE 1
-      END
-      ORDER BY id
-      LIMIT 101
-    `).all();
-    for (const { id } of malformed.slice(0, 100)) {
-      add("record_content_invalid", "A record has an invalid content envelope.", {
-        id,
-      });
-    }
-    if (malformed.length > 100) omittedIssues += 1;
-
-    const fields = db.prepare(String.raw`
-      SELECT id FROM records
-      WHERE length(CAST(id AS BLOB)) NOT BETWEEN 1 AND ${LIMITS.identifierBytes}
-        OR length(CAST(type AS BLOB)) NOT BETWEEN 1 AND ${LIMITS.typeBytes}
-        OR length(CAST(name AS BLOB)) NOT BETWEEN 1 AND ${LIMITS.nameBytes}
-        OR length(CAST(scope AS BLOB)) NOT BETWEEN 1 AND ${LIMITS.scopeBytes}
-      ORDER BY id
-      LIMIT 101
-    `).all();
-    for (const { id } of fields.slice(0, 100)) {
-      add("record_fields_invalid", "A record has an out-of-bounds field.", {
-        id,
-      });
-    }
-    if (fields.length > 100) omittedIssues += 1;
-
-    const timestamps = db.prepare(String.raw`
-      SELECT id, created_at, updated_at FROM records
-      WHERE (
-        length(CAST(created_at AS BLOB)) <> 24
-        OR COALESCE(
-          strftime('%Y-%m-%dT%H:%M:%fZ', created_at) = created_at,
-          0
-        ) = 0
-        OR length(CAST(updated_at AS BLOB)) <> 24
-        OR COALESCE(
-          strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) = updated_at,
-          0
-        ) = 0
-      )
-      ORDER BY id
-      LIMIT 101
-    `).all();
-    for (const row of timestamps.slice(0, 100)) {
-      for (const field of ["created_at", "updated_at"]) {
-        try {
-          validateTimestamp(row[field], `records.${field}`);
-        } catch {
-          add("record_timestamp_invalid", "A record timestamp is invalid.", {
-            id: row.id,
-            field,
-            value: row[field],
-          });
-        }
-      }
-    }
-    if (timestamps.length > 100) omittedIssues += 1;
-  }
-
-  if (validColumns.links) {
-    const timestamps = db.prepare(String.raw`
-      SELECT from_id, relationship, to_id, created_at FROM links
-      WHERE length(CAST(created_at AS BLOB)) <> 24
-        OR COALESCE(
-          strftime('%Y-%m-%dT%H:%M:%fZ', created_at) = created_at,
-          0
-        ) = 0
-      ORDER BY from_id, relationship, to_id
-      LIMIT 101
-    `).all();
-    for (const row of timestamps.slice(0, 100)) {
-      try {
-        validateTimestamp(row.created_at, "links.created_at");
-      } catch {
-        add("link_timestamp_invalid", "A link timestamp is invalid.", {
-          from_id: row.from_id,
-          relationship: row.relationship,
-          to_id: row.to_id,
-          value: row.created_at,
-        });
-      }
-    }
-    if (timestamps.length > 100) omittedIssues += 1;
-  }
-
-  if (validColumns.sources) {
-    const malformed = db.prepare(String.raw`
-      SELECT record_id, origin FROM sources
-      WHERE length(CAST(origin AS BLOB)) NOT BETWEEN 1 AND ${LIMITS.originBytes}
-        OR length(CAST(metadata_json AS BLOB)) > ${LIMITS.sourceMetadataBytes}
-        OR freshness NOT IN ('current', 'stale', 'unknown')
-        OR CASE
-        WHEN json_valid(metadata_json)
-          THEN (
-            json_type(metadata_json) <> 'object'
-            OR COALESCE(json_type(metadata_json, '$.inspection'), '') <> 'text'
-            OR json_extract(metadata_json, '$.inspection') NOT IN
-              ('inspected', 'not_inspected', 'inspected_no_value', 'unknown')
-          )
-        ELSE 1
-      END
-      ORDER BY record_id, origin
-      LIMIT 101
-    `).all();
-    for (const row of malformed.slice(0, 100)) {
-      add("source_metadata_invalid", "A source has invalid metadata.", row);
-    }
-    if (malformed.length > 100) omittedIssues += 1;
-  }
-
-  if (validColumns.aliases) {
-    const malformed = db.prepare(String.raw`
-      SELECT alias, record_id FROM aliases
-      WHERE length(CAST(alias AS BLOB))
-        NOT BETWEEN 1 AND ${LIMITS.identifierBytes}
-      ORDER BY alias
-      LIMIT 101
-    `).all();
-    for (const row of malformed.slice(0, 100)) {
-      add("alias_invalid", "An alias exceeds its storage bounds.", row);
-    }
-    if (malformed.length > 100) omittedIssues += 1;
-  }
-
-  if (validColumns.links) {
-    const malformed = db.prepare(String.raw`
-      SELECT from_id, relationship, to_id FROM links
-      WHERE length(CAST(relationship AS BLOB))
-        NOT BETWEEN 1 AND ${LIMITS.relationshipBytes}
-      ORDER BY from_id, relationship, to_id
-      LIMIT 101
-    `).all();
-    for (const row of malformed.slice(0, 100)) {
-      add("link_invalid", "A link relationship exceeds its storage bounds.", row);
-    }
-    if (malformed.length > 100) omittedIssues += 1;
+  for (const issue of storedSemanticIssues(db, validColumns)) {
+    if (!add(issue.code, issue.message, issue.identifiers)) break;
   }
 
   if (validColumns.aliases && validColumns.records) {
