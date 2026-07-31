@@ -134,6 +134,26 @@ function normalizedSql(value) {
   return value.replace(/\s+/gu, " ").trim();
 }
 
+const SQLITE_STATISTICS_DEFINITIONS = Object.freeze({
+  sqlite_stat1: Object.freeze({
+    type: "table",
+    sql: "CREATE TABLE sqlite_stat1(tbl,idx,stat)",
+  }),
+  sqlite_stat4: Object.freeze({
+    type: "table",
+    sql: "CREATE TABLE sqlite_stat4(tbl,idx,nEq,nLt,nDLt,sample)",
+  }),
+});
+
+function isSqliteStatisticsTable({ type, name, tbl_name: table, sql }) {
+  const expected = SQLITE_STATISTICS_DEFINITIONS[name];
+  return expected !== undefined
+    && type === expected.type
+    && table === name
+    && typeof sql === "string"
+    && normalizedSql(sql) === expected.sql;
+}
+
 function expectedDefinitions() {
   const definitions = {};
   for (const statement of SCHEMA_SQL.split(";")) {
@@ -153,10 +173,10 @@ export const EXPECTED_SCHEMA_DEFINITIONS = expectedDefinitions();
 
 export function inspectSchemaDefinitions(db) {
   const rows = db.prepare(
-    "SELECT type, name, sql FROM sqlite_schema "
+    "SELECT type, name, tbl_name, sql FROM sqlite_schema "
       + "WHERE type IN ('table', 'index', 'trigger', 'view') "
-      + "AND lower(substr(name, 1, 7)) <> 'sqlite_' ORDER BY name",
-  ).all();
+      + "ORDER BY name",
+  ).all().filter((row) => !isSqliteStatisticsTable(row));
   const actual = Object.fromEntries(rows.map(({ type, name, sql }) => [
     name,
     {
