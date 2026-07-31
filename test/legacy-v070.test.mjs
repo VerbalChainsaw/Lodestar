@@ -144,6 +144,80 @@ test("ambiguous locator health is not copied across duplicate IDs", () => {
   ));
 });
 
+test("every unique locator-health observation is imported or reported", () => {
+  const cases = [
+    {
+      key: "record:rejected#0",
+      record: legacyRecord({
+        id: "record:rejected",
+        locators: [{ type: "file", path: "rejected.txt" }],
+        oversized: "x".repeat(256 * 1024),
+      }),
+      health: { status: "ok" },
+    },
+    {
+      key: "record:invalid-locator#0",
+      record: legacyRecord({
+        id: "record:invalid-locator",
+        locators: [{ type: "file" }],
+      }),
+      health: { status: "missing" },
+    },
+    {
+      key: "record:duplicate-origin#1",
+      record: legacyRecord({
+        id: "record:duplicate-origin",
+        locators: [
+          { type: "file", path: "same.txt" },
+          { type: "file", path: "same.txt" },
+        ],
+      }),
+      health: { status: "unreadable" },
+    },
+    {
+      key: "record:source-limit#31",
+      record: legacyRecord({
+        id: "record:source-limit",
+        locators: Array.from({ length: 32 }, (_, index) => ({
+          type: "file",
+          path: `source-${index}.txt`,
+        })),
+      }),
+      health: { status: "unchecked" },
+    },
+    {
+      key: "record:compacted#0",
+      record: legacyRecord({
+        id: "record:compacted",
+        locators: [{ type: "file", path: "compacted.txt" }],
+      }),
+      health: {
+        status: "ok",
+        detail: "x".repeat(65 * 1024),
+      },
+    },
+  ];
+
+  for (const item of cases) {
+    const converted = convertV070(sourceWith([item.record], {
+      v: 1,
+      generation: GENERATION,
+      locators: { [item.key]: item.health },
+    }));
+    const entries = converted.report.unsupported.filter(
+      ({ kind, identifier }) =>
+        kind === "locator_health" && identifier === item.key,
+    );
+    assert.deepEqual(entries.map((entry) => ({ ...entry })), [{
+      kind: "locator_health",
+      identifier: item.key,
+      source: "indexes/locator-health.json",
+      reason: "unimported_locator_health",
+      disposition: "not_imported",
+    }], item.key);
+  }
+});
+
 test("the v0.7 reader rejects a different current-pointer version", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-pointer-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

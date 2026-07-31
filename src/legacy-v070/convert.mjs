@@ -8,7 +8,11 @@ import {
   LIMITS,
   validatePutInput,
 } from "../validate.mjs";
-import { selectLocatorHealth } from "./locator-health.mjs";
+import {
+  beginLocatorHealthCandidate,
+  finishLocatorHealthCandidate,
+  selectLocatorHealth,
+} from "./locator-health.mjs";
 import { locationText, mapCandidate } from "./mapping.mjs";
 
 const CONTROL = /[\u0000-\u001f\u007f]/gu;
@@ -212,6 +216,7 @@ export function convertV070(source) {
     }
     const id = assignedId(source, candidate, usedIds, reservedIds, report);
     let bundle;
+    beginLocatorHealthCandidate(selectedHealth.source);
     try {
       bundle = {
         id,
@@ -221,6 +226,7 @@ export function convertV070(source) {
       };
       validatePutInput(bundle);
     } catch (error) {
+      finishLocatorHealthCandidate(selectedHealth.source, false);
       if (error?.name !== "LodestarError") throw error;
       usedIds.delete(id);
       report.skipped.push({
@@ -232,6 +238,7 @@ export function convertV070(source) {
       });
       continue;
     }
+    finishLocatorHealthCandidate(selectedHealth.source, true);
     if (typeof payload.id === "string" && !primaryByOriginal.has(payload.id)) {
       primaryByOriginal.set(payload.id, id);
     }

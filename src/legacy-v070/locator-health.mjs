@@ -45,17 +45,21 @@ function keyOwnerCount(key, owners) {
   return ownersAtIndex(owners.get(key.slice(0, separator)), index);
 }
 
-function* unsupportedEntries(health, owners) {
+const SELECTED_HEALTH = new WeakMap();
+
+function* unsupportedEntries(health, owners, consumed) {
   for (const key of Object.keys(health.locators).sort()) {
     const count = keyOwnerCount(key, owners);
-    if (count === 1) continue;
+    if (count === 1 && consumed.has(key)) continue;
     yield {
       kind: "locator_health",
       identifier: key,
       source: "indexes/locator-health.json",
       reason: count === 0
         ? "orphan_locator_health"
-        : "ambiguous_locator_health",
+        : count > 1
+          ? "ambiguous_locator_health"
+          : "unimported_locator_health",
       ...(count > 1 ? { owners: count } : {}),
       disposition: "not_imported",
     };
@@ -66,12 +70,36 @@ export function selectLocatorHealth(source, candidates) {
   const health = source.locatorHealth;
   if (!health) return { source, unsupported: [] };
   const owners = locatorOwners(candidates);
+  const consumed = new Set();
   const selectedSource = { ...source };
-  SELECTED_HEALTH.set(selectedSource, { health, owners });
+  SELECTED_HEALTH.set(selectedSource, {
+    health,
+    owners,
+    consumed,
+    pending: null,
+  });
   return {
     source: selectedSource,
-    unsupported: unsupportedEntries(health, owners),
+    unsupported: unsupportedEntries(health, owners, consumed),
   };
+}
+
+export function beginLocatorHealthCandidate(source) {
+  const selection = SELECTED_HEALTH.get(source);
+  if (selection) selection.pending = new Set();
+}
+
+export function retainLocatorHealth(source, key) {
+  SELECTED_HEALTH.get(source)?.pending?.add(key);
+}
+
+export function finishLocatorHealthCandidate(source, accepted) {
+  const selection = SELECTED_HEALTH.get(source);
+  if (!selection?.pending) return;
+  if (accepted) {
+    for (const key of selection.pending) selection.consumed.add(key);
+  }
+  selection.pending = null;
 }
 
 export function selectedLocatorHealth(source, key) {
@@ -90,4 +118,3 @@ export function selectedLocatorHealth(source, key) {
   }
   return locators[key];
 }
-const SELECTED_HEALTH = new WeakMap();
