@@ -8,7 +8,7 @@ import {
   LIMITS,
   truncateUtf8,
 } from "../validate.mjs";
-import { selectedLocatorHealth } from "./locator-health.mjs";
+import { retainLocatorHealth, selectedLocatorHealth } from "./locator-health.mjs";
 
 const CONTROL = /[\u0000-\u001f\u007f]/gu;
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/gu;
@@ -366,7 +366,10 @@ function locatorMetadata({
   };
   const text = canonicalStringify(metadata);
   const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes <= LIMITS.sourceMetadataBytes) return metadata;
+  if (bytes <= LIMITS.sourceMetadataBytes) {
+    if (health) retainLocatorHealth(source, `${payload.id}#${index}`);
+    return metadata;
+  }
   report.unsupported.push({
     kind: "source",
     source: locationText(location),
