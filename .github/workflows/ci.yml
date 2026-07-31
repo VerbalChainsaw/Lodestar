@@ -21,24 +21,30 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          node-version: 24.15.0
       - run: npm test
-      - run: node install.mjs --dry-run --skip-codex
-      - run: npm pack --dry-run
-      - run: npm pack
+      - run: npm run pack:check
+      - run: npm pack --json
       - name: Resolve package artifact
         shell: pwsh
         run: |
           $version = node -p "require('./package.json').version"
           "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
-      - run: node install.mjs --package "./${{ env.PACKAGE }}" --prefix .installer-smoke --home .installer-state --skip-codex
-      - run: npm install --prefix .package-smoke "./${{ env.PACKAGE }}"
-      - run: npm --prefix .package-smoke exec -- agentctx init --home ../.package-smoke-state
-      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state
-      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-state --deep
-      - run: npm --prefix .package-smoke exec -- agentctx snapshot --home ../.package-smoke-state --to ../.package-smoke-snapshot
-      - run: npm --prefix .package-smoke exec -- agentctx snapshot --verify ../.package-smoke-snapshot
-      - run: npm --prefix .package-smoke exec -- agentctx restore --from ../.package-smoke-snapshot --home ../.package-smoke-restored
-      - run: npm --prefix .package-smoke exec -- agentctx doctor --home ../.package-smoke-restored --deep
-      - run: npm --prefix .package-smoke exec -- agentctx maintain --home ../.package-smoke-state --skip-drift
-      - run: npm --prefix .package-smoke exec -- lodestar-performance --quick --iterations 3 --warmups 1 --json
+      - run: npm install --ignore-scripts --prefix .package-smoke "./${{ env.PACKAGE }}"
+      - name: Exercise the packed executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $database = Join-Path $PWD ".package-smoke-state/lodestar.db"
+          '{"id":"smoke","type":"note","name":"Smoke","scope":"global","content":{"state":"known","value":"packed"},"aliases":["packed smoke"],"links":[],"sources":[]}' |
+            Set-Content -NoNewline -Encoding utf8 .package-smoke-record.json
+          npm --prefix .package-smoke exec -- lodestar --help
+          npm --prefix .package-smoke exec -- lodestar init --db "$database"
+          npm --prefix .package-smoke exec -- lodestar put --file .package-smoke-record.json --db "$database"
+          npm --prefix .package-smoke exec -- lodestar get "packed smoke" --db "$database"
+          npm --prefix .package-smoke exec -- lodestar find packed --db "$database"
+          npm --prefix .package-smoke exec -- lodestar links smoke --db "$database"
+          npm --prefix .package-smoke exec -- lodestar doctor --db "$database"
+          npm --prefix .package-smoke exec -- lodestar export --db "$database"
+          npm --prefix .package-smoke exec -- lodestar delete smoke --db "$database"
