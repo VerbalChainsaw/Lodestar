@@ -16,6 +16,8 @@ import test from "node:test";
 import {
   initializeDatabase,
   openConnection,
+  beginImmediate,
+  commit,
   openReadDatabase,
   openWriteDatabase,
   transaction,
@@ -100,8 +102,7 @@ test("schema validation rejects forged reserved-prefix objects", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
-  const raw = new DatabaseSync(file);
-  raw.enableDefensive(false);
+  const raw = openConnection(file);
   raw.exec(
     "CREATE TRIGGER schema_probe AFTER UPDATE ON records "
       + "BEGIN SELECT 1; END",
