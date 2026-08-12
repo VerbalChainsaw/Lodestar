@@ -41,6 +41,7 @@ const EXPECTED_PACKAGE_FILES = [
   "src/schema.mjs",
   "src/stored-semantics.mjs",
   "src/validate.mjs",
+  "src/windows-install.mjs",
 ];
 
 function packageArtifact() {
@@ -151,6 +152,7 @@ test("runtime modules stay understandable in one sitting", async () => {
     const relative = path.relative(source, file);
     if (
       relative !== "import-v070.mjs"
+      && relative !== "windows-install.mjs"
       && !relative.startsWith(`legacy-v070${path.sep}`)
     ) {
       coreLines += lines;
