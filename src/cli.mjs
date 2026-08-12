@@ -3,11 +3,16 @@ import path from "node:path";
 
 import { AGENT_BOOTSTRAP } from "./bootstrap.mjs";
 import {
+  executeContinuityCli,
+  runCliService,
+} from "./continuity-cli.mjs";
+import { COMMANDS } from "./cli-commands.mjs";
+import {
   initializeDatabase,
+  openOrMigrateReadDatabase,
+  openOrMigrateWriteDatabase,
   openOrInitializeWriteDatabase,
   openDiagnosticDatabase,
-  openReadDatabase,
-  openWriteDatabase,
 } from "./database.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
 import {
@@ -34,77 +39,10 @@ import {
   putRecord,
 } from "./records.mjs";
 import { LIMITS, validatePutInput } from "./validate.mjs";
+import { LODESTAR_VERSION } from "./version.mjs";
 
-export const LODESTAR_VERSION = "1.0.3";
+export { LODESTAR_VERSION } from "./version.mjs";
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
-
-const COMMANDS = Object.freeze({
-  init: {
-    usage: "lodestar init [--db <path>]",
-    summary: "Initialize the SQLite registry.",
-    values: [],
-    booleans: [],
-    positionals: 0,
-  },
-  put: {
-    usage: "lodestar put [--file <path>] [--db <path>]",
-    summary: "Insert or replace one record, initializing on first write.",
-    values: ["--file"],
-    booleans: [],
-    positionals: 0,
-  },
-  get: {
-    usage: "lodestar get <id-or-alias> [--db <path>]",
-    summary: "Retrieve one exact record or alias.",
-    values: [],
-    booleans: [],
-    positionals: 1,
-  },
-  find: {
-    usage:
-      "lodestar find <query> [--scope <scope>] [--type <type>] [--limit <n>]",
-    summary: "Search bounded structured context.",
-    values: ["--scope", "--type", "--limit"],
-    booleans: [],
-    positionals: 1,
-  },
-  links: {
-    usage: "lodestar links <id-or-alias> [--limit <n>] [--db <path>]",
-    summary: "Return explicit incoming and outgoing links.",
-    values: ["--limit"],
-    booleans: [],
-    positionals: 1,
-  },
-  delete: {
-    usage: "lodestar delete <id-or-alias> [--db <path>]",
-    summary: "Delete one record and its dependent rows.",
-    values: [],
-    booleans: [],
-    positionals: 1,
-  },
-  doctor: {
-    usage: "lodestar doctor [--db <path>]",
-    summary: "Diagnose schema and referential integrity.",
-    values: [],
-    booleans: [],
-    positionals: 0,
-  },
-  import: {
-    usage:
-      "lodestar import <v0.7-store-path> [--dry-run] [--db <path>]",
-    summary: "Import one v0.7 store into an empty registry.",
-    values: [],
-    booleans: ["--dry-run"],
-    positionals: 1,
-  },
-  export: {
-    usage: "lodestar export [--db <path>]",
-    summary: "Export the registry as canonical JSON.",
-    values: [],
-    booleans: [],
-    positionals: 0,
-  },
-});
 
 function helpData(command = null) {
   if (command) {
@@ -279,6 +217,7 @@ async function withDatabase(open, file, operation) {
   }
 }
 
+
 async function dispatch(command, parsed, database, io) {
   const { options, positionals } = parsed;
   if (command === "init") {
@@ -306,11 +245,11 @@ async function dispatch(command, parsed, database, io) {
       putRecord(db, value, { database }));
   }
   if (command === "get") {
-    return await withDatabase(openReadDatabase, database, (db) =>
+    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
       getRecord(db, positionals[0]));
   }
   if (command === "find") {
-    return await withDatabase(openReadDatabase, database, (db) =>
+    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
       findRecords(db, positionals[0], {
         scope: options["--scope"],
         type: options["--type"],
@@ -318,13 +257,13 @@ async function dispatch(command, parsed, database, io) {
       }));
   }
   if (command === "links") {
-    return await withDatabase(openReadDatabase, database, (db) =>
+    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
       linkedRecords(db, positionals[0], {
         limit: options["--limit"],
       }));
   }
   if (command === "delete") {
-    return await withDatabase(openWriteDatabase, database, (db) =>
+    return await withDatabase(openOrMigrateWriteDatabase, database, (db) =>
       deleteRecord(db, positionals[0], { database }));
   }
   if (command === "doctor") {
@@ -339,8 +278,11 @@ async function dispatch(command, parsed, database, io) {
     });
   }
   if (command === "export") {
-    return await withDatabase(openReadDatabase, database, (db) =>
+    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
       exportRegistry(db).document);
+  }
+  if (command === "continuity") {
+    return await executeContinuityCli(positionals, options, io);
   }
   throw lodestarError(
     "unknown_command",
@@ -466,6 +408,12 @@ export async function runCli(
     }
     const parsed = parseCommand(command, rest.slice(1));
     const database = resolveDatabasePath({ explicit: global.database });
+    if (command === "serve") {
+      await runCliService(database, parsed.options, (data) =>
+        writeSuccess(io, data, global.human)
+      );
+      return 0;
+    }
     const data = await dispatch(command, parsed, database, io);
     writeSuccess(io, data, global.human);
     return command === "doctor" && data.healthy === false ? 4 : 0;

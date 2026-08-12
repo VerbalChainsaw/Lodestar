@@ -84,6 +84,26 @@ export function resolveDatabasePath({
   return pathApi.resolve(cwd, selected);
 }
 
+export function defaultServiceDiscoveryPath({
+  platform = process.platform,
+  env = process.env,
+  home = os.homedir(),
+  pathApi = path,
+} = {}) {
+  if (platform === "win32") {
+    return pathApi.join(
+      env.LOCALAPPDATA || pathApi.join(home, "AppData", "Local"),
+      "Lodestar",
+      "service.json",
+    );
+  }
+  return pathApi.join(
+    env.XDG_RUNTIME_DIR || pathApi.join(home, ".local", "run"),
+    "lodestar",
+    "service.json",
+  );
+}
+
 async function prospectivePhysicalPath(candidate) {
   const missing = [];
   let existing = path.resolve(candidate);

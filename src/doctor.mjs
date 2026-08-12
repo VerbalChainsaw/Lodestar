@@ -5,6 +5,7 @@ import {
   SCHEMA_TABLES,
   SCHEMA_VERSION,
 } from "./schema.mjs";
+import { CONTINUITY_TABLES } from "./continuity-schema.mjs";
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { LIMITS, validateTimestamp } from "./validate.mjs";
@@ -69,11 +70,16 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       database,
       schema_version: null,
       database_created_at: null,
+      database_instance_id: null,
       counts: {
         records: null,
         links: null,
         aliases: null,
         sources: null,
+        continuity_lanes: null,
+        continuity_packets: null,
+        continuity_events: null,
+        continuity_transfers: null,
       },
       checks: {
         integrity: "failed",
@@ -92,7 +98,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   if (!same(tables, SCHEMA_TABLES)) {
     add(
       "schema_tables_invalid",
-      "The database table set does not match schema version 1.",
+      `The database table set does not match schema version ${SCHEMA_VERSION}.`,
       { expected: SCHEMA_TABLES, actual: tables },
     );
   }
@@ -100,7 +106,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   if (!same(indexes, SCHEMA_INDEXES)) {
     add(
       "schema_indexes_invalid",
-      "The database index set does not match schema version 1.",
+      `The database index set does not match schema version ${SCHEMA_VERSION}.`,
       { expected: SCHEMA_INDEXES, actual: indexes },
     );
   }
@@ -108,7 +114,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   if (!definitions.matches) {
     add(
       "schema_definitions_invalid",
-      "The database DDL does not match schema version 1.",
+      `The database DDL does not match schema version ${SCHEMA_VERSION}.`,
       {
         missing: definitions.missing,
         unexpected: definitions.unexpected,
@@ -134,11 +140,14 @@ export function diagnoseDatabase(db, { database = null } = {}) {
 
   let schemaVersion = null;
   let databaseCreatedAt = null;
+  let databaseInstanceId = null;
   if (validColumns.metadata) {
     const metadataRows = db.prepare(
       "SELECT key, substr(value, 1, 4097) AS value, "
         + "length(CAST(value AS BLOB)) AS bytes FROM metadata "
-        + "WHERE key IN ('schema_version', 'created_at') ORDER BY key",
+      + "WHERE key IN ("
+      + "'schema_version', 'created_at', 'database_instance_id'"
+      + ") ORDER BY key",
     ).all();
     const metadata = Object.fromEntries(
       metadataRows.map(({ key, value }) => [key, value]),
@@ -149,6 +158,10 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       : boundedDiagnosticValue(schemaValue, { maximumBytes: 1024 });
     databaseCreatedAt = boundedDiagnosticValue(
       metadata.created_at ?? null,
+      { maximumBytes: 1024 },
+    );
+    databaseInstanceId = boundedDiagnosticValue(
+      metadata.database_instance_id ?? null,
       { maximumBytes: 1024 },
     );
     for (const row of metadataRows) {
@@ -181,6 +194,13 @@ export function diagnoseDatabase(db, { database = null } = {}) {
         { created_at: databaseCreatedAt },
       );
     }
+    if (!/^[0-9a-f]{64}$/u.test(metadata.database_instance_id ?? "")) {
+      add(
+        "database_instance_id_invalid",
+        "The database instance ID is invalid.",
+        { database_instance_id: databaseInstanceId },
+      );
+    }
   }
 
   let foreignKeyRows = [];
@@ -203,7 +223,16 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   }
 
   const counts = {};
-  for (const table of ["records", "links", "aliases", "sources"]) {
+  for (const table of [
+    "records",
+    "links",
+    "aliases",
+    "sources",
+    "continuity_lanes",
+    "continuity_packets",
+    "continuity_events",
+    "continuity_transfers",
+  ]) {
     if (!tables.includes(table)) {
       counts[table] = null;
       continue;
@@ -269,11 +298,58 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     if (collisions.length > 100) omittedIssues += 1;
   }
 
+  const continuityChecks = [
+    {
+      code: "continuity_active_packet_invalid",
+      message: "A lane active packet is missing or belongs to another lane.",
+      sql: "SELECT l.lane_id, l.active_packet_id AS related_id "
+        + "FROM continuity_lanes l LEFT JOIN continuity_packets p "
+        + "ON p.lane_id = l.lane_id AND p.packet_id = l.active_packet_id "
+        + "WHERE l.active_packet_id IS NOT NULL AND p.packet_id IS NULL",
+    },
+    {
+      code: "continuity_predecessor_invalid",
+      message: "A packet predecessor is missing or crosses lanes.",
+      sql: "SELECT p.lane_id, p.predecessor_packet_id AS related_id "
+        + "FROM continuity_packets p LEFT JOIN continuity_packets prior "
+        + "ON prior.lane_id = p.lane_id "
+        + "AND prior.packet_id = p.predecessor_packet_id "
+        + "WHERE p.predecessor_packet_id IS NOT NULL "
+        + "AND prior.packet_id IS NULL",
+    },
+    {
+      code: "continuity_absorption_invalid",
+      message: "An absorbed event packet is missing or crosses lanes.",
+      sql: "SELECT e.lane_id, e.absorbed_packet_id AS related_id "
+        + "FROM continuity_events e LEFT JOIN continuity_packets p "
+        + "ON p.lane_id = e.lane_id AND p.packet_id = e.absorbed_packet_id "
+        + "WHERE e.absorbed_packet_id IS NOT NULL AND p.packet_id IS NULL",
+    },
+    {
+      code: "continuity_transfer_packet_invalid",
+      message: "A transfer packet is missing or crosses lanes.",
+      sql: "SELECT t.lane_id, t.packet_id AS related_id "
+        + "FROM continuity_transfers t LEFT JOIN continuity_packets p "
+        + "ON p.lane_id = t.lane_id AND p.packet_id = t.packet_id "
+        + "WHERE p.packet_id IS NULL",
+    },
+  ];
+  if (CONTINUITY_TABLES.every((table) => validColumns[table])) {
+    for (const check of continuityChecks) {
+      const rows = db.prepare(`${check.sql} LIMIT 101`).all();
+      for (const row of rows.slice(0, 100)) {
+        add(check.code, check.message, row);
+      }
+      if (rows.length > 100) omittedIssues += 1;
+    }
+  }
+
   return {
     healthy: issues.length === 0 && omittedIssues === 0,
     database,
     schema_version: schemaVersion,
     database_created_at: databaseCreatedAt,
+    database_instance_id: databaseInstanceId,
     counts,
     checks: {
       integrity: integrity.length === 1 && integrity[0] === "ok"

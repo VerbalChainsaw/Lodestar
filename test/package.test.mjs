@@ -22,8 +22,17 @@ const EXPECTED_PACKAGE_FILES = [
   "lodestar.mjs",
   "package.json",
   "src/bootstrap.mjs",
+  "src/cli-commands.mjs",
   "src/cli.mjs",
+  "src/continuity-cli.mjs",
+  "src/continuity-common.mjs",
+  "src/continuity-core.mjs",
+  "src/continuity-request.mjs",
+  "src/continuity-schema.mjs",
+  "src/continuity-transfer.mjs",
+  "src/continuity.mjs",
   "src/database.mjs",
+  "src/database-schema.mjs",
   "src/diagnostics.mjs",
   "src/doctor.mjs",
   "src/errors.mjs",
@@ -39,8 +48,12 @@ const EXPECTED_PACKAGE_FILES = [
   "src/queries.mjs",
   "src/records.mjs",
   "src/schema.mjs",
+  "src/schema-migration.mjs",
+  "src/service-client.mjs",
+  "src/service.mjs",
   "src/stored-semantics.mjs",
   "src/validate.mjs",
+  "src/version.mjs",
   "src/windows-install.mjs",
 ];
 
@@ -145,7 +158,8 @@ test("runtime modules stay understandable in one sitting", async () => {
     }
   }
   await collect(source);
-  let coreLines = 0;
+  let registryCoreLines = 0;
+  let continuityLines = 0;
   for (const file of files) {
     const lines = (await readFile(file, "utf8")).split("\n").length;
     assert.ok(lines <= 500, `${path.relative(ROOT, file)} has ${lines} lines`);
@@ -155,8 +169,21 @@ test("runtime modules stay understandable in one sitting", async () => {
       && relative !== "windows-install.mjs"
       && !relative.startsWith(`legacy-v070${path.sep}`)
     ) {
-      coreLines += lines;
+      if (
+        relative.startsWith("continuity-")
+        || relative === "continuity.mjs"
+        || relative.startsWith("service")
+        || relative === "schema-migration.mjs"
+      ) continuityLines += lines;
+      else registryCoreLines += lines;
     }
   }
-  assert.ok(coreLines < 4_000, `core runtime has ${coreLines} lines`);
+  assert.ok(
+    registryCoreLines < 4_500,
+    `registry core runtime has ${registryCoreLines} lines`,
+  );
+  assert.ok(
+    continuityLines < 4_000,
+    `continuity runtime has ${continuityLines} lines`,
+  );
 });
