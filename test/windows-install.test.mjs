@@ -21,9 +21,11 @@ test("the Windows POSIX shim converts paths explicitly", () => {
 
 test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
   const shim = renderWslShim();
-  assert.match(shim, /cmd\.exe \/d \/c echo %USERPROFILE%/u);
+  assert.match(shim, /\/init "\$\(command -v cmd\.exe\)" -- \/d \/c echo %USERPROFILE%/u);
   assert.match(shim, /wslpath -w/u);
   assert.match(shim, /node-\*\/node\.exe/u);
+  assert.match(shim, /exec \/init "\$NODE_BIN" -- "\$LODESTAR_ENTRY_WIN" "\$@"/u);
+  assert.doesNotMatch(shim, /exec "\$NODE_BIN"/u);
   assert.doesNotMatch(shim, /LODESTAR_DB=/u);
 });
 

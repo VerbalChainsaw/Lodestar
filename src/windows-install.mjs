@@ -46,12 +46,12 @@ export function renderWslShim() {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v cmd.exe >/dev/null 2>&1 || ! command -v wslpath >/dev/null 2>&1; then
-  echo "LODESTAR ERROR: Windows interop and wslpath are required by the WSL shim" >&2
+if [ ! -x /init ] || ! command -v cmd.exe >/dev/null 2>&1 || ! command -v wslpath >/dev/null 2>&1; then
+  echo "LODESTAR ERROR: WSL /init, cmd.exe, and wslpath are required by the WSL shim" >&2
   exit 1
 fi
 
-WINDOWS_PROFILE_WIN="$(cmd.exe /d /c echo %USERPROFILE% 2>/dev/null | tr -d '\r')"
+WINDOWS_PROFILE_WIN="$(/init "$(command -v cmd.exe)" -- /d /c echo %USERPROFILE% 2>/dev/null | tr -d '\r')"
 WINDOWS_PROFILE="$(wslpath -u "$WINDOWS_PROFILE_WIN")"
 LODESTAR_HOME=""
 NODE_BIN=""
@@ -73,7 +73,7 @@ if [ -z "$LODESTAR_HOME" ] || [ -z "$NODE_BIN" ]; then
 fi
 
 LODESTAR_ENTRY_WIN="$(wslpath -w "$LODESTAR_HOME/lodestar.mjs")"
-exec "$NODE_BIN" "$LODESTAR_ENTRY_WIN" "$@"
+exec /init "$NODE_BIN" -- "$LODESTAR_ENTRY_WIN" "$@"
 `;
 }
 

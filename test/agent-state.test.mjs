@@ -37,15 +37,17 @@ const projectRecord = (id, text, required = false) => ({ id, type: "instruction"
 
 test("Windows and WSL paths share one project identity and startup stays bounded", async (t) => {
   const { database, directory } = await fixture(t);
-  const windows = normalizeMachinePath(directory), drive = /^([A-Z]):\/(.*)$/u.exec(windows);
-  assert.ok(drive, windows);
-  const wsl = `/mnt/${drive[1].toLowerCase()}/${drive[2]}`;
+  const windows = "C:/Users/demo/Project With Spaces", wsl = "/mnt/c/Users/demo/Project With Spaces";
   assert.equal(normalizeMachinePath(wsl), windows);
-  assert.equal(normalizeMachinePath(`${drive[1]}:\\`), normalizeMachinePath(`/mnt/${drive[1]}`));
+  assert.equal(normalizeMachinePath("C:\\"), normalizeMachinePath("/mnt/c"));
 
   const db = await openWriteDatabase(database);
   assert.equal(resolveProject(db, directory).scope, "project:lodestar");
-  assert.equal(resolveProject(db, wsl).scope, "project:lodestar");
+  putRecord(db, { id: "project:cross-platform", type: "project", name: "Cross platform",
+    scope: "global", content: { state: "known", value: { roots: [windows] } },
+    aliases: [], links: [], sources: [] });
+  assert.equal(resolveProject(db, windows).scope, "project:cross-platform");
+  assert.equal(resolveProject(db, wsl).scope, "project:cross-platform");
   putRecord(db, projectRecord("instruction:required", "Always include this.", true));
   for (let index = 0; index < 14; index += 1) {
     putRecord(db, projectRecord(`context:${index}`, `${index}:${"x".repeat(1_200)}`));
@@ -59,11 +61,53 @@ test("Windows and WSL paths share one project identity and startup stays bounded
   assert.equal(first.value.data.required[0].id, "instruction:required");
   assert.equal(first.value.more, true);
   assert.match(first.value.next[0], /^lodestar find /u);
-  const crossDialect = await invoke([
-    "start", "--db", database, "--cwd", wsl, "--session", "reader",
+  const windowsDialect = await invoke([
+    "start", "--db", database, "--cwd", windows, "--session", "reader",
   ]);
-  assert.equal(crossDialect.value.scope.project, first.value.scope.project);
-  assert.equal(crossDialect.value.scope.cwd, first.value.scope.cwd);
+  const crossDialect = await invoke(["start", "--db", database,
+    "--cwd", wsl, "--session", "reader"]);
+  assert.equal(crossDialect.value.scope.project, windowsDialect.value.scope.project);
+  assert.equal(crossDialect.value.scope.cwd, windowsDialect.value.scope.cwd);
+});
+
+test("startup rejects oversized required context without claiming a handoff", async (t) => {
+  const { database, directory } = await fixture(t);
+  const db = await openWriteDatabase(database);
+  putRecord(db, projectRecord("instruction:oversized", "x".repeat(20_000), true));
+  db.close();
+  await invoke(["handoff", "save", "--db", database, "--cwd", directory,
+    "--session", "source"], JSON.stringify({ goal: "continue" }));
+  let stdout = "", stderr = "";
+  const exitCode = await runCli(["start", "--db", database, "--cwd", directory,
+    "--session", "claimant"], { stdin: Readable.from([]),
+    stdout: { write: (value) => { stdout += value; } },
+    stderr: { write: (value) => { stderr += value; } } });
+  assert.notEqual(exitCode, 0);
+  assert.equal(stdout, "");
+  assert.equal(JSON.parse(stderr).error.code, "resource_limit");
+  assert.ok(Buffer.byteLength(stderr, "utf8") <= 16 * 1024);
+  const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory]);
+  assert.equal(status.value.data.record.data.state, "pending");
+  assert.equal(status.value.data.record.data.claimed_by, null);
+});
+
+test("startup caps an oversized handoff head and reports exact omitted counts", async (t) => {
+  const { database, directory } = await fixture(t);
+  const db = await openWriteDatabase(database);
+  for (let index = 0; index < 30; index += 1) {
+    putRecord(db, projectRecord(`context:counted:${index}`, `${index}:${"x".repeat(1_200)}`));
+  }
+  db.close();
+  await invoke(["handoff", "save", "--db", database, "--cwd", directory,
+    "--session", "source"], JSON.stringify({ goal: "g".repeat(20_000) }));
+  const started = await invoke(["start", "--db", database, "--cwd", directory,
+    "--session", "claimant"]);
+  assert.ok(Buffer.byteLength(started.text, "utf8") <= 16 * 1024);
+  assert.ok(Buffer.byteLength(JSON.stringify(started.value.data.handoff.data.packet), "utf8") <= 4096);
+  assert.equal(started.value.data.handoff.data.packet.truncated, true);
+  assert.equal(started.value.data.context.length + started.value.data.omitted.context, 30);
+  assert.match(started.value.next.join("\n"), /lodestar handoff status/u);
+  assert.match(started.value.next.join("\n"), /lodestar find/u);
 });
 
 test("start initializes an absent registry without a separate setup command", async (t) => {

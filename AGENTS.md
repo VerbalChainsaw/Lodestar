@@ -25,8 +25,8 @@ The cross-OS boundary is one one-shot, Windows-owned Lodestar operation per
 request. WSL invokes the installed shim and Windows Node. Normal Codex handoff
 operation must not ask the user to use a terminal.
 
-Do not revive DriftGuard, agentctx, Glimpse, or Durable Handoff as separate
-model-facing products or command suites.
+Do not revive retired compatibility products or command suites. Keep the
+model-facing surface entirely under Lodestar.
 
 Do not change quality thresholds merely because the implementation grew. Any gate change requires explicit Director approval and an actual changed product contract.
 

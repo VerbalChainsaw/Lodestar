@@ -18,6 +18,15 @@
   surfaces.
 - Rebuild the GitHub and npm front page and publish the packed executable with
   cross-platform verification.
+- Normalize WSL, MSYS, and Cygwin path arguments at the Windows process
+  boundary, including `--db`, `--file`, and legacy import sources.
+- Route WSL execution through `/init` so Lodestar remains available when a
+  second distro changes the shared `WSLInterop` binary-format registration.
+- Enforce the 16 KiB startup budget before transaction commit, cap oversized
+  handoff heads, report exact omitted counts, and roll back an unreturned
+  handoff claim.
+- Make the complete test suite portable across Windows, Linux, and macOS
+  fixtures under the required Node 24.15 runtime.
 
 ## 1.0.3 - 2026-07-31
 

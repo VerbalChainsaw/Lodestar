@@ -14,14 +14,14 @@ import { canonicalStringify, parseJsonText, readStreamBounded, readTextFileBound
 import { exportRegistry, findRecords, linkedRecords } from "./queries.mjs";
 import { coercePutRecord, contentData, deleteRecord, getRecord, getRecordById, normalizeRecord,
   parseStoredContent, putRecord, writeRecordSnapshot } from "./records.mjs";
+import { resolveInputPath, translateWindowsDialectPath } from "./paths.mjs";
 import { allocateRevision, currentRevision } from "./revisions.mjs";
 import { LIMITS, validatePutInput } from "./validate.mjs";
 const hash = (value, length = 20) => createHash("sha256").update(String(value)).digest("hex").slice(0, length);
 const slash = (value) => String(value).replaceAll("\\", "/").replace(/\/+$/u, "");
 export function normalizeMachinePath(value) {
-  let result = slash(String(value).trim()), match = /^\/mnt\/([a-z])(?:\/(.*))?$/iu.exec(result)
-    ?? /^\/\/(?:wsl\$|wsl\.localhost)\/[^/]+\/mnt\/([a-z])(?:\/(.*))?$/iu.exec(result);
-  if (match) result = `${match[1].toUpperCase()}:/${match[2] ?? ""}`;
+  let result = slash(translateWindowsDialectPath(String(value).trim(),
+    { includeMsys: process.platform === "win32" }));
   if (/^[a-z]:$/iu.test(result)) result += "/";
   if (/^[a-z]:\//iu.test(result)) result = `${result[0].toUpperCase()}${result.slice(1)}`;
   return result || "/";
@@ -126,6 +126,21 @@ const handoffRecord = (db, project) => {
 };
 const handoffInput = (project, data) => recordInput(handoffId(project), "handoff",
   `Handoff for ${project.name}`, project.scope, 1000, data);
+const STARTUP_BYTES = 16 * 1024, HANDOFF_PACKET_BYTES = 4 * 1024;
+function utf8JsonSummary(value) {
+  const text = typeof value === "string" ? value : "Handoff packet exceeds the startup head limit.";
+  const points = Array.from(text); let low = 0, high = points.length;
+  const packet = (length) => ({ truncated: true, summary: points.slice(0, length).join("") });
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(JSON.stringify(packet(middle)), "utf8") <= HANDOFF_PACKET_BYTES) low = middle;
+    else high = middle - 1;
+  }
+  return packet(low);
+}
+const startupBytes = (data, revision, project, identity, more, next) =>
+  Buffer.byteLength(canonicalStringify({ v: 1, ok: true, operation: "start", revision,
+    scope: scope(project, identity), data, more, next }), "utf8") + 1;
 export const handoffStatus = (db, project) => {
   const record = handoffRecord(db, project);
   return record ? { found: true, record: normalizeRecord(record) } : { found: false };
@@ -172,25 +187,49 @@ export function startProjection(db, project, identity, options = {}) {
       + "json_extract(content_json,'$._lodestar.revision') DESC,id";
     const required = normalizedRows(db, "SELECT id FROM records WHERE scope IN ('global',?) "
       + "AND json_extract(content_json,'$.value.required')=1 " + order, project.scope);
-    const limit = options.optionalLimit ?? 12, optional = db.prepare(
-      "SELECT id FROM records WHERE scope IN ('global',?) "
+    const limit = options.optionalLimit ?? 12;
+    const optionalWhere = "FROM records WHERE scope IN ('global',?) "
       + "AND type NOT IN ('work','handoff','project') "
-      + "AND COALESCE(json_extract(content_json,'$.value.required'),0)!=1 "
-      + order + " LIMIT ?").all(project.scope, limit + 1);
-    const more = optional.length > limit, data = { project: { id: project.id,
+      + "AND COALESCE(json_extract(content_json,'$.value.required'),0)!=1 ";
+    const optionalTotal = Number(db.prepare(`SELECT count(*) AS count ${optionalWhere}`)
+      .get(project.scope).count);
+    const optional = db.prepare(`SELECT id ${optionalWhere}${order} LIMIT ?`)
+      .all(project.scope, limit);
+    const omitted = {};
+    if (optionalTotal > optional.length) omitted.context = optionalTotal - optional.length;
+    const data = { project: { id: project.id,
       scope: project.scope, name: project.name,
       root: project.root, cwd: project.cwd, identity_source: project.identity_source,
       git_common_directory: project.git_common_directory ?? null }, required,
-      context: optional.slice(0, limit).map(({ id }) => normalizeRecord(getRecordById(db, id))),
+      context: optional.map(({ id }) => normalizeRecord(getRecordById(db, id))),
       active_work: workStatus(db, project).records, handoff,
-      omitted: more ? { context: optional.length - limit } : {} };
-    const next = more ? [`lodestar find "${project.name}" --scope ${project.scope} --limit 50`] : [];
+      omitted };
+    const next = omitted.context
+      ? [`lodestar find "${project.name}" --scope ${project.scope} --limit 50`] : [];
     if (handoff?.data?.packet && Buffer.byteLength(JSON.stringify(handoff.data.packet), "utf8") > 4096) {
-      handoff.data.packet = { truncated: true, summary: handoff.data.packet.goal
-        ?? handoff.data.packet.summary ?? "Handoff packet exceeds the startup head limit." };
+      handoff.data.packet = utf8JsonSummary(handoff.data.packet.goal ?? handoff.data.packet.summary);
       next.push(`lodestar handoff status --cwd "${project.cwd}"`);
     }
-    return { data, revision: currentRevision(db), more, next };
+    const revision = currentRevision(db);
+    const fits = () => startupBytes(data, revision, project, identity,
+      Object.keys(omitted).length > 0, next) <= STARTUP_BYTES;
+    while (!fits() && data.context.length) {
+      data.context.pop(); omitted.context = (omitted.context ?? 0) + 1;
+      const command = `lodestar find "${project.name}" --scope ${project.scope} --limit 50`;
+      if (!next.includes(command)) next.unshift(command);
+    }
+    while (!fits() && data.active_work.length) {
+      data.active_work.pop(); omitted.work = (omitted.work ?? 0) + 1;
+      const command = `lodestar work status --cwd "${project.cwd}"`;
+      if (!next.includes(command)) next.push(command);
+    }
+    const more = Object.keys(omitted).length > 0;
+    if (!fits()) throw lodestarError("resource_limit",
+      "Required startup context exceeds the 16 KiB startup budget.", {
+        identifiers: { resource: "startup_output", maximum: STARTUP_BYTES },
+        action: "Reduce required Lodestar context and retry; no handoff was claimed.",
+      });
+    return { data, revision, more, next };
   }, options.database);
 }
 async function withDatabase(open, file, operation) {
@@ -201,7 +240,7 @@ const identity = (options, write = false) => resolveIdentity({ session: options[
   agent: options["--agent"], harness: options["--harness"] }, process.env, write);
 async function input(options, io, resource) {
   const bounds = { maximum: LIMITS.putInputBytes, resource };
-  const text = options["--file"] ? await readTextFileBounded(path.resolve(options["--file"]), bounds)
+  const text = options["--file"] ? await readTextFileBounded(resolveInputPath(options["--file"]), bounds)
     : await readStreamBounded(io.stdin, bounds);
   return parseJsonText(text, { maximum: LIMITS.putInputBytes, resource });
 }
@@ -210,7 +249,7 @@ const scoped = (db, project, actor, data, extra = {}) => operationResult(data,
 export async function dispatch(command, { options, positionals }, database, io) {
   if (command === "init") return operationResult({ ...(await initializeDatabase(database)),
     bootstrap: AGENT_BOOTSTRAP });
-  if (command === "import") return operationResult(await importV070({ sourcePath: path.resolve(positionals[0]),
+  if (command === "import") return operationResult(await importV070({ sourcePath: resolveInputPath(positionals[0]),
     database, dryRun: options["--dry-run"] === true }));
   if (command === "start") return withDatabase(openOrInitializeWriteDatabase, database, (db) => {
     const actor = identity(options), project = resolveProject(db, cwd(options));

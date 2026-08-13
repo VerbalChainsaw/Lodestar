@@ -109,7 +109,8 @@ test("schema validation rejects forged reserved-prefix objects", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
-  const raw = openConnection(file);
+  const raw = new DatabaseSync(file);
+  if (typeof raw.enableDefensive === "function") raw.enableDefensive(false);
   raw.exec(
     "CREATE TRIGGER schema_probe AFTER UPDATE ON records "
       + "BEGIN SELECT 1; END",
@@ -424,6 +425,33 @@ test("resolves platform data paths without touching the filesystem", () => {
       pathApi: path.posix,
     }),
     "/workspace/custom.db",
+  );
+  assert.equal(
+    resolveDatabasePath({
+      explicit: "/mnt/c/Users/demo/state.db",
+      cwd: "C:\\workspace",
+      platform: "win32",
+      pathApi: path.win32,
+    }),
+    "C:\\Users\\demo\\state.db",
+  );
+  assert.equal(
+    resolveDatabasePath({
+      explicit: "/c/Users/demo/state.db",
+      cwd: "C:\\workspace",
+      platform: "win32",
+      pathApi: path.win32,
+    }),
+    "C:\\Users\\demo\\state.db",
+  );
+  assert.equal(
+    resolveDatabasePath({
+      explicit: "/cygdrive/c/Users/demo/state.db",
+      cwd: "C:\\workspace",
+      platform: "win32",
+      pathApi: path.win32,
+    }),
+    "C:\\Users\\demo\\state.db",
   );
   assert.throws(
     () => resolveDatabasePath({

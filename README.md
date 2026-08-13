@@ -78,7 +78,9 @@ The bounded response contains the canonical project identity, required
 instructions, high-priority context, current work reports, and an eligible
 claimed handoff. Startup output is deterministic and capped at 16 KiB; when
 optional context is omitted, `more` is true and `next` contains exact follow-up
-commands.
+commands. Oversized handoff packets receive a bounded startup head. If the
+complete required instruction set alone cannot fit, startup fails explicitly
+and rolls back any attempted handoff claim.
 
 Then use ordinary verbs:
 
@@ -204,11 +206,14 @@ Run `lodestar --help` or `lodestar <command> --help`. JSON is the default;
 
 ## Windows and WSL
 
-Project identity normalizes Windows paths, WSL mount paths, and canonical Git
-common directories. On a shared Windows/WSL machine, the included WSL shim
-crosses into the installed Windows runtime for each one-shot command. This
-keeps one Windows-owned SQLite connection boundary and one database while
-remaining directly callable from WSL. There is no resident bridge or service.
+Project identity normalizes Windows paths, WSL mount paths, MSYS/Cygwin paths,
+and canonical Git common directories. The same adapter handles path-valued
+`--db`, `--file`, and import arguments received by the Windows runtime. On a
+shared Windows/WSL machine, the included WSL shim crosses through WSL's
+explicit `/init` broker into the installed Windows runtime for each one-shot
+command. It does not depend on mutable `binfmt` registration. This keeps one
+Windows-owned SQLite connection boundary and one database while remaining
+directly callable from WSL. There is no resident bridge or service.
 
 Default database locations are:
 

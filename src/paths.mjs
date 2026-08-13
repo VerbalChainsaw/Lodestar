@@ -39,6 +39,24 @@ function assertPath(value, name) {
   return value;
 }
 
+export function translateWindowsDialectPath(value, { includeMsys = false } = {}) {
+  const slashed = String(value).replaceAll("\\", "/");
+  const mounted = /^\/mnt\/([a-z])(?:\/(.*))?$/iu.exec(slashed)
+    ?? /^\/\/(?:wsl\$|wsl\.localhost)\/[^/]+\/mnt\/([a-z])(?:\/(.*))?$/iu.exec(slashed);
+  const posix = includeMsys ? /^\/([a-z])(?:\/(.*))?$/iu.exec(slashed)
+    ?? /^\/cygdrive\/([a-z])(?:\/(.*))?$/iu.exec(slashed) : null;
+  const match = mounted ?? posix;
+  return match ? `${match[1].toUpperCase()}:/${match[2] ?? ""}` : value;
+}
+
+export function resolveInputPath(value, { cwd = process.cwd(), platform = process.platform,
+  pathApi = path, name = "path" } = {}) {
+  assertPath(value, name);
+  const selected = platform === "win32" ? translateWindowsDialectPath(value,
+    { includeMsys: true }) : value;
+  return pathApi.resolve(cwd, selected);
+}
+
 export function defaultDatabasePath({
   platform = process.platform,
   env = process.env,
@@ -80,8 +98,7 @@ export function resolveDatabasePath({
     : env.LODESTAR_DB !== undefined
       ? env.LODESTAR_DB
       : defaultDatabasePath({ platform, env, home, pathApi });
-  assertPath(selected, "database");
-  return pathApi.resolve(cwd, selected);
+  return resolveInputPath(selected, { cwd, platform, pathApi, name: "database" });
 }
 
 async function prospectivePhysicalPath(candidate) {

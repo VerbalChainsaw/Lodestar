@@ -187,17 +187,6 @@ function writeSuccess(io, operation, result, human) {
     more: result.more,
     next: result.next,
   };
-  if (operation === "start") {
-    while (Buffer.byteLength(canonicalStringify(envelope), "utf8") + 1 > 16 * 1024
-      && envelope.data.context.length) {
-      envelope.data.context.pop();
-      envelope.more = true;
-      const followUp = `lodestar find "${envelope.data.project.name}" --scope ${envelope.data.project.scope} --limit 50`;
-      if (!envelope.next.includes(followUp)) {
-        envelope.next.push(followUp);
-      }
-    }
-  }
   const text = human
     ? JSON.stringify(envelope, null, 2)
     : canonicalStringify(envelope);

@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { openConnection } from '../src/database.mjs'
 import test from "node:test";
 
 import {
@@ -116,7 +115,8 @@ test("doctor reports objects whose names only resemble SQLite internals", async 
 
 test("doctor reports forged objects inside SQLite's reserved namespace", async (t) => {
   const file = await fixture(t);
-  const raw = openConnection(file);
+  const raw = new DatabaseSync(file);
+  if (typeof raw.enableDefensive === "function") raw.enableDefensive(false);
   raw.exec(
     "CREATE TRIGGER schema_probe AFTER UPDATE ON records "
       + "BEGIN SELECT 1; END",
