@@ -5,7 +5,6 @@ import {
   SCHEMA_TABLES,
   SCHEMA_VERSION,
 } from "./schema.mjs";
-import { CONTINUITY_TABLES } from "./continuity-schema.mjs";
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { LIMITS, validateTimestamp } from "./validate.mjs";
@@ -76,10 +75,6 @@ export function diagnoseDatabase(db, { database = null } = {}) {
         links: null,
         aliases: null,
         sources: null,
-        continuity_lanes: null,
-        continuity_packets: null,
-        continuity_events: null,
-        continuity_transfers: null,
       },
       checks: {
         integrity: "failed",
@@ -228,10 +223,6 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     "links",
     "aliases",
     "sources",
-    "continuity_lanes",
-    "continuity_packets",
-    "continuity_events",
-    "continuity_transfers",
   ]) {
     if (!tables.includes(table)) {
       counts[table] = null;
@@ -296,52 +287,6 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       );
     }
     if (collisions.length > 100) omittedIssues += 1;
-  }
-
-  const continuityChecks = [
-    {
-      code: "continuity_active_packet_invalid",
-      message: "A lane active packet is missing or belongs to another lane.",
-      sql: "SELECT l.lane_id, l.active_packet_id AS related_id "
-        + "FROM continuity_lanes l LEFT JOIN continuity_packets p "
-        + "ON p.lane_id = l.lane_id AND p.packet_id = l.active_packet_id "
-        + "WHERE l.active_packet_id IS NOT NULL AND p.packet_id IS NULL",
-    },
-    {
-      code: "continuity_predecessor_invalid",
-      message: "A packet predecessor is missing or crosses lanes.",
-      sql: "SELECT p.lane_id, p.predecessor_packet_id AS related_id "
-        + "FROM continuity_packets p LEFT JOIN continuity_packets prior "
-        + "ON prior.lane_id = p.lane_id "
-        + "AND prior.packet_id = p.predecessor_packet_id "
-        + "WHERE p.predecessor_packet_id IS NOT NULL "
-        + "AND prior.packet_id IS NULL",
-    },
-    {
-      code: "continuity_absorption_invalid",
-      message: "An absorbed event packet is missing or crosses lanes.",
-      sql: "SELECT e.lane_id, e.absorbed_packet_id AS related_id "
-        + "FROM continuity_events e LEFT JOIN continuity_packets p "
-        + "ON p.lane_id = e.lane_id AND p.packet_id = e.absorbed_packet_id "
-        + "WHERE e.absorbed_packet_id IS NOT NULL AND p.packet_id IS NULL",
-    },
-    {
-      code: "continuity_transfer_packet_invalid",
-      message: "A transfer packet is missing or crosses lanes.",
-      sql: "SELECT t.lane_id, t.packet_id AS related_id "
-        + "FROM continuity_transfers t LEFT JOIN continuity_packets p "
-        + "ON p.lane_id = t.lane_id AND p.packet_id = t.packet_id "
-        + "WHERE p.packet_id IS NULL",
-    },
-  ];
-  if (CONTINUITY_TABLES.every((table) => validColumns[table])) {
-    for (const check of continuityChecks) {
-      const rows = db.prepare(`${check.sql} LIMIT 101`).all();
-      for (const row of rows.slice(0, 100)) {
-        add(check.code, check.message, row);
-      }
-      if (rows.length > 100) omittedIssues += 1;
-    }
   }
 
   return {

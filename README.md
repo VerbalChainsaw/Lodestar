@@ -1,279 +1,249 @@
 # Lodestar
 
 <p align="center">
-  <img
-    src="https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-launch-hero.png"
-    alt="Lodestar: local context, one database, one CLI, small by design"
-    width="100%"
-  />
+  <img src="https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-launch-hero.png" alt="Lodestar: one local state suite for software agents" width="100%">
 </p>
 
-<p align="center">
-  <strong>A small, durable, machine-first local context registry.</strong>
-</p>
+<p align="center"><strong>One local state suite for software agents.</strong></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/lodestar-agent-context"><img alt="npm version" src="https://img.shields.io/npm/v/lodestar-agent-context?style=flat-square"></a>
-  <a href="https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml"><img alt="cross-platform checks" src="https://img.shields.io/github/actions/workflow/status/VerbalChainsaw/Lodestar/ci.yml?branch=main&style=flat-square&label=checks"></a>
+  <a href="https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml"><img alt="Windows, Linux, and macOS checks" src="https://img.shields.io/github/actions/workflow/status/VerbalChainsaw/Lodestar/ci.yml?branch=main&style=flat-square&label=checks"></a>
+  <a href="https://github.com/VerbalChainsaw/Lodestar/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/VerbalChainsaw/Lodestar?style=flat-square"></a>
   <a href="https://github.com/VerbalChainsaw/Lodestar/blob/main/LICENSE"><img alt="MIT license" src="https://img.shields.io/npm/l/lodestar-agent-context?style=flat-square"></a>
 </p>
 
-Lodestar stores compact, structured project knowledge in one local SQLite
-database and retrieves it through stable IDs, exact aliases, bounded search,
-and explicit links. JSON is the primary interface, so humans and agents use
-the same predictable contract.
+Lodestar gives Codex and other local agents one deterministic interface for
+startup context, durable knowledge, advisory work presence, and project
+handoff. It is one executable, one SQLite database, and one JSON envelope—no
+daemon, network service, or background indexer.
 
-Lodestar does not inspect repositories, infer readiness, orchestrate agents,
-run services, contact providers, or claim that its records fully describe a
-project. A missing record means only that Lodestar lacks that knowledge.
+```text
+lodestar start | get | find | links | put | work | handoff
+```
 
-## Why 1.0 is the better Lodestar
+```mermaid
+flowchart LR
+  A[Codex / agents] --> L[lodestar]
+  L --> S[start + knowledge]
+  L --> W[work presence]
+  L --> H[handoff baton]
+  S --> D[(one SQLite database)]
+  W --> D
+  H --> D
+```
 
-The original Lodestar proved that stable, structured project context was
-useful. It also taught me where the product had become more complicated than
-its job required.
+## One suite, not four
 
-I believe Lodestar 1.0 is the stronger product. It does less, but it does the
-important part with a smaller contract and fewer custom mechanisms to operate,
-debug, and maintain.
+Lodestar 1.1 absorbs the machine-state jobs that were previously split across
+separate tools. Old product names are not compatibility commands.
 
-| Original Lodestar | Lodestar 1.0 |
+| Capability | Lodestar interface |
 | --- | --- |
-| Generation trees, commit pointers, heartbeat locks, snapshots, and custom rollback | SQLite transactions and normal SQLite durability |
-| Multiple executables and installer-specific behavior | One `lodestar` executable and no installer runtime |
-| Project discovery, readiness scoring, and completeness claims | Direct records and source facts; unknown stays unknown |
-| Provider experiments and agent-specific integration | Provider-neutral JSON with no orchestration layer |
-| A required setup path before normal writes | The first valid `put` initializes the registry automatically |
-| A broad context-management platform | A focused local registry with no runtime dependencies or background service |
+| Session orientation | `lodestar start --cwd <cwd>` |
+| Exact knowledge lookup | `lodestar get <id-or-alias>` |
+| Bounded knowledge search | `lodestar find <query>` |
+| Explicit relationships | `lodestar links <id-or-alias>` |
+| Durable memory | `lodestar put` |
+| Concurrent work presence | `lodestar work ...` |
+| Cross-session continuation | `handoff now` in Codex; `lodestar handoff ...` underneath |
 
-The reduction did not throw away the parts that mattered. Lodestar keeps
-deterministic behavior, structured JSON, explicit schemas, stable identifiers,
-bounded inputs and outputs, careful paths, cross-platform support, actionable
-diagnostics, atomic transactions, and honest uncertainty.
-
-For the job Lodestar now claims—store, retrieve, relate, validate, and migrate
-project context—1.0 is simpler to understand and safer to operate. It is the
-version I recommend.
-
-## Why Lodestar
-
-Agents often start by recursively searching a repository and rebuilding
-context that a project already knows. Lodestar gives them a smaller first
-move:
-
-- retrieve a known fact by stable ID or exact alias;
-- follow explicit relationships instead of inferring them;
-- distinguish known, empty, unavailable, unknown, and stale knowledge;
-- fall back to normal repository inspection when the registry is insufficient.
-
-The result is deliberately plain: one executable, one database, no background
-service, no plugins, and no network requirement at runtime.
-
-## Requirements
-
-- Node.js 24.15.0 or newer
-- no runtime dependencies
-- no network connection at runtime
-
-The package publishes one executable: `lodestar`.
+Every successful command returns the same versioned envelope. Every mutation
+receives a unique, monotonically increasing database revision in the same
+`BEGIN IMMEDIATE` transaction as its write.
 
 ## Install
+
+Lodestar requires Node.js 24.15.0 or newer and has no runtime dependencies.
 
 ```text
 npm install --global lodestar-agent-context
 lodestar --version
+lodestar start --cwd .
 ```
 
-## Quick start
+The exact npm tarball is also attached to every
+[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases). The
+package publishes exactly one executable: `lodestar`.
 
-No setup command is required. The first valid `lodestar put` creates and
-initializes the default database automatically. `lodestar import` likewise
-creates its destination. `lodestar init` remains available when a caller
-deliberately wants an empty registry or the bootstrap response.
+## The normal agent loop
 
-Create `record.json`:
-
-```json
-{
-  "id": "project:example:commands",
-  "type": "command",
-  "name": "Example project commands",
-  "scope": "project:example",
-  "content": {
-    "state": "known",
-    "value": {
-      "test": "npm test"
-    }
-  },
-  "aliases": [
-    "example commands"
-  ],
-  "links": [],
-  "sources": [
-    {
-      "origin": "package.json",
-      "freshness": "current",
-      "metadata": {
-        "inspection": "inspected"
-      }
-    }
-  ]
-}
-```
-
-Then write and retrieve it:
+Start once when a session opens:
 
 ```text
+lodestar start --cwd C:\path\to\project
+```
+
+The bounded response contains the canonical project identity, required
+instructions, high-priority context, current work reports, and an eligible
+claimed handoff. Startup output is deterministic and capped at 16 KiB; when
+optional context is omitted, `more` is true and `next` contains exact follow-up
+commands.
+
+Then use ordinary verbs:
+
+```text
+lodestar get project:example
+lodestar find "release process" --scope project:example
+lodestar links project:example
 lodestar put --file record.json
-lodestar get "example commands"
-lodestar find commands --scope project:example
 ```
 
-JSON is the default interface. Every successful command emits one object to
-stdout:
+A missing record means only that Lodestar lacks the knowledge. Inspect the
+repository normally after a miss.
+
+## Work presence
+
+Work reports are advisory. They help concurrent agents see broad activity; they
+do not coordinate, lock, assign authority, or override user instructions.
+
+```text
+lodestar work
+lodestar work start "Repairing the release pipeline"
+lodestar work done "Release repair complete"
+lodestar work history --limit 20
+```
+
+Mutations require a reliable session identity from `--session` or a supported
+harness environment. Repeating `work start` updates that actor's active record.
+After `work done`, a later start creates a new history record. Reports sort by
+database revision descending, then actor ID.
+
+## Handoff
+
+The optional Codex plugin in [`codex-plugin/`](codex-plugin/.codex-plugin/plugin.json) loads
+`lodestar start` once at `SessionStart` and supports the exact natural prompt:
+
+```text
+handoff now
+```
+
+The plugin authorizes that prompt, validates the semantic packet, redacts
+secret-shaped fields and text, and saves it through Lodestar. The source
+session cannot claim its own baton. The next eligible same-project session
+claims it atomically during startup; retries by that claimant return the same
+record and later sessions cannot steal it.
+
+The direct state commands are:
+
+```text
+lodestar handoff save --file packet.json --cwd . --session <id>
+lodestar handoff status --cwd .
+lodestar handoff clear --cwd . --session <id>
+```
+
+There is one baton lineage per project. No plugin-local file is durable baton
+state; short-lived host attestations exist only to authorize the exact Codex
+tool call.
+
+## Stable JSON contract
+
+Success:
 
 ```json
 {
+  "v": 1,
   "ok": true,
-  "data": {}
+  "operation": "start",
+  "revision": 42,
+  "scope": {
+    "project": "project:example",
+    "cwd": "C:/work/example",
+    "session": "abc",
+    "actor": "codex:abc"
+  },
+  "data": {},
+  "more": false,
+  "next": []
 }
 ```
 
-Every failure emits one stable error object to stderr and exits nonzero:
+Errors use the same envelope and replace `data` with
+`error: { code, message, identifiers, action }`.
+
+Returned records have one normalized shape:
 
 ```json
 {
-  "ok": false,
-  "error": {
-    "code": "record_not_found",
-    "message": "No record or alias matched the requested identifier.",
-    "identifiers": {
-      "requested": "missing"
-    },
-    "action": "Use lodestar find or inspect the repository directly."
-  }
+  "v": 1,
+  "id": "project:example:commands",
+  "kind": "command",
+  "scope": "project:example",
+  "availability": "known",
+  "priority": 0,
+  "revision": 42,
+  "updated_at": "2026-08-13T12:00:00.000Z",
+  "data": {},
+  "links": [],
+  "sources": []
 }
 ```
 
-Use `--human` for formatted output. Use `--db <path>` or `LODESTAR_DB` to
-select a database explicitly.
+Lodestar reads both the original direct-content record form and the wrapped
+`content.value` form without rewriting authoritative stored content.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `lodestar init` | Optionally create an empty schema and return the bootstrap contract. |
-| `lodestar put` | Insert or replace one record, initializing on the first valid write. |
-| `lodestar get <id-or-alias>` | Resolve an exact ID or alias. |
-| `lodestar find <query>` | Return bounded, deterministically ordered summaries. |
-| `lodestar links <id-or-alias>` | Return one hop of incoming and outgoing links. |
-| `lodestar delete <id-or-alias>` | Delete a record and its dependent rows transactionally. |
-| `lodestar doctor` | Check schema, SQLite integrity, foreign keys, and complete stored-value semantics. |
-| `lodestar import <path>` | Import one v0.7-compatible store into an empty database. |
-| `lodestar export` | Emit a deterministic JSON representation of the registry. |
+| `start` | Resolve one canonical project and return bounded startup state. |
+| `get` | Retrieve one exact ID or alias. |
+| `find` | Search bounded stored context by query, scope, and kind. |
+| `links` | Return deterministic one-hop incoming and outgoing links. |
+| `put` | Insert or replace one complete record snapshot. |
+| `work status\|start\|done\|history` | Read or mutate advisory work records. |
+| `handoff save\|status\|clear` | Save, inspect, or clear the project baton. Claim occurs in `start`. |
+| `doctor` | Diagnose schema, integrity, foreign keys, and stored semantics. |
+| `export` | Emit a deterministic registry export. |
+| `import` | Import one v0.7 generation store into an empty registry. |
+| `delete` | Delete one record and dependent rows transactionally. |
+| `init` | Explicitly initialize an empty registry; normally unnecessary. |
 
-Run `lodestar --help` or `lodestar <command> --help` for the bounded
-machine-readable command contract. Help and version requests do not open or
-create a database. Use `--` before a positional ID, alias, query, or path that
-begins with two hyphens.
+Run `lodestar --help` or `lodestar <command> --help`. JSON is the default;
+`--human` formats help and responses for reading.
 
-## Data model
+## Windows and WSL
 
-The database contains exactly five tables:
+Project identity normalizes Windows paths, WSL mount paths, and canonical Git
+common directories. On a shared Windows/WSL machine, the included WSL shim
+crosses into the installed Windows runtime for each one-shot command. This
+keeps one Windows-owned SQLite connection boundary and one database while
+remaining directly callable from WSL. There is no resident bridge or service.
 
-- `records`: stable identity, type, name, scope, content, and timestamps
-- `links`: directed relationships between existing records
-- `aliases`: globally unique exact aliases
-- `sources`: origin, freshness, and inspection facts
-- `metadata`: schema version and database creation time
-
-Record content must use one of five distinct states:
-
-- `known`
-- `known_empty`
-- `unavailable`
-- `unknown`
-- `stale`
-
-`known_empty` means a checked source supports an empty value. It does not mean
-the project is complete. Source inspection is stored separately as
-`inspected`, `not_inspected`, `inspected_no_value`, or `unknown`.
-
-See [the schema contract](docs/schema.md) for the complete input shape and
-bounds.
-
-## Database location and durability
-
-The default database is:
+Default database locations are:
 
 - Windows: `%LOCALAPPDATA%\Lodestar\lodestar.db`
 - macOS: `~/Library/Application Support/Lodestar/lodestar.db`
-- Linux/WSL: `$XDG_DATA_HOME/lodestar/lodestar.db`, or
+- native Linux: `$XDG_DATA_HOME/lodestar/lodestar.db` or
   `~/.local/share/lodestar/lodestar.db`
 
-Writes use `BEGIN IMMEDIATE`, foreign keys, a bounded busy timeout, SQLite's
-rollback journal, and `synchronous=FULL`. Read commands use read-only,
-query-only connections with in-memory temporary storage. New database files
-are reserved without replacement before SQLite initializes them. A published
-reservation is never removed as failure cleanup and a zero-byte reservation is
-resumable, so one creator cannot delete another creator's completed database.
-Lodestar does not add generations, lock heartbeats, snapshots, quarantine, or
-a second persistence format around SQLite.
+Use `--db <path>` or `LODESTAR_DB` for disposable tests and deliberate custom
+stores.
 
-## Agent use
+## Storage and migration
 
-The package documents this short provider-neutral contract; optional
-`lodestar init` also returns it:
+Schema version 3 has only the universal record model: `records`, `aliases`,
+`links`, `sources`, and `metadata`. Knowledge, work, and handoff are typed
+records in that model. Schema-v2's retired specialized continuity tables are
+removed only when all four are empty; migration halts rather than dropping
+nonempty state. Every automatic schema migration creates an exclusive backup
+first.
 
-1. Use Lodestar before recursively searching; the first put initializes it.
-2. Retrieve records through stable IDs or aliases.
-3. Follow explicit links for related context.
-4. Treat a missing record as missing knowledge, not proof that nothing exists.
-5. Inspect the repository normally when Lodestar is insufficient.
-
-The identical machine-readable contract is in
-[docs/agent-bootstrap.json](docs/agent-bootstrap.json). Lodestar does not
-install or orchestrate an agent.
-
-## Migrating from v0.7
-
-Preview first:
-
-```text
-lodestar import /path/to/old/store --dry-run --db /path/to/lodestar.db
-```
-
-Review `skipped`, `unsupported`, `id_mappings`, and the `reporting` totals
-before running the command without `--dry-run`. Report arrays are bounded; a
-true `reporting.truncated` value identifies exact omitted-entry counts and is a
-reason to keep the old store while resolving the omissions. The importer never
-writes to the old store, does not merge into populated databases, and does not
-provide dual-write compatibility. Keep the old store until representative
-IDs, aliases, links, counts, `lodestar doctor`, and `lodestar export` have been
-checked.
-
-See [the v0.7 migration guide](docs/migration-v0.7.md).
-
-## Boundaries
-
-Lodestar is not a backup system, authorization boundary, repository search
-engine, source-control system, database server, or completeness assessor. It
-does not encrypt or authenticate a database. Protect and back up the file with
-normal operating-system tools appropriate to the data.
-
-The complete claim boundary is documented in
-[docs/limitations.md](docs/limitations.md).
+Lodestar uses rollback journaling, `synchronous=FULL`, foreign keys, a bounded
+busy timeout, and `BEGIN IMMEDIATE` writes. It is a direct CLI, not a database
+server or backup system. See [the schema](docs/schema.md),
+[limitations](docs/limitations.md), and [v0.7 migration guide](docs/migration-v0.7.md).
 
 ## Development
 
 ```text
 npm test
 npm run pack:check
+npm pack --json
 ```
 
-The core is plain JavaScript using Node's built-in SQLite API. The architecture
-and its deliberate deletions are recorded in the source repository's
-architectural reduction report.
+The release workflow tests the packed executable on Windows, Linux, and macOS,
+runs CodeQL, publishes the exact tarball to npm with provenance, and attaches
+that tarball plus SHA-256 checksums to the GitHub release.
 
-Lodestar is licensed under the [MIT License](LICENSE). Security reports should
-follow [SECURITY.md](SECURITY.md).
+Lodestar is MIT licensed. Security reports should follow [SECURITY.md](SECURITY.md).

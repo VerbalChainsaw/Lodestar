@@ -24,7 +24,6 @@ import {
 } from "../src/database.mjs";
 import {
   defaultDatabasePath,
-  defaultServiceDiscoveryPath,
   resolveDatabasePath,
 } from "../src/paths.mjs";
 
@@ -39,7 +38,7 @@ async function digest(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 
-test("initializes exactly the schema-v2 tables and is read-only when repeated", async (t) => {
+test("initializes the universal-record schema and is read-only when repeated", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "state", "lodestar.db");
   const now = () => new Date("2026-07-30T10:00:00.000Z");
@@ -70,10 +69,6 @@ test("initializes exactly the schema-v2 tables and is read-only when repeated", 
       .filter((name) => !name.toLowerCase().startsWith("sqlite_")),
     [
       "aliases",
-      "continuity_events",
-      "continuity_lanes",
-      "continuity_packets",
-      "continuity_transfers",
       "links",
       "metadata",
       "records",
@@ -85,7 +80,8 @@ test("initializes exactly the schema-v2 tables and is read-only when repeated", 
       .map(({ key, value }) => [key, value]),
   );
   assert.equal(metadata.created_at, "2026-07-30T10:00:00.000Z");
-  assert.equal(metadata.schema_version, "2");
+  assert.equal(metadata.schema_version, "3");
+  assert.equal(metadata.database_revision, "0");
   assert.match(metadata.database_instance_id, /^[0-9a-f]{64}$/u);
   db.close();
 });
@@ -210,7 +206,7 @@ test("commit ambiguity is explicit and preserves a possibly committed init", asy
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "2",
+    "3",
   );
   db.close();
 });
@@ -244,7 +240,7 @@ test("definite init commit failure preserves a resumable reservation", async (t)
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "2",
+    "3",
   );
   db.close();
 });
@@ -307,7 +303,7 @@ test("initialization resumes an interrupted zero-byte reservation", async (t) =>
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "2",
+    "3",
   );
   db.close();
 });
@@ -385,7 +381,7 @@ test("concurrent initialization never overwrites another creator", async (t) => 
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "2",
+    "3",
   );
   db.close();
   if (process.platform !== "win32") {
@@ -420,15 +416,6 @@ test("resolves platform data paths without touching the filesystem", () => {
       pathApi: path.posix,
     }),
     "/data/lodestar/lodestar.db",
-  );
-  assert.equal(
-    defaultServiceDiscoveryPath({
-      platform: "win32",
-      env: { LOCALAPPDATA: "C:\\Data" },
-      home: "C:\\Users\\demo",
-      pathApi: path.win32,
-    }),
-    "C:\\Data\\Lodestar\\service.json",
   );
   assert.equal(
     resolveDatabasePath({

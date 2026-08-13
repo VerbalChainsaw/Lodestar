@@ -1,9 +1,11 @@
-import {
-  CONTINUITY_COMMAND,
-  SERVE_COMMAND,
-} from "./continuity-cli.mjs";
-
 export const COMMANDS = Object.freeze({
+  start: {
+    usage: "lodestar start [--cwd <path>] [--session <id>] [--agent <name>] [--harness <name>]",
+    summary: "Resolve one project and return its bounded startup projection.",
+    values: ["--cwd", "--session", "--agent", "--harness"],
+    booleans: [],
+    positionals: 0,
+  },
   init: {
     usage: "lodestar init [--db <path>]",
     summary: "Initialize the SQLite registry.",
@@ -27,9 +29,9 @@ export const COMMANDS = Object.freeze({
   },
   find: {
     usage:
-      "lodestar find <query> [--scope <scope>] [--type <type>] [--limit <n>]",
+      "lodestar find <query> [--scope <scope>] [--kind <kind>] [--limit <n>]",
     summary: "Search bounded structured context.",
-    values: ["--scope", "--type", "--limit"],
+    values: ["--scope", "--kind", "--type", "--limit"],
     booleans: [],
     positionals: 1,
   },
@@ -68,6 +70,18 @@ export const COMMANDS = Object.freeze({
     booleans: [],
     positionals: 0,
   },
-  continuity: CONTINUITY_COMMAND,
-  serve: SERVE_COMMAND,
+  work: {
+    usage: "lodestar work [status|start|done|history] [text] [options]",
+    summary: "Read or update advisory project work reports.",
+    values: ["--cwd", "--session", "--agent", "--harness", "--limit"],
+    booleans: [],
+    positionals: { min: 0, max: 2 },
+  },
+  handoff: {
+    usage: "lodestar handoff <save|status|clear> [options]",
+    summary: "Save, inspect, claim, or clear one project handoff baton.",
+    values: ["--cwd", "--session", "--agent", "--harness", "--file"],
+    booleans: [],
+    positionals: 1,
+  },
 });

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.0 - 2026-08-13
+
+- Unify startup context, durable knowledge, advisory work presence, and
+  cross-session handoff behind one `lodestar` executable and one JSON envelope.
+- Add monotonic database and record revisions allocated inside every mutation
+  transaction.
+- Normalize Windows and WSL project paths and cross the Windows-owned one-shot
+  runtime boundary from WSL.
+- Preserve original direct-content and wrapped record forms through one
+  universal output adapter.
+- Replace specialized continuity persistence with typed universal records;
+  schema-v2 migration drops its old tables only when all are empty.
+- Include the Lodestar Codex plugin for one startup injection and the validated,
+  redacted natural `handoff now` flow.
+- Retire old service, discovery, successor-creation, and separate-suite runtime
+  surfaces.
+- Rebuild the GitHub and npm front page and publish the packed executable with
+  cross-platform verification.
+
 ## 1.0.3 - 2026-07-31
 
 - Put the central original-to-1.0 product comparison near the top of the

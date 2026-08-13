@@ -6,10 +6,10 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  installWslShim,
   installWindowsPosixShim,
-  installWindowsServiceBootstrap,
+  renderWslShim,
   renderWindowsPosixShim,
-  renderWindowsServiceBootstrap,
 } from "../src/windows-install.mjs";
 
 test("the Windows POSIX shim converts paths explicitly", () => {
@@ -19,15 +19,12 @@ test("the Windows POSIX shim converts paths explicitly", () => {
   assert.match(shim, /MSYS2_ARG_CONV_EXCL='\*'/u);
 });
 
-test("the Windows service bootstrap is identity-bound and argument-safe", () => {
-  const bootstrap = renderWindowsServiceBootstrap();
-  assert.match(bootstrap, /ValidateSet\("ensure"\)/u);
-  assert.match(bootstrap, /\$Options\[0\] -ne "--json"/u);
-  assert.match(bootstrap, /127\\\.0\\\.0\\\.1/u);
-  assert.match(bootstrap, /schemaVersion -ne \$expectedSchema/u);
-  assert.match(bootstrap, /databaseInstanceId -ne \$discovery\.databaseInstanceId/u);
-  assert.match(bootstrap, /@\(\$entryPath, "serve", "--port", "0"\)/u);
-  assert.doesNotMatch(bootstrap, /packet_json|conversation|prompt.tail/u);
+test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
+  const shim = renderWslShim();
+  assert.match(shim, /cmd\.exe \/d \/c echo %USERPROFILE%/u);
+  assert.match(shim, /wslpath -w/u);
+  assert.match(shim, /node-\*\/node\.exe/u);
+  assert.doesNotMatch(shim, /LODESTAR_DB=/u);
 });
 
 test("the Windows POSIX shim installer writes an executable atomically", async (t) => {
@@ -36,14 +33,24 @@ test("the Windows POSIX shim installer writes an executable atomically", async (
   const target = path.join(directory, "bin", "lodestar");
   await installWindowsPosixShim(target);
   assert.equal(await readFile(target, "utf8"), renderWindowsPosixShim());
-  const syntax = spawnSync("bash", ["-n", target], { encoding: "utf8" });
+  const bashTarget = process.platform === "win32"
+    ? `/mnt/${target[0].toLowerCase()}${target.slice(2).replaceAll("\\", "/")}`
+    : target;
+  const syntax = spawnSync("bash", ["-n", bashTarget], {
+    encoding: "utf8",
+  });
   assert.equal(syntax.status, 0, syntax.stderr);
 });
 
-test("the Windows service bootstrap installer writes atomically", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-service-"));
+test("the WSL shim installer writes an executable atomically", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-wsl-shim-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const target = path.join(directory, "bin", "lodestar-service.ps1");
-  await installWindowsServiceBootstrap(target);
-  assert.equal(await readFile(target, "utf8"), renderWindowsServiceBootstrap());
+  const target = path.join(directory, "lodestar");
+  await installWslShim(target);
+  assert.equal(await readFile(target, "utf8"), renderWslShim());
+  const bashTarget = process.platform === "win32"
+    ? `/mnt/${target[0].toLowerCase()}${target.slice(2).replaceAll("\\", "/")}`
+    : target;
+  const syntax = spawnSync("bash", ["-n", bashTarget], { encoding: "utf8" });
+  assert.equal(syntax.status, 0, syntax.stderr);
 });

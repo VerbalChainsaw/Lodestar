@@ -1,7 +1,7 @@
 {
   "name": "lodestar-agent-context",
-  "version": "1.0.3",
-  "description": "Small offline SQLite context registry for humans and software agents",
+  "version": "1.1.0",
+  "description": "One local state suite for agent startup, knowledge, work presence, and handoff",
   "type": "module",
   "bin": {
     "lodestar": "lodestar.mjs"
@@ -9,6 +9,7 @@
   "files": [
     "lodestar.mjs",
     "src/",
+    "codex-plugin/",
     "docs/agent-bootstrap.json",
     "docs/limitations.md",
     "docs/migration-v0.7.md",
@@ -32,6 +33,8 @@
     "agents",
     "context",
     "context-registry",
+    "handoff",
+    "multi-agent",
     "sqlite",
     "cli",
     "local-first",

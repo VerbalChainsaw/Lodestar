@@ -8,7 +8,8 @@ export function readMetadata(db, file = null) {
       "SELECT key, substr(value, 1, 4097) AS value, "
         + "length(CAST(value AS BLOB)) AS bytes FROM metadata "
         + "WHERE key IN ("
-        + "'schema_version', 'created_at', 'database_instance_id'"
+        + "'schema_version', 'created_at', 'database_instance_id', "
+        + "'database_revision'"
         + ") ORDER BY key",
     ).all();
     if (rows.some(({ bytes }) => Number(bytes) > 4096)) {
@@ -113,6 +114,19 @@ export function assertSupportedSchema(db, file = null) {
         identifiers: {
           database: file,
           database_instance_id: metadata.database_instance_id ?? null,
+        },
+        action: "Run lodestar doctor and use a valid Lodestar database.",
+      },
+    );
+  }
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(metadata.database_revision ?? "")) {
+    throw lodestarError(
+      "invalid_database",
+      "The database revision is invalid.",
+      {
+        identifiers: {
+          database: file,
+          database_revision: metadata.database_revision ?? null,
         },
         action: "Run lodestar doctor and use a valid Lodestar database.",
       },

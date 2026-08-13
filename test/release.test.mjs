@@ -73,8 +73,8 @@ test("the current release has valid launch graphics", async () => {
         "assets",
         `lodestar-v${packageJson.version}-social.png`,
       ),
-      width: 1_200,
-      height: 1_200,
+      width: 1_254,
+      height: 1_254,
     },
   ];
   const pngSignature = Buffer.from([

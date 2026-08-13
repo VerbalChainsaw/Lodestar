@@ -23,8 +23,9 @@ understanding platform.
 ## Storage boundary
 
 - One SQLite file is the source of truth.
-- Lodestar has no built-in history, audit chain, snapshots, restore, rollback,
-  quarantine, or automatic repair.
+- Lodestar retains advisory work history and one handoff lineage as universal
+  records. It is not a general audit chain, snapshot, restore, rollback,
+  quarantine, or automatic-repair system.
 - SQLite rolls back interrupted transactions, but it cannot recover a lost or
   maliciously rewritten database.
 - `doctor` diagnoses; it does not mutate or repair.
@@ -48,17 +49,18 @@ understanding platform.
 
 ## Operational boundary
 
-- There is one public executable and no plugin or provider framework.
-- Lodestar does not install, configure, or orchestrate agents.
+- There is one public executable. The optional Codex plugin is an integration
+  bundle around that executable, not another durable state product.
+- Lodestar does not orchestrate agents or create successor sessions.
 - There is no background indexing or maintenance process.
 - Writers and overlapping first-use validation wait for the same bounded busy
   timeout and then report contention; Lodestar does not identify or reclaim
   another process's lock.
 - Rollback-journal mode favors a simple write-light CLI. It is not tuned as a
   high-throughput database service.
-- Read-only commands never initialize a missing database. The first
-  structurally valid `lodestar put` initializes it automatically; `init`
-  remains optional.
+- Read-only knowledge commands never initialize a missing database. `start`, a
+  structurally valid `put`, and state mutations initialize it through the same
+  exclusive reservation path; `init` remains optional.
 - A definite failure while creating a new database can leave its published
   zero-byte reservation in place. A later `put`, `init`, or import can resume
   that reservation; Lodestar does not unlink it because another process may
@@ -66,8 +68,10 @@ understanding platform.
 
 ## Compatibility boundary
 
-- Schema version 1 is accepted exactly; unknown versions fail closed.
-- There is no speculative automatic schema migration framework.
+- Schema versions 1 and 2 migrate to version 3 only through the documented,
+  backed-up paths; unknown versions fail closed.
+- Version-2 migration removes retired continuity tables only when all four are
+  empty. Nonempty state halts migration without changing the database.
 - The v0.7 importer is one-way and accepts only its documented
   generation-store layout.
 - Import does not merge, overwrite populated databases, dual-write, or mutate

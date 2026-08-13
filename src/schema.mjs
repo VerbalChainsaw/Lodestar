@@ -1,14 +1,11 @@
 import { randomBytes } from "node:crypto";
 
 import {
-  CONTINUITY_COLUMNS,
-  CONTINUITY_INDEXES,
   CONTINUITY_SCHEMA_SQL,
-  CONTINUITY_TABLES,
 } from "./continuity-schema.mjs";
-
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const LEGACY_SCHEMA_VERSION = 1;
+export const PREVIOUS_SCHEMA_VERSION = 2;
 
 export function createDatabaseInstanceId() {
   return randomBytes(32).toString("hex");
@@ -144,19 +141,11 @@ CREATE INDEX aliases_record_id
   ON aliases(record_id, alias);
 `;
 
-export const SCHEMA_SQL = `${LEGACY_SCHEMA_SQL}\n${CONTINUITY_SCHEMA_SQL}`;
-export const SCHEMA_TABLES = Object.freeze([
-  ...LEGACY_SCHEMA_TABLES,
-  ...CONTINUITY_TABLES,
-].sort());
-export const SCHEMA_INDEXES = Object.freeze([
-  ...LEGACY_SCHEMA_INDEXES,
-  ...CONTINUITY_INDEXES,
-].sort());
-export const EXPECTED_COLUMNS = Object.freeze({
-  ...LEGACY_EXPECTED_COLUMNS,
-  ...CONTINUITY_COLUMNS,
-});
+export const PREVIOUS_SCHEMA_SQL = `${LEGACY_SCHEMA_SQL}\n${CONTINUITY_SCHEMA_SQL}`;
+export const SCHEMA_SQL = LEGACY_SCHEMA_SQL;
+export const SCHEMA_TABLES = LEGACY_SCHEMA_TABLES;
+export const SCHEMA_INDEXES = LEGACY_SCHEMA_INDEXES;
+export const EXPECTED_COLUMNS = LEGACY_EXPECTED_COLUMNS;
 
 function normalizedSql(value) {
   return value.replace(/\s+/gu, " ").trim();
@@ -200,14 +189,15 @@ function expectedDefinitions(schemaSql) {
 
 export const LEGACY_EXPECTED_SCHEMA_DEFINITIONS =
   expectedDefinitions(LEGACY_SCHEMA_SQL);
+export const PREVIOUS_EXPECTED_SCHEMA_DEFINITIONS =
+  expectedDefinitions(PREVIOUS_SCHEMA_SQL);
 export const EXPECTED_SCHEMA_DEFINITIONS = expectedDefinitions(SCHEMA_SQL);
 
 export function inspectSchemaDefinitions(db, { version = SCHEMA_VERSION } = {}) {
   const expectedDefinitionsForVersion = version === LEGACY_SCHEMA_VERSION
     ? LEGACY_EXPECTED_SCHEMA_DEFINITIONS
-    : version === SCHEMA_VERSION
-      ? EXPECTED_SCHEMA_DEFINITIONS
-      : null;
+    : version === PREVIOUS_SCHEMA_VERSION ? PREVIOUS_EXPECTED_SCHEMA_DEFINITIONS
+    : version === SCHEMA_VERSION ? EXPECTED_SCHEMA_DEFINITIONS : null;
   if (expectedDefinitionsForVersion === null) {
     throw new Error(`Unsupported schema inspection version: ${version}`);
   }
@@ -259,4 +249,5 @@ export function createSchema(
   insert.run("schema_version", String(SCHEMA_VERSION));
   insert.run("created_at", createdAt);
   insert.run("database_instance_id", databaseInstanceId);
+  insert.run("database_revision", "0");
 }

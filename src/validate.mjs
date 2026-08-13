@@ -322,6 +322,7 @@ export function validatePutInput(value) {
       "type",
       "name",
       "scope",
+      "priority",
       "content",
       "aliases",
       "links",
@@ -331,6 +332,10 @@ export function validatePutInput(value) {
   );
   for (const field of ["id", "type", "name", "scope", "content"]) {
     if (!Object.hasOwn(value, field)) invalid(field, "missing or empty");
+  }
+  if (value.priority !== undefined
+    && (!Number.isSafeInteger(value.priority) || value.priority < 0)) {
+    invalid("priority", "not a nonnegative safe integer");
   }
   const aliases = boundedArray(
     Object.hasOwn(value, "aliases") ? value.aliases : undefined,

@@ -72,7 +72,7 @@ test("CLI initializes, writes, reads, searches, diagnoses, and exports JSON", as
 
   const get = await invoke(["get", "cli alias", ...common]);
   assert.equal(get.exitCode, 0, get.stderr);
-  assert.equal(JSON.parse(get.stdout).data.content.state, "known");
+  assert.equal(JSON.parse(get.stdout).data.availability, "known");
 
   const find = await invoke(["find", "searchable", ...common]);
   assert.deepEqual(
@@ -194,6 +194,9 @@ test("every public command help path is JSON and side-effect free", async (t) =>
     "doctor",
     "import",
     "export",
+    "start",
+    "work",
+    "handoff",
   ];
   for (const args of [["--help"], ["--version"]]) {
     const result = await invoke([...args, "--db", file]);
@@ -213,6 +216,58 @@ test("every public command help path is JSON and side-effect free", async (t) =>
     assert.equal(output.data.command, command);
   }
   await assert.rejects(access(path.dirname(file)), { code: "ENOENT" });
+});
+
+test("legacy direct-content records remain readable through every lookup command", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  const common = ["--db", file];
+  const legacy = {
+    id: "instruction:legacy",
+    type: "instruction",
+    name: "Legacy instruction",
+    scope: "global",
+    content: { state: "known", required: true, text: "preserve this guidance" },
+    aliases: ["legacy guidance"],
+    links: [],
+    sources: [],
+  };
+  await invoke(["put", ...common], JSON.stringify(legacy));
+  await invoke(["put", ...common], JSON.stringify({
+    ...inputRecord(), id: "record:legacy-link", aliases: [],
+    links: [{ relationship: "documents", to_id: legacy.id }],
+  }));
+
+  const get = await invoke(["get", "legacy guidance", ...common]);
+  assert.equal(get.exitCode, 0, get.stderr);
+  assert.equal(JSON.parse(get.stdout).data.data.text, "preserve this guidance");
+  const find = await invoke(["find", "preserve this", ...common]);
+  assert.deepEqual(JSON.parse(find.stdout).data.records.map(({ id }) => id), [legacy.id]);
+  const links = await invoke(["links", legacy.id, ...common]);
+  assert.equal(JSON.parse(links.stdout).data.links[0].peer.data.value, "searchable phrase");
+  const doctor = await invoke(["doctor", ...common]);
+  assert.equal(JSON.parse(doctor.stdout).data.healthy, true);
+});
+
+test("put accepts the normalized Lodestar record shape", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  const normalized = {
+    v: 1,
+    id: "record:normalized",
+    kind: "note",
+    scope: "global",
+    availability: "known",
+    priority: 700,
+    data: { name: "Normalized", aliases: ["normalized alias"], text: "round trip" },
+    links: [],
+    sources: [],
+  };
+  const put = await invoke(["put", "--db", file], JSON.stringify(normalized));
+  assert.equal(put.exitCode, 0, put.stderr);
+  assert.equal(JSON.parse(put.stdout).data.priority, 700);
+  const get = await invoke(["get", "normalized alias", "--db", file]);
+  assert.equal(JSON.parse(get.stdout).data.data.text, "round trip");
 });
 
 test("the public links and delete commands operate through JSON", async (t) => {
@@ -278,13 +333,19 @@ test("errors use the stable JSON structure and a nonzero exit", async (t) => {
   assert.equal(result.exitCode, 3);
   assert.equal(result.stdout, "");
   assert.deepEqual(JSON.parse(result.stderr), {
+    v: 1,
+    ok: false,
+    operation: "get",
+    revision: null,
+    scope: { project: null, cwd: null, session: null, actor: null },
     error: {
       action: "Use lodestar find or inspect the repository directly.",
       code: "record_not_found",
       identifiers: { requested: "missing" },
       message: "No record or alias matched the requested identifier.",
     },
-    ok: false,
+    more: false,
+    next: ["Use lodestar find or inspect the repository directly."],
   });
 });
 
@@ -394,13 +455,19 @@ test("the CLI does not trust or amplify forged Lodestar errors", async () => {
   assert.equal(result.output().stdout, "");
   assert.ok(Buffer.byteLength(result.output().stderr, "utf8") < 4096);
   assert.deepEqual(JSON.parse(result.output().stderr), {
+    v: 1,
+    ok: false,
+    operation: "put",
+    revision: null,
+    scope: { project: null, cwd: null, session: null, actor: null },
     error: {
       action: "Retry the command. If it fails again, run lodestar doctor.",
       code: "internal_error",
       identifiers: {},
       message: "Lodestar could not complete the operation.",
     },
-    ok: false,
+    more: false,
+    next: ["Retry the command. If it fails again, run lodestar doctor."],
   });
 });
 
@@ -448,12 +515,18 @@ test("the CLI always normalizes unreadable genuine error diagnostics", async () 
   assert.equal(exitCode, 2);
   assert.equal(result.output().stdout, "");
   assert.deepEqual(JSON.parse(result.output().stderr), {
+    v: 1,
+    ok: false,
+    operation: "put",
+    revision: null,
+    scope: { project: null, cwd: null, session: null, actor: null },
     error: {
       action: "Review the identifiers and retry with valid Lodestar input.",
       code: "invalid_input",
       identifiers: {},
       message: "The injected input is invalid.",
     },
-    ok: false,
+    more: false,
+    next: ["Review the identifiers and retry with valid Lodestar input."],
   });
 });

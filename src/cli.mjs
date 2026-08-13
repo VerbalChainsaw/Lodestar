@@ -1,49 +1,17 @@
 import { Buffer } from "node:buffer";
-import path from "node:path";
-
-import { AGENT_BOOTSTRAP } from "./bootstrap.mjs";
-import {
-  executeContinuityCli,
-  runCliService,
-} from "./continuity-cli.mjs";
 import { COMMANDS } from "./cli-commands.mjs";
-import {
-  initializeDatabase,
-  openOrMigrateReadDatabase,
-  openOrMigrateWriteDatabase,
-  openOrInitializeWriteDatabase,
-  openDiagnosticDatabase,
-} from "./database.mjs";
-import { diagnoseDatabase } from "./doctor.mjs";
 import {
   errorResult,
   internalErrorResult,
   lodestarError,
 } from "./errors.mjs";
-import {
-  canonicalStringify,
-  parseJsonText,
-  readStreamBounded,
-  readTextFileBounded,
-} from "./json.mjs";
-import { importV070 } from "./import-v070.mjs";
+import { canonicalStringify } from "./json.mjs";
+import { dispatch, operationResult } from "./agent-state.mjs";
 import { resolveDatabasePath } from "./paths.mjs";
-import {
-  exportRegistry,
-  findRecords,
-  linkedRecords,
-} from "./queries.mjs";
-import {
-  deleteRecord,
-  getRecord,
-  putRecord,
-} from "./records.mjs";
-import { LIMITS, validatePutInput } from "./validate.mjs";
+import { LIMITS } from "./validate.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
-
 export { LODESTAR_VERSION } from "./version.mjs";
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
-
 function helpData(command = null) {
   if (command) {
     const definition = COMMANDS[command];
@@ -74,7 +42,6 @@ function helpData(command = null) {
     output: "JSON is the default; --human requests formatted output.",
   };
 }
-
 function humanHelp(data) {
   if (data.command) {
     return [
@@ -94,7 +61,6 @@ function humanHelp(data) {
     ...data.commands.map(({ name, summary }) => `  ${name.padEnd(7)} ${summary}`),
   ].join("\n");
 }
-
 function extractGlobals(args) {
   const rest = [];
   const global = {
@@ -136,7 +102,6 @@ function extractGlobals(args) {
   }
   return { global, rest };
 }
-
 function parseCommand(command, args) {
   const definition = COMMANDS[command];
   const valueOptions = new Set(definition.values);
@@ -191,14 +156,18 @@ function parseCommand(command, args) {
       { identifiers: { command, option: token } },
     );
   }
-  if (positionals.length !== definition.positionals) {
+  const expected = definition.positionals;
+  const validCount = typeof expected === "number"
+    ? positionals.length === expected
+    : positionals.length >= expected.min && positionals.length <= expected.max;
+  if (!validCount) {
     throw lodestarError(
       "missing_argument",
       "The command received the wrong number of positional arguments.",
       {
         identifiers: {
           command,
-          expected: definition.positionals,
+          expected,
           actual: positionals.length,
         },
         action: `Use: ${definition.usage}`,
@@ -207,94 +176,31 @@ function parseCommand(command, args) {
   }
   return { options, positionals };
 }
-
-async function withDatabase(open, file, operation) {
-  const db = await open(file);
-  try {
-    return await operation(db);
-  } finally {
-    db.close();
+function writeSuccess(io, operation, result, human) {
+  const envelope = {
+    v: 1,
+    ok: true,
+    operation,
+    revision: result.revision,
+    scope: result.scope,
+    data: result.data,
+    more: result.more,
+    next: result.next,
+  };
+  if (operation === "start") {
+    while (Buffer.byteLength(canonicalStringify(envelope), "utf8") + 1 > 16 * 1024
+      && envelope.data.context.length) {
+      envelope.data.context.pop();
+      envelope.more = true;
+      const followUp = `lodestar find "${envelope.data.project.name}" --scope ${envelope.data.project.scope} --limit 50`;
+      if (!envelope.next.includes(followUp)) {
+        envelope.next.push(followUp);
+      }
+    }
   }
-}
-
-
-async function dispatch(command, parsed, database, io) {
-  const { options, positionals } = parsed;
-  if (command === "init") {
-    return {
-      ...(await initializeDatabase(database)),
-      bootstrap: AGENT_BOOTSTRAP,
-    };
-  }
-  if (command === "put") {
-    const text = options["--file"]
-      ? await readTextFileBounded(path.resolve(options["--file"]), {
-        maximum: LIMITS.putInputBytes,
-        resource: "put_input",
-      })
-      : await readStreamBounded(io.stdin, {
-        maximum: LIMITS.putInputBytes,
-        resource: "put_input",
-      });
-    const value = parseJsonText(text, {
-      maximum: LIMITS.putInputBytes,
-      resource: "put_input",
-    });
-    validatePutInput(value);
-    return await withDatabase(openOrInitializeWriteDatabase, database, (db) =>
-      putRecord(db, value, { database }));
-  }
-  if (command === "get") {
-    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
-      getRecord(db, positionals[0]));
-  }
-  if (command === "find") {
-    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
-      findRecords(db, positionals[0], {
-        scope: options["--scope"],
-        type: options["--type"],
-        limit: options["--limit"],
-      }));
-  }
-  if (command === "links") {
-    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
-      linkedRecords(db, positionals[0], {
-        limit: options["--limit"],
-      }));
-  }
-  if (command === "delete") {
-    return await withDatabase(openOrMigrateWriteDatabase, database, (db) =>
-      deleteRecord(db, positionals[0], { database }));
-  }
-  if (command === "doctor") {
-    return await withDatabase(openDiagnosticDatabase, database, (db) =>
-      diagnoseDatabase(db, { database }));
-  }
-  if (command === "import") {
-    return await importV070({
-      sourcePath: path.resolve(positionals[0]),
-      database,
-      dryRun: options["--dry-run"] === true,
-    });
-  }
-  if (command === "export") {
-    return await withDatabase(openOrMigrateReadDatabase, database, (db) =>
-      exportRegistry(db).document);
-  }
-  if (command === "continuity") {
-    return await executeContinuityCli(positionals, options, io);
-  }
-  throw lodestarError(
-    "unknown_command",
-    "The requested command is not part of the Lodestar CLI.",
-    { identifiers: { command } },
-  );
-}
-
-function writeSuccess(io, data, human) {
   const text = human
-    ? JSON.stringify(data, null, 2)
-    : canonicalStringify({ ok: true, data });
+    ? JSON.stringify(envelope, null, 2)
+    : canonicalStringify(envelope);
   const bytes = Buffer.byteLength(text, "utf8") + 1;
   if (bytes > LIMITS.commandOutputBytes) {
     throw lodestarError(
@@ -312,7 +218,6 @@ function writeSuccess(io, data, human) {
   }
   io.stdout.write(`${text}\n`);
 }
-
 function validateArguments(args) {
   let total = 0;
   for (const [index, argument] of args.entries()) {
@@ -361,7 +266,6 @@ function validateArguments(args) {
     );
   }
 }
-
 export async function runCli(
   args = process.argv.slice(2),
   io = {
@@ -370,6 +274,7 @@ export async function runCli(
     stderr: process.stderr,
   },
 ) {
+  let attemptedOperation = "cli";
   try {
     if (!Array.isArray(args)) {
       throw lodestarError(
@@ -388,15 +293,16 @@ export async function runCli(
     validateArguments(args);
     const { global, rest } = extractGlobals(args);
     const command = rest[0] ?? null;
+    attemptedOperation = command ?? "help";
     if (global.version) {
       const data = { name: "lodestar", version: LODESTAR_VERSION };
-      writeSuccess(io, data, global.human);
+      writeSuccess(io, "version", operationResult(data), global.human);
       return 0;
     }
     if (global.help || command === null) {
       const data = helpData(command);
       if (global.human) io.stdout.write(`${humanHelp(data)}\n`);
-      else writeSuccess(io, data, false);
+      else writeSuccess(io, "help", operationResult(data), false);
       return 0;
     }
     if (!Object.hasOwn(COMMANDS, command)) {
@@ -407,16 +313,16 @@ export async function runCli(
       );
     }
     const parsed = parseCommand(command, rest.slice(1));
-    const database = resolveDatabasePath({ explicit: global.database });
-    if (command === "serve") {
-      await runCliService(database, parsed.options, (data) =>
-        writeSuccess(io, data, global.human)
-      );
-      return 0;
+    if (["work", "handoff"].includes(command)) {
+      attemptedOperation = `${command}.${parsed.positionals[0] ?? "status"}`;
     }
-    const data = await dispatch(command, parsed, database, io);
-    writeSuccess(io, data, global.human);
-    return command === "doctor" && data.healthy === false ? 4 : 0;
+    const database = resolveDatabasePath({ explicit: global.database });
+    const result = await dispatch(command, parsed, database, io);
+    const operation = ["work", "handoff"].includes(command)
+      ? `${command}.${parsed.positionals[0] ?? "status"}`
+      : command;
+    writeSuccess(io, operation, result, global.human);
+    return command === "doctor" && result.data.healthy === false ? 4 : 0;
   } catch (error) {
     let normalized;
     try {
@@ -426,16 +332,33 @@ export async function runCli(
     }
     let text;
     try {
-      text = canonicalStringify(normalized.envelope);
+      text = canonicalStringify({
+        v: 1,
+        ok: false,
+        operation: attemptedOperation,
+        revision: null,
+        scope: { project: null, cwd: null, session: null, actor: null },
+        error: normalized.envelope.error,
+        more: false,
+        next: normalized.envelope.error?.action
+          ? [normalized.envelope.error.action]
+          : [],
+      });
     } catch {
       text = JSON.stringify({
+        v: 1,
         ok: false,
+        operation: "cli",
+        revision: null,
+        scope: { project: null, cwd: null, session: null, actor: null },
         error: {
           code: "internal_error",
           message: "Lodestar could not encode the operation error.",
           identifiers: {},
           action: "Retry the command. If it fails again, run lodestar doctor.",
         },
+        more: false,
+        next: [],
       });
     }
     io.stderr.write(`${text}\n`);
