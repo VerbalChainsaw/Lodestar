@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.0 - 2026-08-14
+
+- `start` never refuses to run. Required records larger than the 16 KiB budget used to
+  throw `resource_limit`, which stopped every session in the project over a marking
+  mistake often made somewhere else entirely — a global record is charged to all
+  projects. Startup now demotes instead, in a fixed order, and always returns.
+- Shedding demotes to a stub rather than deleting. Every record the projection cannot
+  carry is still named by `id`, `name` and `kind` in `data.available`, so one
+  `lodestar get` recovers exactly the right one. Dropping records outright and pointing
+  at `lodestar find --limit 50` made the agent search and re-read more than the budget
+  ever saved, which is the opposite of what a bounded projection is for.
+- Shed in value order: optional context, then advisory work, then stubs of optional
+  records, then required records, and the governance record last. A required record's
+  content now outranks an optional record's name.
+- `put` reports the startup cost of marking a record required, naming the heaviest
+  project affected. It reports and never refuses, so a bulk import cannot fail partway.
+
 ## 1.2.7 - 2026-08-14
 
 - Measure the startup budget where it is actually spent. `doctor` only ever counted
