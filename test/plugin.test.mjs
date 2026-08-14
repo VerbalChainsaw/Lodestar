@@ -203,9 +203,12 @@ test("the plugin MCP stdio transport initializes, lists, and executes the author
   assert.equal(stderr, "");
   const replies = stdout.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(replies[0].result.serverInfo.name, "lodestar");
+  // Work is exposed alongside continuity because only the host knows the session id;
+  // a shell cannot supply one, and guessing it captures a concurrent peer's marker.
   assert.deepEqual(replies[1].result.tools.map(({ name }) => name), [
     "lodestar_handoff_arm", "lodestar_handoff_status", "lodestar_handoff_checkpoint",
     "lodestar_handoff_now", "lodestar_handoff_disarm",
+    "lodestar_work_start", "lodestar_work_done", "lodestar_work_status",
   ]);
   assert.equal(replies[2].result.isError, false);
   assert.equal(replies[2].result.structuredContent.result.recovery.data.state, "pending");

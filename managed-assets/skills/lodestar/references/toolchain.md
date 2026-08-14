@@ -87,5 +87,15 @@ lodestar skills verify --target all
 lodestar start --cwd .
 lodestar work start "<scope>"
 lodestar work done "<result>"
+```
+
+Identity comes from the host, not the shell. In a host running the Lodestar plugin
+(Codex Desktop), call the bundled tools — `lodestar_work_start`, `lodestar_work_done`,
+`lodestar_work_status` — which carry the exact session id the host already knows.
+A plain shell has no session id, so `lodestar work start` there requires an explicit
+`--session <id>`. Lodestar refuses rather than guessing: work records are keyed by
+actor, so a guessed session would capture and then overwrite a concurrent peer's
+marker.
+```text
 lodestar handoff status --cwd .
 ```

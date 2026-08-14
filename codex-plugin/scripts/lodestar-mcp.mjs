@@ -4,7 +4,9 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { executeHandoff, HANDOFF_COMMANDS } from "./lodestar-runtime.mjs";
+import {
+  executeHandoff, executeWork, HANDOFF_COMMANDS, WORK_COMMANDS, workToolCommand,
+} from "./lodestar-runtime.mjs";
 
 // Read from the manifest beside this script rather than a literal. A hardcoded version
 // reports whatever was true when it was typed, so an installed build silently claims to
@@ -42,6 +44,22 @@ const tools = HANDOFF_COMMANDS.map((command) => ({
     : { type: "object", additionalProperties: false, properties: {} },
 }));
 
+// Exposed as tools rather than left to the shell so each call carries the host
+// session. A shell has no session id, so a CLI fallback can only guess, and a wrong
+// guess overwrites a concurrent peer's marker.
+tools.push(...WORK_COMMANDS.map((command) => ({
+  name: `lodestar_work_${command}`,
+  description: command === "status"
+    ? "List advisory work reports for this project."
+    : `Mark this session's advisory work as ${command} for this project.`,
+  inputSchema: command === "status"
+    ? { type: "object", additionalProperties: false, properties: {} }
+    : { type: "object", additionalProperties: false,
+      ...(command === "start" ? { required: ["report"] } : {}),
+      properties: { report: { type: "string",
+        description: "One line describing the work area." } } },
+})));
+
 function reply(id, result, error) {
   process.stdout.write(`${JSON.stringify(error ? { jsonrpc: "2.0", id,
     error: { code: -32000, message: error instanceof Error ? error.message : String(error) } }
@@ -64,7 +82,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       else if (message.method === "tools/list") reply(message.id, { tools });
       else if (message.method === "tools/call"
           && tools.some(({ name }) => name === message.params?.name)) {
-        const result = await executeHandoff(
+        const run = workToolCommand(message.params.name) ? executeWork : executeHandoff;
+        const result = await run(
           `lodestar__${message.params.name}`,
           message.params.arguments ?? {},
           dataDir,
