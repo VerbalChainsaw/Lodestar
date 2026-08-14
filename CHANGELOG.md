@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.0 - 2026-08-13
+
+- Generate one required governance record and one canonical bootstrap from the
+  managed assets, return the rule on every startup, and transactionally manage
+  explicitly configured client bootstrap files alongside the skill payload.
+- Fold work presence, continuity, and durable decisions into the Lodestar
+  umbrella skill while keeping one executable and one SQLite authority.
+- Bundle the managed client skills and instruction templates in the Lodestar
+  package, with one `skills install|sync|verify|remove` lifecycle for Codex,
+  Claude, Hermes, and OpenCode.
+- Add session-isolated `handoff arm|status|checkpoint|now|disarm`, atomic
+  next-session startup claiming, append-only `decision` events, and deterministic
+  FACTS/DEAD startup projection.
+- Import supported historical knowledge, work, decision, continuity, and current
+  Lodestar state through one checksummed, backup-first, idempotent manifest.
+- Keep WSL skill staging and backups on the Linux filesystem, translate client
+  roots at the one-shot shim boundary, and verify the installed shim is
+  executable before returning success.
+- Preflight and stage the complete managed-skill batch before client mutation,
+  compensate handled cross-client failures in reverse order, and keep each
+  stage on its destination filesystem.
+- Exercise the packed package through every public command family, the real
+  Codex MCP stdio transport, real AgentLink subprocess delegation, and a
+  disposable live-scale latency/concurrency benchmark.
+- Open the current-schema migration probe read-only and document the exact
+  mutation boundary for startup, schema migration, state, and skill commands.
+
 ## 1.1.0 - 2026-08-13
 
 - Unify startup context, durable knowledge, advisory work presence, and

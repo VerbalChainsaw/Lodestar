@@ -1,7 +1,7 @@
 {
   "name": "lodestar-agent-context",
-  "version": "1.1.0",
-  "description": "One local state suite for agent startup, knowledge, work presence, and handoff",
+  "version": "1.2.0",
+  "description": "One local state suite for agent startup, knowledge, work presence, continuity, and decisions",
   "type": "module",
   "bin": {
     "lodestar": "lodestar.mjs"
@@ -20,7 +20,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --disable-warning=ExperimentalWarning --test",
+    "assets:build": "node scripts/build-managed-assets.mjs --write",
+    "assets:check": "node scripts/build-managed-assets.mjs --check",
+    "test": "npm run assets:check && node --test",
     "pack:check": "npm pack --dry-run --json"
   },
   "engines": {
