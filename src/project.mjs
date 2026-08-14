@@ -56,18 +56,23 @@ function storedProjectRoots(db) {
     if (!Array.isArray(roots)) return [];
     return roots
       .filter((root) => typeof root === "string")
-      .map((root) => ({ id: row.id, name: row.name, root: normalizeMachinePath(root) }));
+      // `root` stays as stored for the projection; `match` carries the physical form.
+      // The cwd is realpath-resolved, so an unresolved stored root never matches behind
+      // a symlink — macOS resolves /var to /private/var, Windows expands 8.3 names.
+      .map((root) => ({ id: row.id, name: row.name, root: normalizeMachinePath(root),
+        match: comparable(physical(root)) }));
   });
 }
 
 export function resolveProject(db, cwdValue = process.cwd()) {
   const cwd = physical(cwdValue);
   const projects = storedProjectRoots(db)
-    .filter(({ root }) => comparable(cwd) === comparable(root)
-      || comparable(cwd).startsWith(`${comparable(root)}/`))
+    .filter(({ match }) => comparable(cwd) === match
+      || comparable(cwd).startsWith(`${match}/`))
     .sort((a, b) => b.root.length - a.root.length || a.id.localeCompare(b.id));
   if (projects.length) {
-    const [best] = projects;
+    // `match` is a comparison key, not part of the reported projection.
+    const [{ match: _match, ...best }] = projects;
     return {
       ...best,
       scope: best.id.startsWith("project:") ? best.id : `project:${best.id}`,
