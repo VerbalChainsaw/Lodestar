@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.6 - 2026-08-14
+
+- Stop a claimed recovery from wedging a project. A baton that has been handed to a
+  successor is already delivered, but it kept blocking `handoff now` for every session
+  except that successor, and no other session could take the claim over. If the
+  successor never saved its own baton — it crashed, the host closed, or it was never
+  the intended reader — the project could never save continuity again, with no command
+  to recover.
+- Guard only what is worth guarding: an *unclaimed* recovery written by another session.
+  A pending baton is self-resolving, because the next session in the project claims it.
+- Let a session supersede its own undelivered baton instead of failing with
+  `A pending or claimed project recovery is owned by another session`, which named the
+  wrong situation when the owner was the caller.
+
 ## 1.2.5 - 2026-08-14
 
 - Recognize a tool however the host namespaces it. `lodestar_x`,

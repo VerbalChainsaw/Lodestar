@@ -334,10 +334,17 @@ export function handoffNow(db, project, identity, input, options = {}) {
       result = { changed: false, recovery: active, packet: existingPacket };
       return;
     }
-    if (activeData && !(
-      activeData.state === "claimed" && activeData.claimed_by === identity.session
-    )) throw lodestarError("handoff_conflict",
-      "A pending or claimed project recovery is owned by another session.");
+    // Only an undelivered baton is worth protecting, and only from a session that did not
+    // write it. A claimed baton has already been handed to a successor, so guarding it
+    // protects nothing: if that successor never saves its own, the project can never save
+    // continuity again, because a claimed recovery is also unclaimable by anyone else.
+    if (activeData?.state === "pending" && activeData.source_session !== identity.session) {
+      throw lodestarError("handoff_conflict",
+        "An unclaimed project recovery is owned by another session.", {
+          identifiers: { recovery: active.id, generation: activeData.generation },
+          action: "Start a session in this project to claim it, then save the next baton.",
+        });
+    }
     const owned = lane(db, project, identity);
     const previous = owned?.data.state === "armed"
       ? validateStoredHandoffPacket(packetById(db, owned.data.active_packet_id)) : null;

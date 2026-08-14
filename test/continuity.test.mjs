@@ -95,6 +95,36 @@ test("now is idempotent, cannot be stolen, and only the next same-project sessio
   assert.ok(advanced.recovery.data.generation > claimed.recovery.data.generation);
 });
 
+test("a claimed recovery never wedges the project against later sessions", async (t) => {
+  const { db, database, project } = await fixture(t);
+  const source = actor("source"), gone = actor("gone"), later = actor("later");
+  handoffNow(db, project, source, packet(), { database });
+
+  // The successor claims the baton and is never seen again — it crashed, the host was
+  // closed, or it was never the intended reader. Its claim used to outlive it forever:
+  // no other session could save a baton, and none could take the claim over either, so
+  // the project lost continuity permanently with no command to recover it.
+  const claimed = transaction(db, () => claimHandoffInside(db, project, gone), database);
+  assert.equal(claimed.recovery.data.claimed_by, "gone");
+  assert.equal(transaction(db, () => claimHandoffInside(db, project, later), database), null);
+
+  const saved = handoffNow(db, project, later, packet({ nextMove: "Carry on" }), { database });
+  assert.equal(saved.recovery.data.state, "pending");
+  assert.equal(saved.recovery.data.source_session, "later");
+  assert.ok(saved.recovery.data.generation > claimed.recovery.data.generation);
+
+  // An undelivered baton is still protected from a session that did not write it, and
+  // the message now says which of the two situations the caller is actually in.
+  assert.throws(() => handoffNow(db, project, source, packet({ nextMove: "Steal" }),
+    { database }), { code: "handoff_conflict", message: /unclaimed/u });
+
+  // Superseding your own undelivered baton is not theft, and stays idempotent.
+  const again = handoffNow(db, project, later, packet({ nextMove: "Revised" }), { database });
+  assert.equal(again.changed, true);
+  assert.equal(handoffNow(db, project, later, packet({ nextMove: "Revised" }),
+    { database }).changed, false);
+});
+
 test("disarm is idempotent and refuses an owned pending recovery", async (t) => {
   const { db, database, project } = await fixture(t);
   const source = actor("source");
