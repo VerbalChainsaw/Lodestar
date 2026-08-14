@@ -64,6 +64,7 @@ const EXPECTED_PACKAGE_FILES = [
   "src/legacy-v070/read.mjs",
   "src/legacy-v070/unified.mjs",
   "src/paths.mjs",
+  "src/pending.mjs",
   "src/project.mjs",
   "src/queries.mjs",
   "src/records.mjs",

@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import {
   EXPECTED_COLUMNS,
   inspectSchemaDefinitions,
@@ -5,9 +6,11 @@ import {
   SCHEMA_TABLES,
   SCHEMA_VERSION,
 } from "./schema.mjs";
+import { REQUIRED_GOVERNANCE } from "./bootstrap.mjs";
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
 import { diagnoseDecisions } from "./decision.mjs";
 import { diagnoseHandoff } from "./continuity.mjs";
+import { getRecordById, normalizeRecord } from "./records.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { LIMITS, validateTimestamp } from "./validate.mjs";
 
@@ -24,6 +27,37 @@ function orderedNames(db, type) {
 function same(left, right) {
   return left.length === right.length
     && left.every((value, index) => value === right[index]);
+}
+
+// Required records are charged to every session, and global ones are charged to every
+// project on the machine. `start` only fails once the total already exceeds the budget,
+// which is the worst moment to discover it. Reporting the standing cost here turns a
+// future outage into a number that can be watched.
+const STARTUP_BUDGET_BYTES = 16 * 1024;
+
+function startupBudget(db, recordsUsable) {
+  if (!recordsUsable) return null;
+  const rows = db.prepare("SELECT id FROM records WHERE scope='global' "
+    + "AND json_extract(content_json,'$.value.required')=1")
+    .all().filter(({ id }) => id !== REQUIRED_GOVERNANCE.id);
+  // The governance record is injected by every startup rather than read from the table,
+  // so it is counted here or the reported headroom is wrong by its size.
+  let bytes = Buffer.byteLength(JSON.stringify(REQUIRED_GOVERNANCE), "utf8");
+  // Measured on the normalized record, which is what `start` actually serializes.
+  // Stored content_json is smaller and would overstate the remaining headroom.
+  for (const { id } of rows) {
+    try {
+      bytes += Buffer.byteLength(JSON.stringify(normalizeRecord(getRecordById(db, id))), "utf8");
+    } catch { return null; }
+  }
+  return {
+    global_required_records: rows.length + 1,
+    global_required_bytes: bytes,
+    budget_bytes: STARTUP_BUDGET_BYTES,
+    // What a project may still spend on its own required records before `start` sheds.
+    project_headroom_bytes: Math.max(0, STARTUP_BUDGET_BYTES - bytes),
+    healthy: bytes < STARTUP_BUDGET_BYTES / 2,
+  };
 }
 
 export function diagnoseDatabase(db, { database = null } = {}) {
@@ -275,6 +309,13 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     if (!add(issue.code, issue.message, issue.identifiers)) break;
   }
 
+  const budget = startupBudget(db, validColumns.records);
+  if (budget && budget.project_headroom_bytes < 4096) {
+    add("startup_budget_low", "Global required records leave little startup budget for projects.", 
+      { global_required_bytes: budget.global_required_bytes,
+        project_headroom_bytes: budget.project_headroom_bytes },
+      "Reduce or unmark a global required record before adding project ones.");
+  }
   const decisions = validColumns.records ? diagnoseDecisions(db)
     : { events: null, invalid: [], healthy: false };
   if (validColumns.records) {
@@ -323,6 +364,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       expected_definitions: definitions.matches,
       decisions,
       handoff,
+      startup_budget: budget,
     },
     issues,
     issues_truncated: omittedIssues > 0,

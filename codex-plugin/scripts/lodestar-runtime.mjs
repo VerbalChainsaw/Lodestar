@@ -264,6 +264,42 @@ export async function recordTail(input, role, text, options = {}) {
   }
 }
 
+// Capture is opt-in per fact rather than inferred from the turn. A marker line is
+// deterministic: it never fires on an ordinary message, needs no extra model call, and
+// cannot fill the queue with near-misses. Candidates land in quarantine, so nothing here
+// can reach the startup budget without a person promoting it.
+const NOTE = /^[ \t]*LODESTAR NOTE:[ \t]*(\S.*?)[ \t]*$/gmu;
+const MAX_NOTES = 3;
+
+export function extractNotes(text) {
+  if (typeof text !== "string") return [];
+  const seen = new Set();
+  for (const [, body] of String(text).matchAll(NOTE)) {
+    const note = body.replace(/\s+/gu, " ").trim();
+    if (note && note.length <= 4_096) seen.add(note);
+    if (seen.size >= MAX_NOTES) break;
+  }
+  return [...seen];
+}
+
+export async function captureNotes(input, text, options = {}) {
+  const notes = extractNotes(text);
+  if (!notes.length) return 0;
+  let captured = 0;
+  for (const note of notes) {
+    try {
+      for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
+      await runLodestar(["pending", "add", redact(note).value, "--cwd", input.cwd,
+        "--session", input.session_id, "--agent", "codex", "--harness", "codex",
+        "--source", "hook"], "", options);
+      captured += 1;
+    } catch {
+      // A hook must never fail a session over an optional capture.
+    }
+  }
+  return captured;
+}
+
 export async function startupContext(input, options = {}) {
   for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
   const envelope = await runLodestar(["start", "--cwd", input.cwd,

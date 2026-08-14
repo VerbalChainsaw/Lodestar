@@ -93,6 +93,14 @@ export const COMMANDS = Object.freeze({
     booleans: [],
     positionals: { min: 1, max: 3 },
   },
+  pending: {
+    usage: "lodestar pending [list|add|promote|drop] [text-or-id] "
+      + "[--source <name>] [--limit <n>] [options]",
+    summary: "Queue captured candidates outside startup, then promote or drop them.",
+    values: ["--cwd", "--session", "--agent", "--harness", "--source", "--limit"],
+    booleans: [],
+    positionals: { min: 0, max: 2 },
+  },
   skills: {
     usage: "lodestar skills <install|sync|verify|remove> "
       + "[--target <codex|claude|hermes|opencode|all>] [--codex-root <codex|agents>] "
