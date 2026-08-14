@@ -88,10 +88,21 @@ export function startProjection(db, project, identity, options = {}) {
     }
     const more = Object.keys(omitted).length > 0;
     if (!fits()) {
+      // start is the first command of every session, so this failure stops all work.
+      // Naming the largest required records turns it from a dead end into one edit:
+      // without them the operator knows only that something, somewhere, is too big.
+      const largest = required
+        .map((record) => ({ id: record.id, scope: record.scope ?? "global",
+          bytes: Buffer.byteLength(JSON.stringify(record), "utf8") }))
+        .sort((left, right) => right.bytes - left.bytes)
+        .slice(0, 5);
       throw lodestarError("resource_limit",
         "Required startup context exceeds the 16 KiB startup budget.", {
-          identifiers: { resource: "startup_output", maximum: STARTUP_BYTES },
-          action: "Reduce required Lodestar context and retry; no handoff was claimed." });
+          identifiers: { resource: "startup_output", maximum: STARTUP_BYTES,
+            required_records: required.length, largest_required: largest },
+          action: `Unmark one with: lodestar get ${largest[0]?.id ?? "<id>"} `
+            + "— then put it back with value.required removed. "
+            + "No handoff was claimed." });
     }
     return { data, revision, more, next };
   }, options.database);

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.2 - 2026-08-13
+
+- Name the largest required records when startup exceeds its 16 KiB budget. `start`
+  is the first command of every session, so the failure previously stopped all work
+  without saying which record to shrink.
+- Bound the pending review queue to a rolling window of 100 candidates per project
+  and report every eviction. A queue past a few screens is one nobody triages.
+- Add `doctor.checks.startup_budget`, measured on the bytes `start` actually
+  serializes, with a `startup_budget_low` warning raised while there is still room
+  to act.
+- Add `lodestar pending list|add|promote|drop`, a quarantine scope startup never
+  reads, so capture costs the startup budget nothing and only promotion spends it.
+
 ## 1.2.1 - 2026-08-13
 
 - Remove three deleted instruction templates from the packaged reference table.
