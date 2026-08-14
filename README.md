@@ -80,10 +80,16 @@ normally. It is never proof of absence.
 
 Advisory only. It tells other agents what area is busy; it takes no locks.
 
+Identity comes from the host. Under the Lodestar plugin, call the bundled
+`lodestar_work_start` / `lodestar_work_done` / `lodestar_work_status` tools, which
+carry the session the host already knows. A plain shell has no session id, so the
+CLI requires an explicit `--session` — Lodestar refuses rather than guessing,
+because work records are keyed by actor and a wrong guess overwrites a peer.
+
 ```text
 lodestar work                               # who is working, on what
 lodestar work start "Repairing the release pipeline"
-lodestar work done "Release repair complete"
+lodestar work done "Release repair complete"   # shell: add --session <id>
 lodestar work history --limit 20
 ```
 

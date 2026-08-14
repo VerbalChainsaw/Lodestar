@@ -6,6 +6,15 @@ ownership, locks, permission to edit, or proof that an area is free.
 - Inspect active reports: `lodestar work status`.
 - Start or update this actor's report: `lodestar work start "<current work>"`.
 - Close it idempotently: `lodestar work done "<completion>"`.
+
+Identity comes from the host, not the shell. In a host running the Lodestar plugin
+(Codex Desktop), call the bundled tools — `lodestar_work_start`, `lodestar_work_done`,
+`lodestar_work_status` — which carry the exact session id the host already knows.
+A plain shell has no session id, so `lodestar work start` there requires an explicit
+`--session <id>`. Lodestar refuses rather than guessing: work records are keyed by
+actor, so a guessed session would capture and then overwrite a concurrent peer's
+marker.
+
 - Review bounded deterministic history: `lodestar work history`.
 - Explicitly expire old open reports: `lodestar work expire --older-than-hours <n>`.
 

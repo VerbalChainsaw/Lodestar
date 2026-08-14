@@ -127,7 +127,8 @@ export function resolveIdentity(options = {}, env = process.env, write = false) 
     throw lodestarError(
       "identity_required",
       "This mutation requires a reliable session identity.",
-      { action: "Pass --session or use a supported harness session environment." },
+      { action: "Under the Lodestar plugin, call the lodestar_work_* tool, which carries "
+        + "the host session. From a plain shell, pass --session <id>." },
     );
   }
   const agent = first(options.agent, env.LODESTAR_AGENT, env.CODEX_AGENT_NAME, "agent");
