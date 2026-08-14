@@ -244,7 +244,13 @@ export function handoffArm(db, project, identity, input, options = {}) {
         result = { changed: false, lane: owned, packet: prior };
         return;
       }
-      throw lodestarError("handoff_conflict", "This session already owns an armed lane.");
+      // Naming the exit matters more here than the refusal does. An agent that reads
+      // only "already armed" concludes the lane is unusable and stops asking Lodestar.
+      throw lodestarError("handoff_conflict", "This session already owns an armed lane.", {
+        identifiers: { lane: owned.id, packet: prior?.id ?? null },
+        action: "Use handoff checkpoint to update the armed packet, or handoff disarm "
+          + "to retire the lane first.",
+      });
     }
     const revision = allocateRevision(db), tail = { items: [], omitted: 0, cursor: revision };
     const packet = createHandoffPacket(project, identity, input, prior, tail, now);
@@ -298,7 +304,11 @@ function updateLanePacket(db, project, identity, input, options, operation) {
   transaction(db, () => {
     const owned = lane(db, project, identity);
     if (owned?.data.state !== "armed") {
-      throw lodestarError("handoff_not_armed", "This session does not own an armed lane.");
+      throw lodestarError("handoff_not_armed", "This session does not own an armed lane.", {
+        identifiers: { project: project.scope, session: identity.session },
+        action: "Use handoff arm to open a lane for this session, or handoff now to "
+          + "save a baton without one.",
+      });
     }
     const previous = validateStoredHandoffPacket(packetById(db, owned.data.active_packet_id));
     const tail = tailSince(db, project, identity, owned.data.tail_cursor ?? 0);
@@ -394,7 +404,12 @@ export function handoffDisarm(db, project, identity, options = {}) {
     if (active?.data.state === "pending"
         && active.data.source_session === identity.session
         && active.data.packet_id === owned.data.active_packet_id) {
-      throw lodestarError("handoff_pending", "Cannot disarm while recovery is pending.");
+      throw lodestarError("handoff_pending", "Cannot disarm while recovery is pending.", {
+        identifiers: { recovery: active.id, packet: active.data.packet_id },
+        action: "The saved baton is waiting for the next session to claim it. Use "
+          + "handoff checkpoint to revise it, or leave the lane armed and let the next "
+          + "session claim it.",
+      });
     }
     const revision = allocateRevision(db);
     result = { changed: true, lane: persistLane(db, project, identity,

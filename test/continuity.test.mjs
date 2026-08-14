@@ -133,3 +133,36 @@ test("disarm is idempotent and refuses an owned pending recovery", async (t) => 
   assert.throws(() => handoffDisarm(db, project, source, { database }),
     { code: "handoff_pending" });
 });
+
+test("every continuity refusal names the way out of the state it refused from", async (t) => {
+  const { db, database, project } = await fixture(t);
+  const me = actor("solo");
+
+  // A refusal that only states the rule reads as "this is not possible", and an agent
+  // that believes that abandons Lodestar for the raw CLI. Each of these states does have
+  // an exit; the error is the only place the agent will look for it.
+  assert.throws(() => handoffCheckpoint(db, project, me, packet(), { database }), (error) => {
+    assert.equal(error.code, "handoff_not_armed");
+    assert.match(error.action, /handoff arm|handoff now/u);
+    return true;
+  });
+
+  handoffArm(db, project, me, packet(), { database });
+  assert.throws(() => handoffArm(db, project, me, packet({ nextMove: "Other" }), { database }),
+    (error) => {
+      assert.equal(error.code, "handoff_conflict");
+      assert.match(error.action, /handoff checkpoint/u);
+      return true;
+    });
+
+  handoffNow(db, project, me, packet({ nextMove: "Saved" }), { database });
+  assert.throws(() => handoffDisarm(db, project, me, { database }), (error) => {
+    assert.equal(error.code, "handoff_pending");
+    assert.match(error.action, /handoff checkpoint|claim/u);
+    return true;
+  });
+
+  // And the exits the messages point at actually work.
+  assert.equal(handoffCheckpoint(db, project, me, packet({ nextMove: "Revised" }),
+    { database }).changed, true);
+});
