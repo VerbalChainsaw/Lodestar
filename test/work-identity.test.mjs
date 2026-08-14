@@ -115,6 +115,42 @@ test("secret material is redacted without corrupting the surrounding text", asyn
   }
 });
 
+test("a tool is recognized however the host namespaces it", async (t) => {
+  const directory = await fixture(t);
+  const { canonicalToolName, workToolCommand } = await import(pathToFileURL(
+    path.join(PLUGIN_ROOT, "scripts", "lodestar-runtime.mjs")));
+
+  // Hosts present the same tool as lodestar_x, lodestar__lodestar_x, or lodestar/x.
+  // Binding an attestation to the exact spelling the hook happened to see made the
+  // token valid only for that spelling, and the mismatch surfaced as
+  // "Invalid, expired, mismatched, or replayed host attestation" — an error that says
+  // nothing about naming, which is how a working plugin looks broken.
+  for (const form of ["lodestar_work_start", "lodestar__lodestar_work_start",
+    "lodestar/lodestar_work_start"]) {
+    assert.equal(workToolCommand(form), "start", form);
+    assert.equal(canonicalToolName(form), "lodestar_work_start", form);
+  }
+  for (const form of ["lodestar_handoff_status", "lodestar__lodestar_handoff_status",
+    "lodestar/lodestar_handoff_status"]) {
+    assert.equal(canonicalToolName(form), "lodestar_handoff_status", form);
+  }
+  // A near miss is still a miss.
+  for (const form of ["notlodestar_work_start", "lodestar_work_bogus", "work_start"]) {
+    assert.equal(workToolCommand(form), null, form);
+  }
+
+  // And the attestation survives a namespace change between hook and execution.
+  const attested = await handleHook({
+    hook_event_name: "PreToolUse", session_id: "s", turn_id: "t1", tool_use_id: "u1",
+    cwd: directory, tool_name: "lodestar/lodestar_work_start",
+    tool_input: { report: "namespaced" },
+  }, directory);
+  assert.equal(attested.hookSpecificOutput.permissionDecision, "allow");
+  const result = await executeWork("lodestar__lodestar_work_start",
+    attested.hookSpecificOutput.updatedInput, directory);
+  assert.equal(result.result.data.current_work, "namespaced");
+});
+
 test("reading the baton needs no spoken phrase, writing it still does", async (t) => {
   const directory = await fixture(t);
   const ask = async (tool, index) => (await handleHook({

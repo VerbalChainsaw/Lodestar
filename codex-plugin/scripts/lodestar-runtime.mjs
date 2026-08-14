@@ -67,13 +67,25 @@ export function parseHandoffCommand(prompt) {
     .exec(String(prompt).trim())?.[1] ?? null;
 }
 
+// A host may present the same tool as lodestar_x, lodestar__lodestar_x, or
+// lodestar/lodestar_x. Binding an attestation to the raw string makes the token valid
+// only for the exact spelling the hook happened to see, and a mismatch surfaces as
+// "Invalid, expired, mismatched, or replayed host attestation" — an error that says
+// nothing about naming. Compare the canonical suffix instead.
+export function canonicalToolName(name) {
+  return /lodestar_(?:handoff|work)_(?:arm|status|checkpoint|now|disarm|start|done)$/u
+    .exec(String(name))?.[0] ?? String(name);
+}
+
 function toolCommand(name) {
-  return /(?:^|__)lodestar_handoff_(arm|status|checkpoint|now|disarm)$/u
+  // Any non-alphanumeric separator, because hosts namespace tools differently:
+  // lodestar_x, lodestar__lodestar_x, and lodestar/lodestar_x are the same tool.
+  return /(?:^|[^a-z0-9])lodestar_handoff_(arm|status|checkpoint|now|disarm)$/u
     .exec(String(name))?.[1] ?? null;
 }
 
 export function workToolCommand(name) {
-  return /(?:^|__)lodestar_work_(start|done|status)$/u.exec(String(name))?.[1] ?? null;
+  return /(?:^|[^a-z0-9])lodestar_work_(start|done|status)$/u.exec(String(name))?.[1] ?? null;
 }
 
 function packetSchema() {
@@ -126,7 +138,8 @@ export async function attestTool(input, dataDir, now = Date.now()) {
   const args = sanitize(input.tool_input), token = randomBytes(32).toString("hex");
   await atomicWrite(paths(dataDir, input.session_id).attest(token), { token, command,
     sessionId: input.session_id, turnId: input.turn_id, cwd: input.cwd,
-    toolName: input.tool_name, argsDigest: digest(args), expiresAt: now + AUTH_TTL_MS });
+    toolName: canonicalToolName(input.tool_name), argsDigest: digest(args),
+    expiresAt: now + AUTH_TTL_MS });
   await unlink(claimed);
   return { matched: true, allowed: true, updatedInput: { ...args, _attestation: token } };
 }
@@ -144,7 +157,8 @@ async function consume(toolName, rawInput, dataDir, now = Date.now()) {
     // Either family may have issued the token; the command must still match the tool it
     // was minted for, so a work attestation can never be replayed as a continuity one.
     const expected = toolCommand(toolName) ?? workToolCommand(toolName);
-    if (record.expiresAt < now || record.token !== token || record.toolName !== toolName
+    if (record.expiresAt < now || record.token !== token
+        || record.toolName !== canonicalToolName(toolName)
         || record.command !== expected || record.argsDigest !== digest(args)) {
       throw new Error("Invalid, expired, mismatched, or replayed host attestation");
     }
@@ -284,7 +298,8 @@ async function issueAttestation(input, dataDir, now, command) {
   const args = sanitize(input.tool_input), token = randomBytes(32).toString("hex");
   await atomicWrite(paths(dataDir, input.session_id).attest(token), { token, command,
     sessionId: input.session_id, turnId: input.turn_id, cwd: input.cwd,
-    toolName: input.tool_name, argsDigest: digest(args), expiresAt: now + AUTH_TTL_MS });
+    toolName: canonicalToolName(input.tool_name), argsDigest: digest(args),
+    expiresAt: now + AUTH_TTL_MS });
   return { matched: true, allowed: true, updatedInput: { ...args, _attestation: token } };
 }
 
