@@ -24,6 +24,9 @@ import { LIMITS, validatePutInput } from "./validate.mjs";
 import { workDone, workExpire, workStart, workStatus } from "./work.mjs";
 export { normalizeMachinePath, resolveIdentity, resolveProject } from "./project.mjs";
 const STARTUP_BYTES = 16 * 1024;
+// How many in-scope records the projection will name but not carry. Stubs are cheap
+// enough that this is bounded by usefulness rather than by bytes.
+const STUB_LIMIT = 200;
 export const operationResult = (data, options = {}) => ({ data,
   revision: options.revision ?? 0, scope: options.scope ?? scope(),
   more: options.more ?? false, next: options.next ?? [] });
@@ -31,6 +34,33 @@ export const operationResult = (data, options = {}) => ({ data,
 const startupBytes = (data, revision, project, identity, more, next) => Buffer.byteLength(
   canonicalStringify({ v: 1, ok: true, operation: "start", revision,
     scope: scope(project, identity), data, more, next }), "utf8") + 1;
+
+// What a newly required record costs the scope it lands in. Global records are charged
+// to every project, so the figure reported is the heaviest project the mark affects.
+export function requiredBudgetNotice(db, value) {
+  if (value?.content?.value?.required !== true) return {};
+  const global = value.scope === "global";
+  const rows = db.prepare("SELECT id,scope FROM records "
+    + (global ? "WHERE json_extract(content_json,'$.value.required')=1"
+      : "WHERE scope IN ('global',?) AND json_extract(content_json,'$.value.required')=1"))
+    .all(...(global ? [] : [value.scope]));
+  const totals = new Map();
+  for (const row of rows) {
+    let bytes = 0;
+    try { bytes = Buffer.byteLength(JSON.stringify(normalizeRecord(getRecordById(db, row.id))),
+      "utf8"); } catch { continue; }
+    const key = row.scope === "global" ? null : row.scope;
+    totals.set(key, (totals.get(key) ?? 0) + bytes);
+  }
+  const base = totals.get(null) ?? 0;
+  let worst = { scope: value.scope, bytes: base };
+  for (const [key, bytes] of totals) {
+    if (key !== null && base + bytes > worst.bytes) worst = { scope: key, bytes: base + bytes };
+  }
+  if (worst.bytes <= STARTUP_BYTES) return {};
+  return { more: true, next: [`lodestar doctor — required records in ${worst.scope} now total `
+    + `${worst.bytes} of the ${STARTUP_BYTES} startup budget, so start will demote some`] };
+}
 
 export function startProjection(db, project, identity, options = {}) {
   return transaction(db, () => {
@@ -51,6 +81,22 @@ export function startProjection(db, project, identity, options = {}) {
       .get(project.scope).count);
     const optional = db.prepare(`SELECT id ${optionalWhere}${order} LIMIT ?`)
       .all(project.scope, limit);
+    // Everything shed becomes a stub instead of vanishing. A stub costs about a
+    // twentieth of a record and keeps the id, so an agent that needs one fetches it with
+    // a single `lodestar get`. Dropping records outright and pointing at a broad `find`
+    // spent more reading than the shedding saved — the agent searched, re-read up to
+    // fifty records, and still might not surface the one that mattered. The budget
+    // exists to stop that, not to cause it.
+    const carried = new Set(optional.map(({ id }) => id));
+    const available = db.prepare(`SELECT id,name,type AS kind ${optionalWhere}${order} LIMIT ?`)
+      .all(project.scope, STUB_LIMIT)
+      .filter(({ id }) => !carried.has(id));
+    // A projected record carries no display name, so demoting one to a stub needs the
+    // name from the row it came from. One scoped query is cheaper than a lookup per
+    // demotion, and a stub without a name makes the agent fetch it just to find out.
+    const nameById = new Map(db
+      .prepare("SELECT id,name FROM records WHERE scope IN ('global',?)")
+      .all(project.scope).map(({ id, name }) => [id, name]));
     const omitted = {};
     if (optionalTotal > optional.length) omitted.context = optionalTotal - optional.length;
     const data = {
@@ -63,47 +109,51 @@ export function startProjection(db, project, identity, options = {}) {
       active_work: workStatus(db, project).records,
       handoff,
       pending: pendingCount(db, project),
+      available,
       omitted,
     };
-    const next = omitted.context
-      ? [`lodestar find "${project.name}" --scope ${project.scope} --limit 50`]
-      : [];
+    const next = [];
     if (handoff?.packet?.summary) next.push(`lodestar handoff status --cwd "${project.cwd}"`);
     const revision = currentRevision(db);
     const fits = () => startupBytes(data, revision, project, identity,
       Object.keys(omitted).length > 0, next) <= STARTUP_BYTES;
-    // Optional context is shed before advisory work, and the follow-up command that
-    // recovers what was dropped is added before the budget is measured again.
-    while (!fits() && data.context.length) {
-      data.context.pop();
-      omitted.context = (omitted.context ?? 0) + 1;
-      const command = `lodestar find "${project.name}" --scope ${project.scope} --limit 50`;
-      if (!next.includes(command)) next.unshift(command);
-    }
-    while (!fits() && data.active_work.length) {
-      data.active_work.pop();
-      omitted.work = (omitted.work ?? 0) + 1;
-      const command = `lodestar work status --cwd "${project.cwd}"`;
-      if (!next.includes(command)) next.push(command);
-    }
+    // Shedding demotes in one direction: optional context, then advisory work, then the
+    // least important required records. Each demotion leaves a stub behind, so the
+    // projection always names everything that exists in scope even when it cannot carry
+    // it. `start` is the first command of every session; refusing to run stops all work,
+    // so it is never the answer while there is anything left to demote.
+    // The recovery line is charged to the budget before the next measurement, never
+    // after. Adding it once the loops have finished grows the envelope past the limit
+    // the loops just satisfied, which is how a bounded projection ships over budget.
+    const recover = `lodestar find "${project.name}" --scope ${project.scope}`;
+    const chargeRecovery = () => {
+      if (!next.includes(recover)) next.unshift(recover);
+    };
+    const demote = (list, key) => {
+      const record = list.pop();
+      available.unshift({ id: record.id, name: nameById.get(record.id) ?? record.id,
+        kind: record.kind });
+      omitted[key] = (omitted[key] ?? 0) + 1;
+      chargeRecovery();
+    };
+    const drop = () => {
+      available.pop();
+      omitted.hidden = (omitted.hidden ?? 0) + 1;
+      chargeRecovery();
+    };
+    if (omitted.context) chargeRecovery();
+    while (!fits() && data.context.length) demote(data.context, "context");
+    while (!fits() && data.active_work.length) demote(data.active_work, "work");
+    // A stub for an optional record is the cheapest thing here to lose — a pointer to
+    // something already judged not worth carrying — so every one of them goes before a
+    // required record's content does. Demoted records are unshifted to the front, which
+    // leaves the optional stubs at the tail exactly where popping removes them first.
+    while (!fits() && available.length) drop();
+    // The governance record states the operating contract, so it is demoted last and
+    // only if it is the one thing standing between here and the budget.
+    while (!fits() && data.required.length > 1) demote(data.required, "required");
+    while (!fits() && available.length) drop();
     const more = Object.keys(omitted).length > 0;
-    if (!fits()) {
-      // start is the first command of every session, so this failure stops all work.
-      // Naming the largest required records turns it from a dead end into one edit:
-      // without them the operator knows only that something, somewhere, is too big.
-      const largest = required
-        .map((record) => ({ id: record.id, scope: record.scope ?? "global",
-          bytes: Buffer.byteLength(JSON.stringify(record), "utf8") }))
-        .sort((left, right) => right.bytes - left.bytes)
-        .slice(0, 5);
-      throw lodestarError("resource_limit",
-        "Required startup context exceeds the 16 KiB startup budget.", {
-          identifiers: { resource: "startup_output", maximum: STARTUP_BYTES,
-            required_records: required.length, largest_required: largest },
-          action: `Unmark one with: lodestar get ${largest[0]?.id ?? "<id>"} `
-            + "— then put it back with value.required removed. "
-            + "No handoff was claimed." });
-    }
     return { data, revision, more, next };
   }, options.database);
 }
@@ -187,7 +237,12 @@ export async function dispatch(command, parsed, database, io) {
     return withDatabase(openOrInitializeWriteDatabase, database, (db) => {
       const record = putRecord(db, value, { database });
       return operationResult(normalizeRecord(record), {
-        revision: currentRevision(db), scope: unscoped(record) });
+        revision: currentRevision(db), scope: unscoped(record),
+        // Marking a record required is where the budget is actually spent, and it used
+        // to say nothing. The cost then surfaced at some later `start`, in some other
+        // project, as records quietly demoted — far from the decision that caused it.
+        // Reported, never refused: a bulk import must not fail on its last record.
+        ...requiredBudgetNotice(db, value) });
     });
   }
   if (["get", "find", "links", "export"].includes(command)) {

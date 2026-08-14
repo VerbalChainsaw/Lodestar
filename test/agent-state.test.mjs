@@ -87,26 +87,37 @@ test("Windows and WSL paths share one project identity and startup stays bounded
   assert.equal(crossDialect.value.scope.cwd, windowsDialect.value.scope.cwd);
 });
 
-test("startup rejects oversized required context without claiming a handoff", async (t) => {
+test("startup survives required context larger than the whole budget", async (t) => {
   const { database, directory } = await fixture(t);
   const db = await openWriteDatabase(database);
   putRecord(db, projectRecord("instruction:oversized", "x".repeat(20_000), true));
   db.close();
   await invoke(["handoff", "now", "--db", database, "--cwd", directory,
     "--session", "source"], JSON.stringify(handoffPacket()));
-  let stdout = "", stderr = "";
-  const exitCode = await runCli(["start", "--db", database, "--cwd", directory,
-    "--session", "claimant"], { stdin: Readable.from([]),
-    stdout: { write: (value) => { stdout += value; } },
-    stderr: { write: (value) => { stderr += value; } } });
-  assert.notEqual(exitCode, 0);
-  assert.equal(stdout, "");
-  assert.equal(JSON.parse(stderr).error.code, "resource_limit");
-  assert.ok(Buffer.byteLength(stderr, "utf8") <= 16 * 1024);
+
+  // `start` is the first command of every session, so refusing to run stops all work in
+  // the project — over one record someone marked required. It used to throw
+  // resource_limit here and the project was dead until a human edited the registry.
+  const started = await invoke(["start", "--db", database, "--cwd", directory,
+    "--session", "claimant"]);
+  assert.equal(started.value.ok, true);
+  assert.ok(Buffer.byteLength(started.text, "utf8") <= 16 * 1024, "still bounded");
+
+  // Nothing is lost: what cannot be carried is named, so one `lodestar get` recovers it
+  // instead of a blind search through everything in scope.
+  const stub = started.value.data.available.find(({ id }) => id === "instruction:oversized");
+  assert.ok(stub, "an oversized required record is still named");
+  assert.equal(started.value.data.omitted.required, 1);
+  assert.equal(started.value.more, true);
+  const recovered = await invoke(["get", "instruction:oversized", "--db", database]);
+  assert.equal(recovered.value.data.id, "instruction:oversized");
+
+  // And because startup ran, the waiting baton was claimed as it would be on any
+  // ordinary session. The old refusal rolled that back and stranded the handoff.
   const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory,
-    "--session", "source"]);
-  assert.equal(status.value.data.recovery.data.state, "pending");
-  assert.equal(status.value.data.recovery.data.claimed_by, null);
+    "--session", "claimant"]);
+  assert.equal(status.value.data.recovery.data.state, "claimed");
+  assert.equal(status.value.data.recovery.data.claimed_by, "claimant");
 });
 
 test("startup caps an oversized handoff head and reports exact omitted counts", async (t) => {

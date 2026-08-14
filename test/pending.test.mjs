@@ -12,7 +12,7 @@ import {
 } from "../src/pending.mjs";
 import { resolveProject } from "../src/project.mjs";
 import { putRecord } from "../src/records.mjs";
-import { startProjection } from "../src/agent-state.mjs";
+import { requiredBudgetNotice, startProjection } from "../src/agent-state.mjs";
 import { extractNotes } from "../codex-plugin/scripts/lodestar-runtime.mjs";
 
 const IDENTITY = { actor: "agent:session", agent: "agent", session: "session", harness: null };
@@ -154,7 +154,7 @@ test("the queue is a bounded rolling window and reports what it evicted", async 
   assert.equal(texts.includes(`candidate ${PENDING_MAXIMUM + 4}`), true);
 });
 
-test("an over-budget startup names the records that caused it", async (t) => {
+test("an over-budget startup sheds to names instead of refusing to run", async (t) => {
   const { db, file, project } = await fixture(t);
   for (let index = 0; index < 6; index += 1) {
     putRecord(db, {
@@ -163,20 +163,56 @@ test("an over-budget startup names the records that caused it", async (t) => {
     }, {});
   }
 
-  // start is the first command of every session, so this failure stops all work. It has
-  // to say which records to shrink, or the operator is left guessing.
-  try {
-    startProjection(db, project, IDENTITY, { database: file });
-    assert.fail("expected the startup budget to be exceeded");
-  } catch (error) {
-    assert.equal(error.code, "resource_limit");
-    const largest = error.identifiers.largest_required;
-    assert.ok(Array.isArray(largest) && largest.length > 0);
-    assert.ok(largest[0].bytes >= largest.at(-1).bytes, "largest first");
-    assert.match(largest[0].id, /^g:bulk\d$/u);
-    assert.ok(error.identifiers.required_records >= 6);
-    assert.match(error.action, /lodestar get g:bulk\d/u);
+  // 18 KiB of "always present" inside a 16 KiB budget is a contradiction, and `start`
+  // used to resolve it by refusing — stopping every session in the project over a
+  // marking mistake made somewhere else. It resolves it by demoting instead.
+  const result = startProjection(db, project, IDENTITY, { database: file });
+  const envelope = Buffer.byteLength(JSON.stringify({ v: 1, ok: true, operation: "start",
+    revision: result.revision, data: result.data, more: result.more, next: result.next }), "utf8");
+  assert.ok(envelope <= 16 * 1024, `envelope ${envelope} must stay within budget`);
+  assert.equal(result.more, true);
+  assert.ok(result.data.omitted.required > 0, "required records were demoted");
+
+  // Demoted is not deleted. Every one is named, so the agent fetches the single record
+  // it needs rather than searching the whole scope and re-reading what it already had.
+  const shed = new Set(result.data.available.map(({ id }) => id));
+  const carried = new Set(result.data.required.map(({ id }) => id));
+  for (let index = 0; index < 6; index += 1) {
+    const id = `g:bulk${index}`;
+    assert.ok(shed.has(id) || carried.has(id), `${id} is either carried or named`);
   }
+  for (const stub of result.data.available) {
+    assert.ok(stub.id && stub.name && stub.kind, `stub is addressable: ${JSON.stringify(stub)}`);
+  }
+  // The governance record states the operating contract and is the last thing demoted.
+  assert.ok(result.data.required.length >= 1, "startup never sheds below the contract");
+});
+
+test("marking a record required reports the budget it just spent", async (t) => {
+  const { db, file, project } = await fixture(t);
+  const put = (id, scope, text, required) => putRecord(db, { id, type: "rule", name: id, scope,
+    content: { state: "known", value: required ? { required: true, text } : { text } } }, {});
+
+  // The cost of `required` is paid at startup, in a session that may be days away and in
+  // a project the author never opens. Saying nothing at the moment of the mark is what
+  // turned a marking mistake into an unexplained startup somewhere else.
+  put("g:cheap", "global", "tiny", true);
+  assert.deepEqual(requiredBudgetNotice(db, { scope: "global",
+    content: { value: { required: true } } }), {}, "an ordinary mark is silent");
+
+  // A record that is not required never triggers the check at all.
+  assert.deepEqual(requiredBudgetNotice(db, { scope: project.scope,
+    content: { value: { text: "x" } } }), {});
+
+  put("g:heavy", "global", "x".repeat(20_000), true);
+  const notice = requiredBudgetNotice(db, { scope: "global",
+    content: { value: { required: true } } });
+  assert.equal(notice.more, true);
+  assert.match(notice.next[0], /startup budget/u);
+  assert.match(notice.next[0], /demote/u);
+
+  // It is a report, never a refusal: a bulk import must not fail on its last record.
+  assert.doesNotThrow(() => put("g:another", "global", "x".repeat(4_000), true));
 });
 
 test("doctor reports the standing startup cost of global required records", async (t) => {
