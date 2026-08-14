@@ -219,6 +219,33 @@ test("every public command help path is JSON and side-effect free", async (t) =>
   await assert.rejects(access(path.dirname(file)), { code: "ENOENT" });
 });
 
+test("help and version answer to both spellings", async (t) => {
+  const file = path.join(await temporaryDirectory(t), "missing", "lodestar.db");
+  // `lodestar version` and `lodestar help get` are the first things anyone types.
+  // Answering only --version and --help taught the CLI was hostile before it had
+  // answered anything, and an agent that meets unknown_command stops asking.
+  for (const args of [["version"], ["--version"]]) {
+    const result = await invoke([...args, "--db", file]);
+    assert.equal(result.exitCode, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, true, args.join(" "));
+    assert.equal(output.data.name, "lodestar");
+  }
+  for (const args of [["help"], ["--help"]]) {
+    const output = JSON.parse((await invoke([...args, "--db", file])).stdout);
+    assert.equal(output.ok, true, args.join(" "));
+    assert.ok(Array.isArray(output.data.commands) && output.data.commands.length > 0);
+  }
+  for (const args of [["help", "get"], ["get", "--help"]]) {
+    const output = JSON.parse((await invoke([...args, "--db", file])).stdout);
+    assert.equal(output.ok, true, args.join(" "));
+    assert.equal(output.data.command, "get");
+  }
+  // A bad name is still a bad name, whichever way it is asked for.
+  const bogus = await invoke(["help", "bogus", "--db", file]);
+  assert.equal(JSON.parse(bogus.stderr).error.code, "unknown_command");
+});
+
 test("legacy direct-content records remain readable through every lookup command", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");
