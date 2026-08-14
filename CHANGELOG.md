@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.7 - 2026-08-14
+
+- Measure the startup budget where it is actually spent. `doctor` only ever counted
+  global required records, but `start` sheds on the global total *plus* the project's
+  own. A registry could report healthy while its heaviest project sat a few hundred
+  bytes from refusing to start — the exact outage the check exists to predict. It now
+  reports the worst project, its startup cost, and how many bytes remain.
+- Stop `doctor` from disagreeing with itself. `startup_budget.healthy` compared against
+  half the budget while the issue fired below 4 KiB of headroom, so an ordinary registry
+  printed `"healthy": false` nested inside `"healthy": true` with an empty issue list
+  and nothing to act on. One threshold now drives both.
+- Name the way out in every continuity refusal. `handoff_not_armed`,
+  `handoff_conflict` on an armed lane, and `handoff_pending` on disarm each state a
+  rule and used to stop there; an agent reading only the rule concludes the operation is
+  impossible and abandons Lodestar for the raw CLI. Each now carries the command that
+  resolves it.
+- Answer `lodestar help` and `lodestar version`. Only `--help` and `--version` worked,
+  so the two commands anyone types first returned `unknown_command`.
+
 ## 1.2.6 - 2026-08-14
 
 - Stop a claimed recovery from wedging a project. A baton that has been handed to a

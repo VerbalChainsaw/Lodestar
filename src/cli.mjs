@@ -284,13 +284,18 @@ export async function runCli(
     const { global, rest } = extractGlobals(args);
     const command = rest[0] ?? null;
     attemptedOperation = command ?? "help";
-    if (global.version) {
+    // `help` and `version` are the first things anyone types, and rejecting them as
+    // unknown commands while accepting --help and --version teaches that the CLI is
+    // hostile before it has answered anything. They are spellings of the same request.
+    const asked = { help: global.help || command === "help",
+      version: global.version || command === "version" };
+    if (asked.version) {
       const data = { name: "lodestar", version: LODESTAR_VERSION };
       writeSuccess(io, "version", operationResult(data), global.human);
       return 0;
     }
-    if (global.help || command === null) {
-      const data = helpData(command);
+    if (asked.help || command === null) {
+      const data = helpData(command === "help" ? rest[1] ?? null : command);
       if (global.human) io.stdout.write(`${humanHelp(data)}\n`);
       else writeSuccess(io, "help", operationResult(data), false);
       return 0;

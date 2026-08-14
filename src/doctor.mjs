@@ -34,6 +34,7 @@ function same(left, right) {
 // which is the worst moment to discover it. Reporting the standing cost here turns a
 // future outage into a number that can be watched.
 const STARTUP_BUDGET_BYTES = 16 * 1024;
+const STARTUP_BUDGET_LOW_BYTES = 4096;
 
 function startupBudget(db, recordsUsable) {
   if (!recordsUsable) return null;
@@ -50,13 +51,42 @@ function startupBudget(db, recordsUsable) {
       bytes += Buffer.byteLength(JSON.stringify(normalizeRecord(getRecordById(db, id))), "utf8");
     } catch { return null; }
   }
+  const headroom = Math.max(0, STARTUP_BUDGET_BYTES - bytes);
+  // The global cost alone never predicts an outage: `start` sheds on the global total
+  // *plus* the project's own required records. Reporting only the global figure called a
+  // registry healthy while its heaviest project sat a few hundred bytes from refusing to
+  // start, which is precisely the failure this check exists to see coming.
+  const perProject = new Map();
+  let unreadable = false;
+  for (const { id, scope } of db.prepare("SELECT id,scope FROM records "
+    + "WHERE scope LIKE 'project:%' "
+    + "AND json_extract(content_json,'$.value.required')=1").all()) {
+    try {
+      const own = Buffer.byteLength(JSON.stringify(normalizeRecord(getRecordById(db, id))), "utf8");
+      perProject.set(scope, (perProject.get(scope) ?? 0) + own);
+    } catch { unreadable = true; }
+  }
+  let worst = null;
+  for (const [scope, own] of perProject) {
+    if (!worst || own > worst.required_bytes) worst = { scope, required_bytes: own };
+  }
+  const worstTotal = worst ? worst.required_bytes + bytes : bytes;
   return {
     global_required_records: rows.length + 1,
     global_required_bytes: bytes,
     budget_bytes: STARTUP_BUDGET_BYTES,
     // What a project may still spend on its own required records before `start` sheds.
-    project_headroom_bytes: Math.max(0, STARTUP_BUDGET_BYTES - bytes),
-    healthy: bytes < STARTUP_BUDGET_BYTES / 2,
+    project_headroom_bytes: headroom,
+    projects_with_required: perProject.size,
+    // The project closest to refusing to start, which is the number that actually matters.
+    worst_project: worst ? { ...worst, startup_bytes: worstTotal,
+      remaining_bytes: Math.max(0, STARTUP_BUDGET_BYTES - worstTotal) } : null,
+    unreadable_required_records: unreadable,
+    // One threshold, so this flag and the reported issue always agree. They used to
+    // disagree: `healthy` compared against half the budget while the issue fired below
+    // 4 KiB of headroom, so an ordinary registry reported `"healthy": false` nested
+    // inside `"healthy": true` with an empty issue list and nothing to act on.
+    healthy: !unreadable && STARTUP_BUDGET_BYTES - worstTotal >= STARTUP_BUDGET_LOW_BYTES,
   };
 }
 
@@ -310,11 +340,20 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   }
 
   const budget = startupBudget(db, validColumns.records);
-  if (budget && budget.project_headroom_bytes < 4096) {
-    add("startup_budget_low", "Global required records leave little startup budget for projects.", 
-      { global_required_bytes: budget.global_required_bytes,
-        project_headroom_bytes: budget.project_headroom_bytes },
-      "Reduce or unmark a global required record before adding project ones.");
+  if (budget && !budget.healthy) {
+    const worst = budget.worst_project;
+    add("startup_budget_low", worst
+      ? "A project is close to exceeding its startup budget."
+      : "Global required records leave little startup budget for projects.",
+    { global_required_bytes: budget.global_required_bytes,
+      project_headroom_bytes: budget.project_headroom_bytes,
+      worst_project: worst?.scope ?? null,
+      worst_project_startup_bytes: worst?.startup_bytes ?? null,
+      worst_project_remaining_bytes: worst?.remaining_bytes ?? null },
+    worst
+      ? `Unmark a required record in ${worst.scope}, or reduce a global one. `
+        + "Once the total exceeds the budget, start refuses to run in that project."
+      : "Reduce or unmark a global required record before adding project ones.");
   }
   const decisions = validColumns.records ? diagnoseDecisions(db)
     : { events: null, invalid: [], healthy: false };

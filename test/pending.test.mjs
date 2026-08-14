@@ -240,3 +240,36 @@ test("doctor raises an issue before the startup budget runs out", async (t) => {
   assert.ok(issue.identifiers.project_headroom_bytes < 4096);
   assert.match(issue.action, /global required record/u);
 });
+
+test("doctor sees the project closest to exceeding the budget, not just the global cost", async (t) => {
+  const { db, file } = await fixture(t);
+  const clean = diagnoseDatabase(db, { database: file }).checks.startup_budget;
+  assert.equal(clean.healthy, true);
+  assert.equal(clean.worst_project, null);
+  assert.equal(clean.projects_with_required, 0);
+
+  // Global cost stays small; one project loads itself up. `start` sheds on global plus
+  // project, so this project is nearly dead — but a global-only measurement calls the
+  // whole registry healthy and the outage arrives without warning.
+  for (const [index, scope] of ["project:p:light", "project:p:heavy"].entries()) {
+    putRecord(db, { id: `p:req${index}`, type: "rule", name: `Rule ${index}`, scope,
+      content: { state: "known", value: { required: true, text: "x".repeat(index ? 11_000 : 40) } },
+    }, {});
+  }
+
+  const budget = diagnoseDatabase(db, { database: file }).checks.startup_budget;
+  assert.equal(budget.projects_with_required, 2);
+  assert.equal(budget.worst_project.scope, "project:p:heavy");
+  assert.ok(budget.project_headroom_bytes > 4096, "the global cost alone still looks fine");
+  assert.equal(budget.healthy, false, "but the heaviest project is not");
+  assert.equal(budget.worst_project.startup_bytes,
+    budget.worst_project.required_bytes + budget.global_required_bytes);
+
+  // The flag and the issue must never disagree: a nested "healthy": false with an empty
+  // issue list gives a reader a false to act on and nothing to act with.
+  const report = diagnoseDatabase(db, { database: file });
+  const issue = report.issues.find(({ code }) => code === "startup_budget_low");
+  assert.ok(issue, "an unhealthy budget must always raise its issue");
+  assert.equal(issue.identifiers.worst_project, "project:p:heavy");
+  assert.match(issue.action, /project:p:heavy/u);
+});
