@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.3 - 2026-08-14
+
+- Give advisory work the same host-attested identity continuity already used. Codex
+  injects no session id into spawned shells, so every identity-requiring write failed
+  with `identity_required` and work presence was dead in the harness it was built for.
+  `lodestar_work_start|done|status` now carry the exact host session.
+- Keep concurrent sessions distinct. Work records are keyed by actor, so any shell-side
+  guess at the caller captured another session's marker and the next write erased it.
+  The CLI now refuses without an explicit `--session` rather than guessing.
+- Stop redaction corrupting its own output. A secret pattern with no capture group
+  passed the match offset to the replacer, writing it into the text as `9[REDACTED]`.
+- Derive the Codex plugin version from its manifest instead of a literal, so an
+  installed build cannot claim a release it is not.
+
 ## 1.2.2 - 2026-08-13
 
 - Name the largest required records when startup exceeds its 16 KiB budget. `start`

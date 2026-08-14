@@ -502,7 +502,7 @@
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/references/work-presence.md",
-          "sha256": "0aeaecc66f424b8a947138a5ade8c1605cdf9e0ecac8676f0b6a87ae404d1655"
+          "sha256": "17aaae99438480e8e8d288a86c6d8270b5101ef228771f4c44068f5e2692f531"
         },
         {
           "path": "managed-assets/skills/lodestar/references/bootstrap-and-failures.md",
@@ -519,7 +519,7 @@
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/references/work-presence.md",
-          "sha256": "0aeaecc66f424b8a947138a5ade8c1605cdf9e0ecac8676f0b6a87ae404d1655"
+          "sha256": "17aaae99438480e8e8d288a86c6d8270b5101ef228771f4c44068f5e2692f531"
         }
       ],
       "reason": "useful behavior folded into the Lodestar umbrella; retired packaging and topology omitted"
@@ -580,14 +580,14 @@
       "path": "02-agents-md-library/_stub-pattern.AGENTS.md",
       "sha256": "fd0d49c25dcbc3361aada4a44171a83f376c9f2cf206e9f9ada2948eb29958d6",
       "bytes": 231,
-      "action": "copy",
+      "action": "rewrite",
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md",
-          "sha256": "fd0d49c25dcbc3361aada4a44171a83f376c9f2cf206e9f9ada2948eb29958d6"
+          "sha256": "3923308a3dd089b05883eedfb68e98f2e8eb5fde377ea2d46651a2c6a875d154"
         }
       ],
-      "reason": "byte-for-byte managed copy"
+      "reason": "byte-for-byte managed copy Advisory work guidance now points at the host-attested lodestar_work_* tools, because a shell cannot supply the session id that work records are keyed by."
     },
     {
       "path": "02-agents-md-library/AGENTS.template.md",
@@ -637,7 +637,7 @@
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/references/toolchain.md",
-          "sha256": "738de930cb424ec3ff66db988c58ff8a3d1b75dc6b6b95e0a0e37f6f8363fbe1"
+          "sha256": "c2cebd17c3ffeaf25d87d060bdab522d79604838c027debe827872f4e498a895"
         }
       ],
       "reason": "product identity rewritten to Lodestar; capability content retained"

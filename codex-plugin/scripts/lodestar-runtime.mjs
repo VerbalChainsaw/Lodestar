@@ -7,6 +7,11 @@ import path from "node:path";
 export const HANDOFF_COMMANDS = Object.freeze([
   "arm", "status", "checkpoint", "now", "disarm",
 ]);
+// Advisory presence carries no user intent and cannot destroy state, so it needs no
+// spoken authorization the way a baton does. What it does need is the exact session,
+// which only the host knows: the same attestation that binds session, turn and cwd for
+// continuity gives work an identity no shell fallback can guess or collide with.
+export const WORK_COMMANDS = Object.freeze(["start", "done", "status"]);
 const AUTH_TTL_MS = 10 * 60_000;
 const OUTPUT_LIMIT = 1024 * 1024;
 const TIMEOUT_MS = 20_000;
@@ -64,6 +69,10 @@ function toolCommand(name) {
     .exec(String(name))?.[1] ?? null;
 }
 
+export function workToolCommand(name) {
+  return /(?:^|__)lodestar_work_(start|done|status)$/u.exec(String(name))?.[1] ?? null;
+}
+
 function packetSchema() {
   return "{goal:string,rules:string[],entries:Array<{key:string,state:'fact'|'trap'|"
     + "'ask'|'unsure'|'dead',text:string,scope:string[],provenance:{kind:'user'|'tool'|"
@@ -86,6 +95,8 @@ export async function authorizePrompt(input, dataDir, now = Date.now()) {
 }
 
 export async function attestTool(input, dataDir, now = Date.now()) {
+  const work = workToolCommand(input.tool_name);
+  if (work) return await attestWork(input, dataDir, now, work);
   const command = toolCommand(input.tool_name);
   if (!command) return { matched: false };
   for (const field of ["session_id", "turn_id", "tool_use_id", "cwd"]) {
@@ -123,8 +134,11 @@ async function consume(toolName, rawInput, dataDir, now = Date.now()) {
   await rename(file, claimed);
   try {
     const record = await readJson(claimed), args = sanitize(rawInput);
+    // Either family may have issued the token; the command must still match the tool it
+    // was minted for, so a work attestation can never be replayed as a continuity one.
+    const expected = toolCommand(toolName) ?? workToolCommand(toolName);
     if (record.expiresAt < now || record.token !== token || record.toolName !== toolName
-        || record.command !== toolCommand(toolName) || record.argsDigest !== digest(args)) {
+        || record.command !== expected || record.argsDigest !== digest(args)) {
       throw new Error("Invalid, expired, mismatched, or replayed host attestation");
     }
     return { host: record, args };
@@ -134,10 +148,14 @@ async function consume(toolName, rawInput, dataDir, now = Date.now()) {
 function redact(value, report = { count: 0, categories: new Set() }) {
   if (typeof value === "string") {
     let text = value;
-    for (const pattern of SECRET_TEXT) text = text.replace(pattern, (...match) => {
+    // The prefix is kept only when the pattern actually captured one, so an assignment
+    // stays readable as NAME=[REDACTED]. It must be tested by type: for a pattern with
+    // no capture group the second argument is the match offset, and treating that number
+    // as a prefix wrote the offset into the output as `9[REDACTED]`.
+    for (const pattern of SECRET_TEXT) text = text.replace(pattern, (full, first) => {
       report.count += 1;
       report.categories.add("secret-text");
-      return match[1] ? `${match[1]}[REDACTED]` : "[REDACTED]";
+      return typeof first === "string" ? `${first}[REDACTED]` : "[REDACTED]";
     });
     return { value: text, report };
   }
@@ -236,6 +254,35 @@ async function runLodestar(args, input = "", options = {}) {
     timer.unref();
     child.stdin.end(input);
   });
+}
+
+// Issued without a prior spoken authorization, because an agent marking what it is
+// working on is not a user decision. The binding to session, turn and cwd is what
+// matters, and it is identical to the continuity path.
+async function attestWork(input, dataDir, now, command) {
+  for (const field of ["session_id", "turn_id", "tool_use_id", "cwd"]) {
+    safe(input[field], field, 32_768);
+  }
+  const args = sanitize(input.tool_input), token = randomBytes(32).toString("hex");
+  await atomicWrite(paths(dataDir, input.session_id).attest(token), { token, command,
+    sessionId: input.session_id, turnId: input.turn_id, cwd: input.cwd,
+    toolName: input.tool_name, argsDigest: digest(args), expiresAt: now + AUTH_TTL_MS });
+  return { matched: true, allowed: true, updatedInput: { ...args, _attestation: token } };
+}
+
+export async function executeWork(toolName, rawInput, dataDir, options = {}) {
+  const { host, args } = await consume(toolName, rawInput, dataDir, options.now?.() ?? Date.now());
+  const command = workToolCommand(toolName);
+  const cli = ["work", ...(command === "status" ? [] : [command]),
+    "--cwd", host.cwd, "--session", host.sessionId, "--agent", "codex", "--harness", "codex"];
+  if (command !== "status") {
+    // report is required for start and optional for done; the CLI enforces the rest.
+    const report = redact(String(args.report ?? "")).value.trim();
+    if (command === "start" && !report) throw new Error("work start requires report text");
+    if (report) cli.splice(2, 0, report);
+  }
+  const envelope = await runLodestar(cli, "", options);
+  return { command, result: envelope.data };
 }
 
 export async function executeHandoff(toolName, rawInput, dataDir, options = {}) {
