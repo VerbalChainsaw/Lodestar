@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 - 2026-08-13
+
+- Remove three deleted instruction templates from the packaged reference table.
+  They named private projects and pointed at files the package no longer ships.
+- Fail the release check when packaged documentation cites a template that is not
+  in the artifact.
+
 ## 1.2.0 - 2026-08-13
 
 - Generate one required governance record and one canonical bootstrap from the

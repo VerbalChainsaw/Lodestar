@@ -9,9 +9,6 @@ user or a repository's existing instructions.
 | `assets/templates/CLAUDE.template.md` | Claude-compatible project guidance |
 | `assets/templates/SOUL.template.md` | Named agent persona guidance |
 | `assets/templates/_stub-pattern.AGENTS.md` | Minimal repository stub |
-| `assets/templates/minecraft-companion.AGENTS.md` | Small project example |
-| `assets/templates/minecraft-companion-brain-v2.AGENTS.md` | Larger project example |
-| `assets/templates/SunoSavvy.AGENTS.md` | Desktop application example |
 
 Before copying a template:
 
