@@ -1,9 +1,23 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { executeHandoff, HANDOFF_COMMANDS } from "./lodestar-runtime.mjs";
+
+// Read from the manifest beside this script rather than a literal. A hardcoded version
+// reports whatever was true when it was typed, so an installed build silently claims to
+// be a release it is not.
+function pluginVersion(scriptUrl = import.meta.url) {
+  try {
+    const manifest = path.join(path.dirname(path.dirname(fileURLToPath(scriptUrl))),
+      ".codex-plugin", "plugin.json");
+    return JSON.parse(readFileSync(manifest, "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 export function resolvePluginData(
   pluginData = process.env.PLUGIN_DATA,
@@ -44,7 +58,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (message.method === "initialize") reply(message.id, {
         protocolVersion: message.params?.protocolVersion ?? "2025-03-26",
         capabilities: { tools: {} },
-        serverInfo: { name: "lodestar", version: "1.1.0" },
+        serverInfo: { name: "lodestar", version: pluginVersion() },
       });
       else if (message.method === "ping") reply(message.id, {});
       else if (message.method === "tools/list") reply(message.id, { tools });
