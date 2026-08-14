@@ -12,6 +12,9 @@ export const HANDOFF_COMMANDS = Object.freeze([
 // which only the host knows: the same attestation that binds session, turn and cwd for
 // continuity gives work an identity no shell fallback can guess or collide with.
 export const WORK_COMMANDS = Object.freeze(["start", "done", "status"]);
+// Continuity commands that only read. They still carry an attestation binding session,
+// turn and cwd; they simply do not require the user to have said the phrase first.
+const READ_ONLY_COMMANDS = new Set(["status"]);
 const AUTH_TTL_MS = 10 * 60_000;
 const OUTPUT_LIMIT = 1024 * 1024;
 const TIMEOUT_MS = 20_000;
@@ -96,9 +99,13 @@ export async function authorizePrompt(input, dataDir, now = Date.now()) {
 
 export async function attestTool(input, dataDir, now = Date.now()) {
   const work = workToolCommand(input.tool_name);
-  if (work) return await attestWork(input, dataDir, now, work);
+  if (work) return await attestDirect(input, dataDir, now, work);
   const command = toolCommand(input.tool_name);
   if (!command) return { matched: false };
+  // Reading the baton mutates nothing, and a resumed session has no spoken phrase to
+  // point at. Gating the read denied the first thing an agent does on resume, so it is
+  // attested directly; only the commands that write a lane still need the exact phrase.
+  if (READ_ONLY_COMMANDS.has(command)) return await attestDirect(input, dataDir, now, command);
   for (const field of ["session_id", "turn_id", "tool_use_id", "cwd"]) {
     safe(input[field], field, 32_768);
   }
@@ -259,7 +266,18 @@ async function runLodestar(args, input = "", options = {}) {
 // Issued without a prior spoken authorization, because an agent marking what it is
 // working on is not a user decision. The binding to session, turn and cwd is what
 // matters, and it is identical to the continuity path.
-async function attestWork(input, dataDir, now, command) {
+// Fails closed rather than throwing: a hook that crashes takes the session with it, and
+// an unwritable plugin data directory should deny a command, not break the host.
+async function attestDirect(input, dataDir, now, command) {
+  try {
+    return await issueAttestation(input, dataDir, now, command);
+  } catch {
+    return { matched: true, allowed: false,
+      reason: "Lodestar could not record a host attestation for this command." };
+  }
+}
+
+async function issueAttestation(input, dataDir, now, command) {
   for (const field of ["session_id", "turn_id", "tool_use_id", "cwd"]) {
     safe(input[field], field, 32_768);
   }

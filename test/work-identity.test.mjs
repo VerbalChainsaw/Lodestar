@@ -115,12 +115,26 @@ test("secret material is redacted without corrupting the surrounding text", asyn
   }
 });
 
-test("continuity still refuses a session it cannot verify", async (t) => {
+test("reading the baton needs no spoken phrase, writing it still does", async (t) => {
   const directory = await fixture(t);
-  // No spoken authorization, so the continuity path denies regardless of work being open.
-  const denied = await handleHook({
-    hook_event_name: "PreToolUse", session_id: "s", turn_id: "t1", tool_use_id: "u",
-    cwd: directory, tool_name: "lodestar__lodestar_handoff_now", tool_input: { packet: {} },
-  }, directory);
-  assert.equal(denied.hookSpecificOutput.permissionDecision, "deny");
+  const ask = async (tool, index) => (await handleHook({
+    hook_event_name: "PreToolUse", session_id: "resumed", turn_id: "t1",
+    tool_use_id: `u${index}`, cwd: directory,
+    tool_name: `lodestar__${tool}`, tool_input: {},
+  }, directory)).hookSpecificOutput;
+
+  // Checking continuity is the first thing an agent does when resuming, and a resumed
+  // session has no phrase to point at. Gating the read denied that opening move and sent
+  // the agent hunting through the plugin source for the reason.
+  const status = await ask("lodestar_handoff_status", 0);
+  assert.equal(status.permissionDecision, "allow");
+  assert.match(status.updatedInput._attestation, /^[a-f0-9]{64}$/u,
+    "a read is still bound to this session, turn and cwd");
+
+  // Everything that writes a lane keeps the exact-phrase requirement.
+  for (const [index, tool] of ["lodestar_handoff_now", "lodestar_handoff_arm",
+    "lodestar_handoff_checkpoint", "lodestar_handoff_disarm"].entries()) {
+    const denied = await ask(tool, index + 1);
+    assert.equal(denied.permissionDecision, "deny", tool);
+  }
 });
