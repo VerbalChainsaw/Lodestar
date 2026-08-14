@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -15,6 +15,30 @@ const { handleHook } = await import(pathToFileURL(
 const { executeHandoff, parseEnvelope, parseHandoffCommand } = await import(pathToFileURL(
   path.join(PLUGIN_ROOT, "scripts", "lodestar-runtime.mjs"),
 ));
+
+// The installed plugin is a separate artifact from the npm package, stamped by hand as
+// <version>+codex.<timestamp>. Nothing forced the two to agree, so a Codex Desktop build
+// ran 1.1.0 against a 1.2.2 registry and reported 1.1.0 over MCP while doing it.
+test("the Codex plugin declares the package version", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(ROOT, "package.json"), "utf8"),
+  );
+  const manifest = JSON.parse(
+    await readFile(path.join(ROOT, "codex-plugin", ".codex-plugin", "plugin.json"), "utf8"),
+  );
+  assert.equal(
+    manifest.version.split("+")[0],
+    packageJson.version,
+    "codex-plugin/.codex-plugin/plugin.json must track the package version",
+  );
+
+  // And the server must report that manifest rather than a literal of its own.
+  const server = await readFile(
+    path.join(ROOT, "codex-plugin", "scripts", "lodestar-mcp.mjs"), "utf8",
+  );
+  assert.match(server, /serverInfo:\s*\{\s*name:\s*"lodestar",\s*version:\s*pluginVersion\(\)/u);
+  assert.doesNotMatch(server, /version:\s*"\d+\.\d+\.\d+"/u, "no hardcoded version");
+});
 
 test("the plugin recovers the envelope even when a runtime prepends notices", () => {
   const envelope = '{"v":1,"ok":false,"error":{"code":"database_not_found"}}';
