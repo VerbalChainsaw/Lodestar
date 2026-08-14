@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.5 - 2026-08-14
+
+- Recognize a tool however the host namespaces it. `lodestar_x`,
+  `lodestar__lodestar_x` and `lodestar/lodestar_x` are the same tool, but an
+  attestation was bound to the exact spelling the hook happened to receive. A
+  mismatch surfaced as `Invalid, expired, mismatched, or replayed host attestation`,
+  which says nothing about naming and makes a working plugin look broken.
+- Compare the canonical tool name on both sides of the attestation, so a token minted
+  under one spelling still executes under another while remaining bound to its
+  session, turn, cwd, and arguments.
+
 ## 1.2.4 - 2026-08-14
 
 - Let a resumed session read its own baton. `lodestar_handoff_status` mutates nothing
