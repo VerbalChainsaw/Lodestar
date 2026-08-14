@@ -124,6 +124,22 @@ lodestar skills verify --target all
 lodestar skills sync --target all --dry-run
 ```
 
+## Keeping it current
+
+Startup is a fixed budget, not a growing list, so capture is separated from injection.
+A line beginning `LODESTAR NOTE:` in an agent's final message is captured into a
+quarantine scope that `start` never reads, which costs the budget nothing.
+
+```text
+lodestar pending                 # review candidates
+lodestar pending promote <id>    # keep one; findable by get and find
+lodestar pending drop <id>       # discard
+```
+
+Promotion never marks a record required. `lodestar doctor` reports `startup_budget` —
+the standing cost of global required records, charged to every project — and raises
+`startup_budget_low` while there is still room to act.
+
 ## Commands
 
 | Command | Purpose |
@@ -137,6 +153,7 @@ lodestar skills sync --target all --dry-run
 | `handoff arm\|status\|checkpoint\|now\|disarm` | Session lane and next-session recovery. |
 | `decision set\|drop\|show\|inject` | Append decision events; project current and dead values. |
 | `skills install\|sync\|verify\|remove` | Manage package-owned client skills and templates. |
+| `pending list\|add\|promote\|drop` | Queue captured candidates outside startup. |
 | `doctor` | Diagnose schema, integrity, foreign keys, and stored semantics. |
 | `export` | Emit a deterministic registry export. |
 | `import` | Import supported historical state into the one registry. |

@@ -15,6 +15,7 @@ Use the installed `lodestar` CLI as the single local machine-state boundary.
 - `lodestar handoff arm|status|checkpoint|now|disarm` manages session continuity.
 - `lodestar decision set|drop|show|inject` manages current and superseded decisions.
 - `lodestar skills install|sync|verify|remove` manages this package.
+- `lodestar pending list|add|promote|drop` queues candidates outside startup.
 - `lodestar doctor` diagnoses the local registry.
 
 JSON is the default output. Add `--human` only for human-formatted output.
@@ -51,3 +52,10 @@ refresh agent instructions. Read [references/templates.md](references/templates.
 before applying one. The templates travel with this skill, so install, sync,
 backup, and verification use the same Lodestar command rather than another
 installer.
+
+## Recording something worth keeping
+
+Write a line beginning `LODESTAR NOTE:` in the final message and the Stop hook captures
+it as a candidate. Candidates sit in a quarantine scope that startup never reads, so
+capturing costs the startup budget nothing. Review with `lodestar pending`, then
+`promote` what is durable and `drop` the rest. Promotion never marks a record required.

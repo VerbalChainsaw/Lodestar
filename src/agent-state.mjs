@@ -13,6 +13,8 @@ import {
 import { canonicalStringify, parseJsonText, readStreamBounded,
   readTextFileBounded } from "./json.mjs";
 import { resolveInputPath } from "./paths.mjs";
+import { pendingAdd, pendingCount, pendingDrop, pendingList,
+  pendingPromote } from "./pending.mjs";
 import { normalizedRows, resolveIdentity, resolveProject, scope } from "./project.mjs";
 import { exportRegistry, findRecords, linkedRecords } from "./queries.mjs";
 import { coercePutRecord, deleteRecord, getRecord, getRecordById, normalizeRecord,
@@ -60,6 +62,7 @@ export function startProjection(db, project, identity, options = {}) {
       context: optional.map(({ id }) => normalizeRecord(getRecordById(db, id))),
       active_work: workStatus(db, project).records,
       handoff,
+      pending: pendingCount(db, project),
       omitted,
     };
     const next = omitted.context
@@ -196,6 +199,7 @@ export async function dispatch(command, parsed, database, io) {
   if (command === "work") return dispatchWork(options, positionals, database);
   if (command === "handoff") return dispatchHandoff(options, positionals, database, io);
   if (command === "decision") return dispatchDecision(options, positionals, database);
+  if (command === "pending") return dispatchPending(options, positionals, database);
   throw lodestarError("unknown_command", "The requested command is not part of Lodestar.");
 }
 
@@ -254,6 +258,29 @@ async function dispatchHandoff(options, positionals, database, io) {
     };
     const data = operations[action]?.();
     if (!data) throw lodestarError("unknown_operation", "The handoff operation is not supported.");
+    return scoped(db, project, actor, data);
+  });
+}
+
+async function dispatchPending(options, positionals, database) {
+  const action = positionals[0] ?? "list";
+  const argument = positionals[1];
+  const write = ["add", "promote", "drop"].includes(action);
+  const actor = identity(options, write);
+  const open = write ? openOrInitializeWriteDatabase : openOrMigrateReadDatabase;
+  return withDatabase(open, database, (db) => {
+    const project = resolveProject(db, cwd(options));
+    const change = { database, source: options["--source"] };
+    const operations = {
+      list: () => positionals.length <= 1
+        && pendingList(db, project, Number(options["--limit"] ?? 20)),
+      add: () => positionals.length === 2 && pendingAdd(db, project, actor, argument, change),
+      promote: () => positionals.length === 2
+        && pendingPromote(db, project, actor, argument, change),
+      drop: () => positionals.length === 2 && pendingDrop(db, project, argument, change),
+    };
+    const data = operations[action]?.();
+    if (!data) throw lodestarError("unknown_operation", "The pending operation is not supported.");
     return scoped(db, project, actor, data);
   });
 }

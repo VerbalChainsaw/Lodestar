@@ -8,6 +8,10 @@ const KEY = /^[a-z0-9][a-z0-9./-]*$/u;
 const FORBIDDEN = [/-----BEGIN/iu,
   /\b(?:password|secret|access[-_ ]?token|refresh[-_ ]?token)\b/iu,
   /\bgh[opusr]_[A-Za-z0-9]{20,}\b/u, /\bsk-(?:proj-)?[A-Za-z0-9_-]{12,}\b/u];
+// Shared so every capture path rejects control characters and obvious secret material
+// on the same terms, rather than each surface inventing its own guard.
+export const safeText = (value, label, maximum) => oneLine(value, label, maximum);
+
 function oneLine(value, label, maximum, required = true) {
   if (typeof value !== "string") throw lodestarError("invalid_input", `${label} must be text.`);
   const text = value.replace(/\s+/gu, " ").trim();

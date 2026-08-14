@@ -322,7 +322,7 @@ export async function runCli(
     }
     const database = resolveDatabasePath({ explicit: global.database });
     const result = await dispatch(command, parsed, database, io);
-    const operation = ["work", "handoff", "decision"].includes(command)
+    const operation = ["work", "handoff", "decision", "pending"].includes(command)
       ? `${command}.${parsed.positionals[0] ?? "status"}`
       : command;
     writeSuccess(io, operation, result, global.human);
