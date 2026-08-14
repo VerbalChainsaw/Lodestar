@@ -30,9 +30,9 @@ here as part of the decision record.
 The current package is `lodestar-agent-context@0.7.0`.
 
 - `package.json` publishes 11 executable names.
-- `agentctx --help` exposes 21 commands.
+- The legacy CLI's `--help` exposes 21 commands.
 - The packed artifact contains 74 entries and 574,793 unpacked bytes.
-- The shipped JavaScript in `agentctx.mjs`, `install.mjs`, `lib/`, and `tools/`
+- The shipped JavaScript in the legacy CLI entry point, `install.mjs`, `lib/`, and `tools/`
   is 14,969 lines.
 - The current test suite is 7,088 lines and the documentation tree is 13,596
   lines.
@@ -57,8 +57,8 @@ The disposition labels below are intentionally literal:
 
 | Existing subsystem and principal files | Current responsibility | Classification | LodestarLite disposition |
 | --- | --- | --- | --- |
-| Package executable map (`package.json`) | Publishes `agentctx`, installers, migrations, and benchmark executables | reduce | Publish only `lodestar -> lodestar.mjs`. All other bin names cease to exist. |
-| Main CLI (`agentctx.mjs`, `lib/cli-options.mjs`, `lib/main-entry.mjs`) | Parses and dispatches 21 commands | reduce | Replace with a small JSON-first dispatcher for nine commands and global help/version handling. |
+| Package executable map (`package.json`) | Publishes the legacy CLI, installers, migrations, and benchmark executables | reduce | Publish only `lodestar -> lodestar.mjs`. All other bin names cease to exist. |
+| Main CLI (legacy entry point, `lib/cli-options.mjs`, `lib/main-entry.mjs`) | Parses and dispatches 21 commands | reduce | Replace with a small JSON-first dispatcher for nine commands and global help/version handling. |
 | Error envelope (`lib/errors.mjs`, `ContextError`) | Converts failures to JSON | retain | Keep one small error module with stable code, message, identifiers, and optional corrective action. |
 | State-home selection and initialization (`lib/state-home.mjs`, `lib/store-layout.mjs`) | Selects a home and creates a multi-directory store | reduce | Resolve one database path and create its parent only during `init`, import, or another write command. |
 | Record CRUD in `ContextStore` (`lib/context-store.mjs`, `tools/tool-store.mjs`) | Reads and rewrites JSON/JSONL generations | reduce | Replace with plain transaction-scoped SQL functions for put, get, delete, aliases, links, and sources. The `ContextStore` class ceases to exist. |
@@ -100,7 +100,7 @@ The disposition labels below are intentionally literal:
 The following names and concepts will not be aliases or hidden compatibility
 paths:
 
-- `agentctx`
+- the legacy CLI executable
 - `start`, `resolve`, `project`, `coverage`, `ask`, `install-codex`,
   `rollback`, `inventory-codex`, `migrate-projects`, `migrate-legacy`,
   `profile-projects`, `refresh`, `snapshot`, `restore`, `maintain`, and
@@ -858,7 +858,7 @@ project understanding, or completeness of the knowledge supplied by users.
 Measured current shipped JavaScript:
 
 ```text
-agentctx.mjs + install.mjs + lib/*.mjs + tools/*.mjs = 14,969 lines
+legacy CLI + install.mjs + lib/*.mjs + tools/*.mjs = 14,969 lines
 ```
 
 Preimplementation target:

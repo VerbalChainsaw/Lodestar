@@ -75,7 +75,7 @@ export async function migrateDatabase(file, {
 } = {}) {
   if (!await existingFile(file)) throw lodestarError("database_not_found",
     "The Lodestar database does not exist.", { identifiers: { database: file } });
-  const probe = openConnection(file, { configureWrite: false });
+  const probe = openConnection(file, { readOnly: true });
   let metadata;
   try {
     metadata = readMetadata(probe, file);
@@ -89,7 +89,8 @@ export async function migrateDatabase(file, {
       .map(String).includes(metadata.schema_version)) {
       throw lodestarError("unsupported_schema",
         "The database schema version is not supported.", { identifiers: {
-          database: file, expected: [LEGACY_SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, SCHEMA_VERSION],
+          database: file,
+          expected: [LEGACY_SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, SCHEMA_VERSION],
           actual: metadata.schema_version ?? null,
         } });
     }

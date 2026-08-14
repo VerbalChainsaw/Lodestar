@@ -1,15 +1,15 @@
 {
   "name": "lodestar",
   "version": "1.1.0",
-  "description": "Unified Lodestar startup, work-presence, and durable handoff integration",
+  "description": "Lodestar startup, knowledge, work, continuity, and decisions integration",
   "author": {
     "name": "VerbalChainsaw"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Lodestar",
-    "shortDescription": "One suite for context, work, and handoff.",
-    "longDescription": "Loads bounded Lodestar context at session start and saves validated, redacted project handoffs with the natural handoff now command.",
+    "shortDescription": "One suite for context, work, continuity, and decisions.",
+    "longDescription": "Loads bounded Lodestar context at session start and provides thin, redacted, one-shot knowledge, work, continuity, decision, skill, and doctor operations.",
     "developerName": "VerbalChainsaw",
     "category": "Productivity",
     "capabilities": [

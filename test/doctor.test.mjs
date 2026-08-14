@@ -33,6 +33,8 @@ test("doctor reports a healthy schema without writing", async (t) => {
     expected_tables: true,
     expected_indexes: true,
     expected_definitions: true,
+    decisions: { events: 0, invalid: [], healthy: true },
+    handoff: { records: 0, invalid: [], healthy: true },
   });
 });
 

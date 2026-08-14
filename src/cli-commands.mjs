@@ -57,8 +57,8 @@ export const COMMANDS = Object.freeze({
     positionals: 0,
   },
   import: {
-    usage: "lodestar import <v0.7-store-path> [--dry-run] [--db <path>]",
-    summary: "Import one v0.7 store into an empty registry.",
+    usage: "lodestar import <source-or-manifest.json> [--dry-run] [--db <path>]",
+    summary: "Import supported historical state into the one Lodestar registry.",
     values: [],
     booleans: ["--dry-run"],
     positionals: 1,
@@ -71,17 +71,40 @@ export const COMMANDS = Object.freeze({
     positionals: 0,
   },
   work: {
-    usage: "lodestar work [status|start|done|history] [text] [options]",
+    usage: "lodestar work [status|start|done|history|expire] [text] [options]",
     summary: "Read or update advisory project work reports.",
-    values: ["--cwd", "--session", "--agent", "--harness", "--limit"],
+    values: ["--cwd", "--session", "--agent", "--harness", "--limit",
+      "--older-than-hours"],
     booleans: [],
     positionals: { min: 0, max: 2 },
   },
   handoff: {
-    usage: "lodestar handoff <save|status|clear> [options]",
-    summary: "Save, inspect, claim, or clear one project handoff baton.",
-    values: ["--cwd", "--session", "--agent", "--harness", "--file"],
+    usage: "lodestar handoff <arm|status|checkpoint|now|disarm> [options]",
+    summary: "Manage one session-bound Lodestar continuity lane and recovery.",
+    values: ["--cwd", "--session", "--agent", "--harness", "--file", "--turn",
+      "--role"],
     booleans: [],
+    positionals: 1,
+  },
+  decision: {
+    usage: "lodestar decision <set|drop|show|inject> [key] [value] [options]",
+    summary: "Record and project durable current and superseded project decisions.",
+    values: ["--cwd", "--session", "--agent", "--harness", "--reason"],
+    booleans: [],
+    positionals: { min: 1, max: 3 },
+  },
+  skills: {
+    usage: "lodestar skills <install|sync|verify|remove> "
+      + "[--target <codex|claude|hermes|opencode|all>] [--codex-root <codex|agents>] "
+      + "[--hermes-home <path>] [--opencode-root <path>] [--migrate] "
+      + "[--codex-bootstrap <path>] [--claude-bootstrap <path>] "
+      + "[--hermes-bootstrap <path>] [--opencode-bootstrap <path>] "
+      + "[--home <path>] [--dry-run]",
+    summary: "Install, sync, verify, or remove Lodestar-managed local agent skills.",
+    values: ["--target", "--codex-root", "--hermes-home", "--opencode-root", "--home",
+      "--codex-bootstrap", "--claude-bootstrap", "--hermes-bootstrap",
+      "--opencode-bootstrap"],
+    booleans: ["--dry-run", "--migrate"],
     positionals: 1,
   },
 });

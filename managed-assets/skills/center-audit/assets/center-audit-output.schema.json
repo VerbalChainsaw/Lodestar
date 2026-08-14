@@ -1,0 +1,500 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/center-audit-output.schema.json",
+  "title": "CENTER-AUDIT v2.5 Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result",
+    "case_file",
+    "fusion",
+    "evidence",
+    "trajectory",
+    "confirmed_defects",
+    "disproven_concerns",
+    "contradictions",
+    "unknowns",
+    "human_interactions",
+    "non_center_observations",
+    "blast_radius",
+    "repair_contract",
+    "verification",
+    "independent_witness",
+    "non_scope",
+    "segments",
+    "safety_stops",
+    "stop_reason"
+  ],
+  "properties": {
+    "schema_version": { "const": "2.5.1" },
+    "result": {
+      "enum": ["DEFECT_CONFIRMED", "NO_DEFECT_CONFIRMED", "INCONCLUSIVE"]
+    },
+    "case_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "repository_root",
+        "target_revision",
+        "baseline",
+        "workspace_state",
+        "package_or_service",
+        "environment",
+        "observation",
+        "expected_invariant",
+        "audited_claim",
+        "center_kind",
+        "center_anchor",
+        "pivots"
+      ],
+      "properties": {
+        "mode": { "enum": ["INTERACTIVE", "AUTONOMOUS", "CI"] },
+        "repository_root": { "type": "string" },
+        "target_revision": { "type": "string" },
+        "baseline": { "type": "string" },
+        "workspace_state": { "enum": ["CLEAN", "DIRTY", "NON-GIT", "UNKNOWN"] },
+        "package_or_service": { "type": "string" },
+        "environment": { "type": "string" },
+        "observation": { "type": "string", "minLength": 1 },
+        "expected_invariant": { "type": "string", "minLength": 1 },
+        "audited_claim": { "type": "string", "minLength": 1 },
+        "center_kind": {
+          "enum": ["LINE", "SYMBOL", "EDGE", "STATE", "EVENT", "GENERATED", "PAIRED"]
+        },
+        "center_anchor": { "type": "string", "minLength": 1 },
+        "falsifier": { "type": "string", "minLength": 1 },
+        "pivots": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["prior_claim", "disproof_evidence_ids", "new_claim", "new_center", "selection_reason"],
+            "properties": {
+              "prior_claim": { "type": "string", "minLength": 1 },
+              "disproof_evidence_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/evidence_id" }
+              },
+              "new_claim": { "type": "string", "minLength": 1 },
+              "new_center": { "type": "string", "minLength": 1 },
+              "selection_reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "fusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "likelihood",
+        "impact",
+        "confidence",
+        "reproducibility",
+        "root_cause",
+        "terminal_impact"
+      ],
+      "properties": {
+        "likelihood": { "enum": ["CERTAIN", "LIKELY", "POSSIBLE", "UNLIKELY"] },
+        "impact": { "enum": ["CATASTROPHIC", "HIGH", "MEDIUM", "LOW"] },
+        "confidence": { "enum": ["HIGH", "MEDIUM", "LOW"] },
+        "reproducibility": {
+          "enum": ["DETERMINISTIC", "INTERMITTENT", "NOT_REPRODUCED", "NOT_APPLICABLE"]
+        },
+        "root_cause": { "type": "string" },
+        "terminal_impact": { "type": "string" }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "trajectory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["links", "unproven_links", "hypotheses"],
+      "properties": {
+        "links": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/trajectory_link" }
+        },
+        "unproven_links": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "hypotheses": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "confirmed_defects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/defect" }
+    },
+    "disproven_concerns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/disproof" }
+    },
+    "contradictions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/contradiction" }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/gap" }
+    },
+    "human_interactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "stop", "question_or_unknown", "resolution_or_default", "confidence_effect"],
+        "properties": {
+          "kind": { "enum": ["HUMAN_PAUSE", "DECISION_FORK"] },
+          "stop": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "question_or_unknown": { "type": "string" },
+          "resolution_or_default": { "type": "string" },
+          "confidence_effect": { "type": "string" }
+        }
+      }
+    },
+    "non_center_observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["anchor", "observation", "exclusion_reason"],
+        "properties": {
+          "anchor": { "type": "string" },
+          "observation": { "type": "string" },
+          "exclusion_reason": { "type": "string" }
+        }
+      }
+    },
+    "blast_radius": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direct", "edge_bundles", "indirect", "boundary", "excluded"],
+      "properties": {
+        "direct": { "type": "array", "items": { "type": "string" } },
+        "edge_bundles": { "type": "array", "items": { "type": "string" } },
+        "indirect": { "type": "array", "items": { "type": "string" } },
+        "boundary": { "type": "array", "items": { "type": "string" } },
+        "excluded": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "repair_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applicable",
+        "objective",
+        "required_invariant",
+        "allowed_scope",
+        "forbidden_scope",
+        "compatibility",
+        "reversibility"
+      ],
+      "properties": {
+        "applicable": { "type": "boolean" },
+        "objective": { "type": "string" },
+        "required_invariant": { "type": "string" },
+        "allowed_scope": { "type": "array", "items": { "type": "string" } },
+        "forbidden_scope": { "type": "array", "items": { "type": "string" } },
+        "compatibility": { "type": "array", "items": { "type": "string" } },
+        "reversibility": { "type": "string" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failing_before", "passing_after", "impacted_checks", "test_meta"],
+      "properties": {
+        "failing_before": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/check" }
+        },
+        "passing_after": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/check" }
+        },
+        "impacted_checks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/check" }
+        },
+        "test_meta": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/test_meta" }
+        }
+      }
+    },
+    "independent_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["used", "type", "independence", "result", "evidence_ids"],
+      "properties": {
+        "used": { "type": "boolean" },
+        "type": { "type": "string" },
+        "independence": { "type": "string" },
+        "result": { "type": "string" },
+        "evidence_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence_id" }
+        }
+      }
+    },
+    "repair_revalidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Captured by the repair agent (not the audit agent) after applying the repair contract's fix. Records whether the contract's required invariant was independently re-validated against current source before editing, the method used, and the result. When omitted, the audit predates the v2.5 schema or the repair has not yet occurred.",
+      "required": ["revalidated", "method", "result"],
+      "properties": {
+        "revalidated": {
+          "type": "boolean",
+          "description": "true if the repair agent re-proved the audit's required_invariant against current source before editing. false if the agent skipped re-validation (this should be exceptional and explained in method)."
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How re-validation was performed (e.g., 're-ran the audit's E# evidence chain against current source', 'replayed the failing-before test against HEAD', 'static re-read of the trajectory anchors')."
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence_id" },
+          "description": "New evidence IDs collected during re-validation, if any. Reuse the audit's E# IDs where the anchor still holds; add new IDs when source drift was found."
+        },
+        "result": {
+          "enum": ["INVARIANT_HOLDS", "INVARIANT_DRIFTED", "INVARIANT_REPLACED", "CONTRACT_REJECTED"],
+          "description": "INVARIANT_HOLDS: trajectory still reproduces against current source. INVARIANT_DRIFTED: anchor or contract drifted; repair proceeded with adjustments recorded. INVARIANT_REPLACED: original invariant was wrong; repair replaced it with a corrected invariant. CONTRACT_REJECTED: re-validation failed; repair halted; reopen the audit."
+        },
+        "drift_notes": {
+          "type": "string",
+          "description": "When result is INVARIANT_DRIFTED or INVARIANT_REPLACED, record what drifted, when (revision or timestamp), and how the repair adjusted. Required when result != INVARIANT_HOLDS."
+        }
+      }
+    },
+    "non_scope": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stop", "symbol_or_module", "center_segment", "swept", "skipped"],
+        "properties": {
+          "stop": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "symbol_or_module": { "type": "string" },
+          "center_segment": { "type": "string" },
+          "swept": { "type": "array", "items": { "type": "string" } },
+          "skipped": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "safety_stops": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["blocked_action", "risk", "evidence_lost", "safe_substitute", "confidence_effect"],
+        "properties": {
+          "blocked_action": { "type": "string" },
+          "risk": { "type": "string" },
+          "evidence_lost": { "type": "string" },
+          "safe_substitute": { "type": "string" },
+          "confidence_effect": { "type": "string" }
+        }
+      }
+    },
+    "stop_reason": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "repair_revalidation": {
+            "type": "object",
+            "required": ["result"],
+            "properties": {
+              "result": { "not": { "const": "INVARIANT_HOLDS" } }
+            }
+          }
+        },
+        "required": ["repair_revalidation"]
+      },
+      "then": {
+        "properties": {
+          "repair_revalidation": {
+            "required": ["drift_notes"],
+            "properties": {
+              "drift_notes": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "result": { "const": "NO_DEFECT_CONFIRMED" }
+        },
+        "required": ["result"]
+      },
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "case_file": { "required": ["falsifier"] }
+            }
+          },
+          {
+            "required": ["disproven_concerns"],
+            "properties": {
+              "disproven_concerns": { "minItems": 1 }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^E[1-9][0-9]*$"
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "channel", "strength", "anchor", "method", "result", "relation", "independence_group"],
+      "properties": {
+        "id": { "$ref": "#/$defs/evidence_id" },
+        "channel": {
+          "enum": ["SOURCE", "RUNTIME", "TEST", "CONTRACT", "HISTORY", "STATIC_TOOL", "HUMAN"]
+        },
+        "strength": { "enum": ["A", "B", "C", "D"] },
+        "anchor": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "result": { "type": "string", "minLength": 1 },
+        "relation": { "enum": ["SUPPORTS", "CONTRADICTS", "CONTEXT", "ABSENCE"] },
+        "independence_group": { "type": "string", "minLength": 1 }
+      }
+    },
+    "trajectory_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_anchor", "to_anchor", "edge_type", "edge_token", "mechanism", "evidence_ids", "proven"],
+      "properties": {
+        "from_anchor": { "type": "string" },
+        "to_anchor": { "type": "string" },
+        "edge_type": {
+          "enum": ["VALUE", "CONTROL", "STATE", "CONTRACT", "TEMPORAL", "CONFIG", "PROVENANCE", "TEST", "RUNTIME"]
+        },
+        "edge_token": { "type": "string" },
+        "mechanism": { "type": "string" },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence_id" }
+        },
+        "proven": { "type": "boolean" }
+      }
+    },
+    "defect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "confidence", "anchor", "claim", "root_cause", "impact", "evidence_ids", "tags"],
+      "properties": {
+        "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
+        "confidence": { "enum": ["HIGH", "MEDIUM", "LOW"] },
+        "anchor": { "type": "string" },
+        "claim": { "type": "string" },
+        "root_cause": { "type": "string" },
+        "impact": { "type": "string" },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence_id" }
+        },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "disproof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor", "concern", "evidence_of_absence", "scope_limits", "evidence_ids"],
+      "properties": {
+        "anchor": { "type": "string" },
+        "concern": { "type": "string" },
+        "evidence_of_absence": { "type": "string" },
+        "scope_limits": { "type": "string" },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence_id" }
+        }
+      }
+    },
+    "contradiction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "evidence_ids", "description", "status", "resolution", "confidence_effect"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^K[1-9][0-9]*$" },
+        "kind": {
+          "enum": ["CONTRADICTION", "SELF_CORRECTION"],
+          "default": "CONTRADICTION",
+          "description": "CONTRADICTION: conflicting evidence between two or more anchor-stable observations (E2 contradicts E5). SELF_CORRECTION: the auditor caught its own evidence-anchor error and re-anchored (originally cited E7 as spec §E-1; actual is §3.1). v2.0.x outputs without `kind` are treated as CONTRADICTION by convention. minItems on evidence_ids was lowered from 2 to 1 in v2.5 to permit SELF_CORRECTION entries that cite a single re-anchored evidence row."
+        },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence_id" }
+        },
+        "description": { "type": "string" },
+        "status": { "enum": ["RESOLVED", "MATERIAL_UNRESOLVED", "NONMATERIAL"] },
+        "resolution": { "type": "string" },
+        "confidence_effect": { "type": "string" }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "evidence_needed", "confidence_effect"],
+      "properties": {
+        "description": { "type": "string" },
+        "evidence_needed": { "type": "string" },
+        "confidence_effect": { "type": "string" }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "method", "command_or_anchor"],
+      "properties": {
+        "description": { "type": "string" },
+        "method": { "type": "string" },
+        "command_or_anchor": { "type": "string" }
+      }
+    },
+    "test_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "anchor", "status", "assertion_match", "oracle_independent", "fixture_valid", "isolated_safe"],
+      "properties": {
+        "name": { "type": "string" },
+        "anchor": { "type": "string" },
+        "status": { "enum": ["PASSING", "FAILING", "NOT_RUN"] },
+        "assertion_match": { "enum": ["YES", "STALE", "WRONG_TARGET"] },
+        "oracle_independent": { "enum": ["YES", "NO", "UNCLEAR"] },
+        "fixture_valid": { "enum": ["YES", "FIXTURE_BREAKS", "UNCLEAR"] },
+        "isolated_safe": { "enum": ["YES", "NO", "NOT_RUN"] }
+      }
+    }
+  }
+}

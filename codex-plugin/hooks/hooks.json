@@ -1,5 +1,5 @@
 {
-  "description": "Load unified Lodestar state and authorize exact handoff commands.",
+  "description": "Load Lodestar state and authorize exact Lodestar continuity commands.",
   "hooks": {
     "UserPromptSubmit": [{
       "hooks": [{
@@ -11,7 +11,7 @@
       }]
     }],
     "PreToolUse": [{
-      "matcher": "handoff_now$",
+      "matcher": "lodestar_handoff_(arm|status|checkpoint|now|disarm)$",
       "hooks": [{
         "type": "command",
         "command": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
@@ -26,6 +26,14 @@
         "commandWindows": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
         "timeout": 20,
         "additionalContextLimit": 16384
+      }]
+    }],
+    "Stop": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+        "commandWindows": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+        "timeout": 10
       }]
     }]
   }

@@ -328,6 +328,14 @@ function replaceRecord(
 export function putRecord(db, value, {
   now = () => new Date(), database = null,
 } = {}) {
+  if (value?.type === "work" || value?.type === "decision-event"
+      || value?.type === "migration-source" || value?.type?.startsWith("handoff-")) {
+    throw lodestarError(
+      "reserved_record_type",
+      "This record type is owned by a Lodestar command family.",
+      { identifiers: { type: value.type } },
+    );
+  }
   const timestamp = now().toISOString();
   transaction(db, () => writeRecordSnapshot(db, value, {
     createdAt: timestamp, updatedAt: timestamp, revision: allocateRevision(db),
@@ -361,6 +369,15 @@ export function deleteRecord(db, identifier, { database = null } = {}) {
   return transaction(db, () => {
     const revision = allocateRevision(db);
     const id = resolveRecordId(db, identifier);
+    const owned = db.prepare("SELECT type FROM records WHERE id=?").get(id);
+    if (owned?.type === "work" || owned?.type === "decision-event"
+        || owned?.type === "migration-source" || owned?.type?.startsWith("handoff-")) {
+      throw lodestarError(
+        "reserved_record_type",
+        "Use the owning Lodestar command family instead of deleting this record.",
+        { identifiers: { id, type: owned.type } },
+      );
+    }
     const deleted = {
       records: 1,
       aliases: countRows(db,

@@ -1,0 +1,51 @@
+{
+  "availability": "known",
+  "data": {
+    "action": [
+      "authority:stop-on-truncated-clipped-malformed-or-incomplete-input",
+      "authority:never-infer-missing-authorization",
+      "scope:preserve-user-intent-and-smallest-sufficient-implementation",
+      "worktree:preserve-dirty-staged-untracked-and-concurrent-work",
+      "architecture:no-adjacent-systems-or-speculative-infrastructure",
+      "gates:never-weaken-raise-partition-or-rewrite-without-explicit-authorization",
+      "scope:stop-when-work-materially-exceeds-the-authorized-tranche",
+      "verification:prove-the-critical-path-with-observable-evidence",
+      "completion:never-imply-success-without-direct-support",
+      "version-control:never-commit-publish-tag-push-or-release-without-authorization"
+    ],
+    "aliases": [],
+    "facts": {
+      "authority": "A complete governing instruction is required before mutation.",
+      "completion": "Stop when the requested outcome and required direct verification are materially complete.",
+      "scope": "A discovered blocker authorizes only the smallest seam needed to clear that blocker.",
+      "verification": "Tests and audits are evidence, not substitutes for the requested outcome."
+    },
+    "id": "g:lodestar:required-governance",
+    "kind": "rule",
+    "name": "Lodestar required operating rules",
+    "priority": 1100,
+    "required": true,
+    "scope": [
+      "global"
+    ],
+    "v": 1
+  },
+  "id": "g:lodestar:required-governance",
+  "kind": "rule",
+  "links": [],
+  "priority": 1100,
+  "revision": 0,
+  "scope": "global",
+  "sources": [
+    {
+      "freshness": "current",
+      "metadata": {
+        "inspection": "inspected",
+        "role": "package-owned required startup policy"
+      },
+      "origin": "package:managed-assets/governance.json"
+    }
+  ],
+  "updated_at": "2026-08-13T00:00:00.000Z",
+  "v": 1
+}

@@ -22,11 +22,16 @@ async function fixture(t) {
   return { database, directory };
 }
 
-async function invoke(args, input = "") {
+async function invokeRaw(args, input = "") {
   let stdout = "", stderr = "";
   const exitCode = await runCli(args, { stdin: Readable.from([input]),
     stdout: { write: (value) => { stdout += value; } },
     stderr: { write: (value) => { stderr += value; } } });
+  return { exitCode, stdout, stderr };
+}
+
+async function invoke(args, input = "") {
+  const { exitCode, stdout, stderr } = await invokeRaw(args, input);
   assert.equal(exitCode, 0, stderr);
   return { text: stdout, value: JSON.parse(stdout) };
 }
@@ -34,6 +39,16 @@ async function invoke(args, input = "") {
 const projectRecord = (id, text, required = false) => ({ id, type: "instruction",
   name: id, scope: "project:lodestar", content: { state: "known", value: { required, text } },
   aliases: [], links: [], sources: [] });
+
+const handoffPacket = (overrides = {}) => ({
+  goal: "Continue Lodestar",
+  rules: ["Preserve current work"],
+  entries: [{ key: "database", state: "fact", text: "Use SQLite", scope: ["project"],
+    generation: 1, provenance: { kind: "repo", sourceRef: "AGENTS.md",
+      observedAt: "2026-08-13T12:00:00.000Z" } }],
+  work: { completed: [], current: [], files: [] }, nextMove: "Run the next check",
+  evidence: [], ...overrides,
+});
 
 test("Windows and WSL paths share one project identity and startup stays bounded", async (t) => {
   const { database, directory } = await fixture(t);
@@ -58,7 +73,9 @@ test("Windows and WSL paths share one project identity and startup stays bounded
   const first = await invoke(args), second = await invoke(args);
   assert.equal(first.text, second.text);
   assert.ok(Buffer.byteLength(first.text, "utf8") <= 16 * 1024);
-  assert.equal(first.value.data.required[0].id, "instruction:required");
+  assert.equal(first.value.data.required[0].id, "g:lodestar:required-governance");
+  assert.equal(first.value.data.required[1].id, "instruction:required");
+  assert.match(JSON.stringify(first.value.data.required[0]), /truncated-clipped-malformed/u);
   assert.equal(first.value.more, true);
   assert.match(first.value.next[0], /^lodestar find /u);
   const windowsDialect = await invoke([
@@ -75,8 +92,8 @@ test("startup rejects oversized required context without claiming a handoff", as
   const db = await openWriteDatabase(database);
   putRecord(db, projectRecord("instruction:oversized", "x".repeat(20_000), true));
   db.close();
-  await invoke(["handoff", "save", "--db", database, "--cwd", directory,
-    "--session", "source"], JSON.stringify({ goal: "continue" }));
+  await invoke(["handoff", "now", "--db", database, "--cwd", directory,
+    "--session", "source"], JSON.stringify(handoffPacket()));
   let stdout = "", stderr = "";
   const exitCode = await runCli(["start", "--db", database, "--cwd", directory,
     "--session", "claimant"], { stdin: Readable.from([]),
@@ -86,9 +103,10 @@ test("startup rejects oversized required context without claiming a handoff", as
   assert.equal(stdout, "");
   assert.equal(JSON.parse(stderr).error.code, "resource_limit");
   assert.ok(Buffer.byteLength(stderr, "utf8") <= 16 * 1024);
-  const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory]);
-  assert.equal(status.value.data.record.data.state, "pending");
-  assert.equal(status.value.data.record.data.claimed_by, null);
+  const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory,
+    "--session", "source"]);
+  assert.equal(status.value.data.recovery.data.state, "pending");
+  assert.equal(status.value.data.recovery.data.claimed_by, null);
 });
 
 test("startup caps an oversized handoff head and reports exact omitted counts", async (t) => {
@@ -98,13 +116,15 @@ test("startup caps an oversized handoff head and reports exact omitted counts", 
     putRecord(db, projectRecord(`context:counted:${index}`, `${index}:${"x".repeat(1_200)}`));
   }
   db.close();
-  await invoke(["handoff", "save", "--db", database, "--cwd", directory,
-    "--session", "source"], JSON.stringify({ goal: "g".repeat(20_000) }));
+  await invoke(["handoff", "now", "--db", database, "--cwd", directory,
+    "--session", "source"], JSON.stringify(handoffPacket({
+    goal: "g".repeat(4_096), nextMove: "n".repeat(4_096),
+  })));
   const started = await invoke(["start", "--db", database, "--cwd", directory,
     "--session", "claimant"]);
   assert.ok(Buffer.byteLength(started.text, "utf8") <= 16 * 1024);
-  assert.ok(Buffer.byteLength(JSON.stringify(started.value.data.handoff.data.packet), "utf8") <= 4096);
-  assert.equal(started.value.data.handoff.data.packet.truncated, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(started.value.data.handoff.packet), "utf8") <= 6_144);
+  assert.equal(started.value.data.handoff.packet.summary, true);
   assert.equal(started.value.data.context.length + started.value.data.omitted.context, 30);
   assert.match(started.value.next.join("\n"), /lodestar handoff status/u);
   assert.match(started.value.next.join("\n"), /lodestar find/u);
@@ -161,13 +181,13 @@ test("repeated work start updates one active record and a later start creates hi
   assert.equal(history[1].data.status, "closed");
 });
 
-test("handoff save and startup claim are atomic and idempotent", async (t) => {
+test("handoff now and startup claim are atomic and idempotent", async (t) => {
   const { database, directory } = await fixture(t);
   const common = ["--db", database, "--cwd", directory, "--agent", "codex"];
-  const packet = { goal: "Continue the bounded core", context: { proof: "temporary database" } };
-  const saved = await invoke(["handoff", "save", ...common, "--session", "source"],
+  const packet = handoffPacket({ goal: "Continue the bounded core" });
+  const saved = await invoke(["handoff", "now", ...common, "--session", "source"],
     JSON.stringify(packet));
-  const savedAgain = await invoke(["handoff", "save", ...common, "--session", "source"],
+  const savedAgain = await invoke(["handoff", "now", ...common, "--session", "source"],
     JSON.stringify(packet));
   assert.equal(savedAgain.value.revision, saved.value.revision);
   assert.equal((await invoke(["start", ...common, "--session", "source"])).value.data.handoff, null);
@@ -178,32 +198,33 @@ test("handoff save and startup claim are atomic and idempotent", async (t) => {
   assert.equal(winners.length, 1);
   const winner = winners[0].value;
   const claimant = winner.scope.session;
-  assert.equal(winner.data.handoff.data.claimed_by, claimant);
+  assert.equal(winner.data.handoff.recovery.data.claimed_by, claimant);
   const retry = (await invoke(["start", ...common, "--session", claimant])).value;
-  assert.equal(retry.data.handoff.revision, winner.data.handoff.revision);
+  assert.equal(retry.data.handoff.recovery.revision, winner.data.handoff.recovery.revision);
   const loser = claimant === "next-a" ? "next-b" : "next-a";
   assert.equal((await invoke(["start", ...common, "--session", loser])).value.data.handoff, null);
-  await invoke(["handoff", "clear", ...common, "--session", claimant]);
-  const cleared = (await invoke(["handoff", "status", ...common])).value.data.record;
-  assert.equal(cleared.data.state, "cleared");
-  assert.equal(cleared.data.packet, null);
+  const status = (await invoke(["handoff", "status", ...common,
+    "--session", claimant])).value.data;
+  assert.equal(status.recovery.data.state, "claimed");
 });
 
 test("state reads tolerate empty state while writes require an actor identity", async (t) => {
   const { database, directory } = await fixture(t);
   assert.throws(() => resolveIdentity({}, {}, true), { code: "identity_required" });
   const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory]);
-  assert.deepEqual(status.value.data, { found: false });
+  assert.deepEqual(status.value.data,
+    { lane: null, packet: null, recovery: null, recovery_packet: null });
 });
 
-test("handoff save initializes an absent registry and remains readable", async (t) => {
+test("handoff now initializes an absent registry and remains readable", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-first-handoff-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const database = path.join(directory, "state", "lodestar.db");
   const common = ["--db", database, "--cwd", directory, "--session", "source"];
-  const saved = await invoke(["handoff", "save", ...common], JSON.stringify({ goal: "continue" }));
-  assert.equal(saved.value.data.kind, "handoff");
-  assert.equal(saved.value.data.data.state, "pending");
-  const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory]);
-  assert.equal(status.value.data.record.id, saved.value.data.id);
+  const saved = await invoke(["handoff", "now", ...common], JSON.stringify(handoffPacket()));
+  assert.equal(saved.value.data.recovery.kind, "handoff-recovery");
+  assert.equal(saved.value.data.recovery.data.state, "pending");
+  const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory,
+    "--session", "source"]);
+  assert.equal(status.value.data.recovery.id, saved.value.data.recovery.id);
 });

@@ -23,8 +23,8 @@ understanding platform.
 ## Storage boundary
 
 - One SQLite file is the source of truth.
-- Lodestar retains advisory work history and one handoff lineage as universal
-  records. It is not a general audit chain, snapshot, restore, rollback,
+- Lodestar retains advisory work history, append-only decision events, and
+  session continuity lineages as universal records. It is not a general audit chain, snapshot, restore, rollback,
   quarantine, or automatic-repair system.
 - SQLite rolls back interrupted transactions, but it cannot recover a lost or
   maliciously rewritten database.
@@ -58,9 +58,18 @@ understanding platform.
   another process's lock.
 - Rollback-journal mode favors a simple write-light CLI. It is not tuned as a
   high-throughput database service.
+- Managed-skill install, sync, and removal preflight and stage the complete
+  selected-client batch, then compensate completed renames in reverse order if
+  a handled failure occurs. They are filesystem operations, not a durable ACID
+  transaction: a process or machine loss between renames can still require
+  restoring the reported timestamped backups manually. Lodestar deliberately
+  has no persistent recovery journal or background repair service.
 - Read-only knowledge commands never initialize a missing database. `start`, a
   structurally valid `put`, and state mutations initialize it through the same
   exclusive reservation path; `init` remains optional.
+- Reads of schema versions 1 and 2 intentionally create the documented exclusive
+  backup and migrate to schema version 3 before returning. Current-schema reads
+  use a read-only SQLite probe and leave database bytes unchanged.
 - A definite failure while creating a new database can leave its published
   zero-byte reservation in place. A later `put`, `init`, or import can resume
   that reservation; Lodestar does not unlink it because another process may
@@ -72,8 +81,8 @@ understanding platform.
   backed-up paths; unknown versions fail closed.
 - Version-2 migration removes retired continuity tables only when all four are
   empty. Nonempty state halts migration without changing the database.
-- The v0.7 importer is one-way and accepts only its documented
-  generation-store layout.
+- Direct v0.7 import accepts only its documented generation-store layout. A
+  version-1 manifest is required for mixed historical state sources.
 - Import does not merge, overwrite populated databases, dual-write, or mutate
   the legacy source.
 - Import rejects an existing destination with more than one hard link. This

@@ -8,6 +8,7 @@ import {
 import { canonicalStringify } from "./json.mjs";
 import { dispatch, operationResult } from "./agent-state.mjs";
 import { resolveDatabasePath } from "./paths.mjs";
+import { manageSkills } from "./skills.mjs";
 import { LIMITS } from "./validate.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
 export { LODESTAR_VERSION } from "./version.mjs";
@@ -302,12 +303,26 @@ export async function runCli(
       );
     }
     const parsed = parseCommand(command, rest.slice(1));
-    if (["work", "handoff"].includes(command)) {
+    if (["work", "handoff", "decision", "skills"].includes(command)) {
       attemptedOperation = `${command}.${parsed.positionals[0] ?? "status"}`;
+    }
+    if (command === "skills") {
+      const result = operationResult(await manageSkills(parsed.positionals[0], {
+        target: parsed.options["--target"],
+        home: parsed.options["--home"],
+        dryRun: parsed.options["--dry-run"] === true,
+        codexRoot: parsed.options["--codex-root"],
+        hermesHome: parsed.options["--hermes-home"],
+        opencodeRoot: parsed.options["--opencode-root"],
+        migrate: parsed.options["--migrate"] === true,
+        bootstrapFiles: parsed.options,
+      }));
+      writeSuccess(io, attemptedOperation, result, global.human);
+      return result.data.verified === false ? 4 : 0;
     }
     const database = resolveDatabasePath({ explicit: global.database });
     const result = await dispatch(command, parsed, database, io);
-    const operation = ["work", "handoff"].includes(command)
+    const operation = ["work", "handoff", "decision"].includes(command)
       ? `${command}.${parsed.positionals[0] ?? "status"}`
       : command;
     writeSuccess(io, operation, result, global.human);

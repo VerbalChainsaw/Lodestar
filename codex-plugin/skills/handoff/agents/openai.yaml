@@ -1,4 +1,0 @@
-interface:
-  display_name: "Lodestar Handoff"
-  short_description: "Save and continue project context"
-  default_prompt: "Use handoff now to save this work for the next project session."

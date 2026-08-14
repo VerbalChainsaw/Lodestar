@@ -21,8 +21,21 @@ const EXPECTED_PACKAGE_FILES = [
   "codex-plugin/scripts/lodestar-hook.mjs",
   "codex-plugin/scripts/lodestar-mcp.mjs",
   "codex-plugin/scripts/lodestar-runtime.mjs",
-  "codex-plugin/skills/handoff/SKILL.md",
-  "codex-plugin/skills/handoff/agents/openai.yaml",
+  "codex-plugin/skills/lodestar/SKILL.md",
+  "codex-plugin/skills/lodestar/agents/openai.yaml",
+  "codex-plugin/skills/lodestar/assets/templates/AGENTS.template.md",
+  "codex-plugin/skills/lodestar/assets/templates/CLAUDE.template.md",
+  "codex-plugin/skills/lodestar/assets/templates/SOUL.template.md",
+  "codex-plugin/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md",
+  "codex-plugin/skills/lodestar/references/bootstrap-and-failures.md",
+  "codex-plugin/skills/lodestar/references/continuity.md",
+  "codex-plugin/skills/lodestar/references/decisions.md",
+  "codex-plugin/skills/lodestar/references/governance-package.md",
+  "codex-plugin/skills/lodestar/references/knowledge.md",
+  "codex-plugin/skills/lodestar/references/templates.md",
+  "codex-plugin/skills/lodestar/references/toolchain.md",
+  "codex-plugin/skills/lodestar/references/work-presence.md",
+  "docs/README.md",
   "docs/agent-bootstrap.json",
   "docs/limitations.md",
   "docs/migration-v0.7.md",
@@ -34,9 +47,11 @@ const EXPECTED_PACKAGE_FILES = [
   "src/cli-commands.mjs",
   "src/cli.mjs",
   "src/continuity-schema.mjs",
+  "src/continuity.mjs",
   "src/database.mjs",
   "src/database-schema.mjs",
   "src/diagnostics.mjs",
+  "src/decision.mjs",
   "src/doctor.mjs",
   "src/errors.mjs",
   "src/import-v070.mjs",
@@ -47,6 +62,7 @@ const EXPECTED_PACKAGE_FILES = [
   "src/legacy-v070/mapping.mjs",
   "src/legacy-v070/parse.mjs",
   "src/legacy-v070/read.mjs",
+  "src/legacy-v070/unified.mjs",
   "src/paths.mjs",
   "src/project.mjs",
   "src/queries.mjs",
@@ -54,10 +70,13 @@ const EXPECTED_PACKAGE_FILES = [
   "src/revisions.mjs",
   "src/schema.mjs",
   "src/schema-migration.mjs",
+  "src/skills-payload.json",
+  "src/skills.mjs",
   "src/stored-semantics.mjs",
   "src/validate.mjs",
   "src/version.mjs",
   "src/windows-install.mjs",
+  "src/work.mjs",
 ];
 
 function packageArtifact() {
@@ -128,6 +147,46 @@ test("relative links in packaged Markdown resolve inside the artifact", async ()
   assert.deepEqual(broken, []);
 });
 
+test("published model-facing surfaces contain only the Lodestar brand", async () => {
+  const pattern = /Context Buddy|context_buddy|Glimpse|Keel|Durable Handoff|DriftGuard|drift_guard/iu;
+  const artifact = packageArtifact();
+  const contaminated = [];
+  for (const { path: file } of artifact.files) {
+    if (!/\.(?:json|md|mjs)$/u.test(file) && file !== "package.json") continue;
+    const text = await readFile(path.join(ROOT, file), "utf8");
+    if (pattern.test(text)) contaminated.push(file);
+  }
+  assert.deepEqual(contaminated, []);
+});
+
+// A published tarball is permanent: npm mirrors it and unpublishing does not erase
+// copies. Templates authored against a real machine carried an absolute home path and
+// a private repository name into the artifact once already, so the artifact itself is
+// the thing under test rather than the source tree it was built from.
+test("the published artifact leaks no local machine or private project detail", async () => {
+  const homePath = /C:[\\/]Users[\\/][^"'\\/\s]+|\/home\/[a-z][a-z0-9_-]*|\/Users\/[^"'/\s]+/u;
+  const artifact = packageArtifact();
+  const leaked = [];
+  for (const { path: file } of artifact.files) {
+    if (!/\.(?:json|md|mjs|ya?ml)$/u.test(file)) continue;
+    const text = await readFile(path.join(ROOT, file), "utf8");
+    const found = homePath.exec(text);
+    if (found) leaked.push(`${file}: ${found[0]}`);
+  }
+  assert.deepEqual(leaked, [], "published files must not contain absolute home paths");
+
+  // Project-specific agent instructions are user content and belong in the registry,
+  // not in the package every consumer installs.
+  const templates = artifact.files
+    .map(({ path: file }) => file)
+    .filter((file) => file.includes("/assets/templates/"))
+    .map((file) => path.basename(file));
+  const generic = templates.filter(
+    (name) => !/\.template\.md$/u.test(name) && !name.startsWith("_"),
+  );
+  assert.deepEqual(generic, [], "only generic templates may ship");
+});
+
 test("package metadata and bootstrap have one source of truth", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(ROOT, "package.json"), "utf8"),
@@ -149,6 +208,35 @@ test("package metadata and bootstrap have one source of truth", async () => {
   assert.deepEqual(documented, AGENT_BOOTSTRAP);
 });
 
+test("managed assets generate the complete unified skill, bootstrap, and rule payload", async () => {
+  const checked = spawnSync(process.execPath,
+    [path.join(ROOT, "scripts", "build-managed-assets.mjs"), "--check"],
+    { cwd: ROOT, encoding: "utf8" });
+  assert.equal(checked.status, 0, checked.stderr || checked.error?.stack);
+  const payload = JSON.parse(await readFile(path.join(ROOT, "src", "skills-payload.json"), "utf8"));
+  assert.equal(payload.schema, 2);
+  assert.deepEqual(payload.skills.map(({ name }) => name), [
+    "director-protocol", "codeplan", "center-multigeometry", "center-audit",
+    "ladder-audit", "lodestar",
+  ]);
+  assert.match(payload.bootstrap.text, /truncated or incomplete/u);
+  assert.equal(payload.governance.id, "g:lodestar:required-governance");
+  assert.equal(payload.governance.data.required, true);
+  const lodestar = payload.skills.find(({ name }) => name === "lodestar");
+  assert.ok(lodestar.files.some(({ path: file }) =>
+    file === "assets/templates/AGENTS.template.md"));
+  assert.ok(lodestar.files.some(({ path: file }) => file === "agents/openai.yaml"));
+  for (const skill of payload.skills) {
+    for (const file of skill.files) {
+      assert.doesNotMatch(file.content, /(?:^|\n)\d+\|/u);
+    }
+    assert.match(skill.files.find(({ path: file }) => file === "SKILL.md").content,
+      /^---\r?\nname: /u);
+  }
+  assert.doesNotMatch(JSON.stringify(payload),
+    /Context Buddy|context_buddy|Glimpse|Keel|Durable Handoff|DriftGuard|drift_guard/u);
+});
+
 test("runtime modules stay understandable in one sitting", async () => {
   const source = path.join(ROOT, "src");
   const files = [];
@@ -164,9 +252,23 @@ test("runtime modules stay understandable in one sitting", async () => {
   let registryCoreLines = 0;
   let continuityLines = 0;
   for (const file of files) {
-    const lines = (await readFile(file, "utf8")).split("\n").length;
+    const text = await readFile(file, "utf8");
+    const lines = text.split("\n").length;
     assert.ok(lines <= 500, `${path.relative(ROOT, file)} has ${lines} lines`);
     const relative = path.relative(source, file);
+    // A line budget alone is satisfied by joining statements, which buys headroom by
+    // making the densest modules the least readable ones. Capping line width removes
+    // that escape so the budget can only be met by writing less, not by writing tighter.
+    // windows-install.mjs is exempt because it is mostly embedded shell inside template
+    // literals, where a wrap would change the emitted script rather than the JavaScript.
+    if (relative !== "windows-install.mjs") {
+      for (const [index, line] of text.split("\n").entries()) {
+        assert.ok(
+          line.length <= 100,
+          `${path.relative(ROOT, file)}:${index + 1} is ${line.length} characters`,
+        );
+      }
+    }
     if (
       relative !== "import-v070.mjs"
       && relative !== "windows-install.mjs"
@@ -181,8 +283,11 @@ test("runtime modules stay understandable in one sitting", async () => {
       else registryCoreLines += lines;
     }
   }
+  // Raised from 4,500 for the v1.1 contract change that absorbed the work and handoff
+  // domains into this core, and to pay for the width cap above: the same logic spread
+  // to a readable width costs more lines than it did compressed.
   assert.ok(
-    registryCoreLines < 4_500,
+    registryCoreLines < 5_200,
     `registry core runtime has ${registryCoreLines} lines`,
   );
   assert.ok(

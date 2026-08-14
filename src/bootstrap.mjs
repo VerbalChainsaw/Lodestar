@@ -1,10 +1,7 @@
-export const AGENT_BOOTSTRAP = Object.freeze({
-  version: 1,
-  instructions: Object.freeze([
-    "At session start, run lodestar start --cwd <cwd> once and use its project, instructions, work, and handoff context.",
-    "Retrieve known context with lodestar get, search with lodestar find, and follow relationships with lodestar links.",
-    "Treat a missing record as missing Lodestar knowledge, then inspect the repository normally.",
-    "Save durable context with lodestar put.",
-    "Use lodestar work for advisory presence and the Lodestar handoff flow for cross-session continuation.",
-  ]),
-});
+import { readFileSync } from "node:fs";
+const managed = JSON.parse(readFileSync(new URL("./skills-payload.json", import.meta.url), "utf8"));
+if (managed?.schema !== 2 || !managed.bootstrap || !managed.governance)
+  throw new Error("Unsupported managed payload schema");
+export const AGENT_BOOTSTRAP = Object.freeze(managed.bootstrap);
+export const BOOTSTRAP_TEXT = AGENT_BOOTSTRAP.text;
+export const REQUIRED_GOVERNANCE = Object.freeze(managed.governance);

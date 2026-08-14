@@ -197,6 +197,7 @@ test("every public command help path is JSON and side-effect free", async (t) =>
     "start",
     "work",
     "handoff",
+    "skills",
   ];
   for (const args of [["--help"], ["--version"]]) {
     const result = await invoke([...args, "--db", file]);

@@ -6,13 +6,55 @@ Ship one suite named **Lodestar** with one public command family:
 
 ```text
 lodestar start|get|find|links|put|work|handoff
+lodestar skills install|sync|verify|remove
 ```
 
 The current universal-record implementation remains the persistence mechanism.
 This tranche repairs its compatibility seams, proves the installed Windows and
 WSL paths, consolidates active agent guidance, and publishes the resulting
 package. It does not add a daemon, a second database, a second executable, or a
-compatibility launcher under an old product name.
+compatibility launcher under an old product name. The external release cutover
+is separate from this locally installed integration tranche.
+
+## Absorption inventory
+
+- Six managed skill trees: director protocol, Codeplan, multigeometry,
+  Center Audit, Ladder Audit, and Lodestar.
+- AGENTS, CLAUDE, SOUL, project, and stub templates bundled as native Lodestar
+  skill assets rather than a second template installer.
+- Install, sync, replacement backup, root migration, verification, and removal
+  behavior generated from `managed-assets/` into the published runtime payload.
+- Windows Codex, Windows Hermes, WSL Codex, and WSL Hermes client roots, with
+  Linux-local staging for WSL atomic replacement.
+
+## Compatibility mapping
+
+| Retired surface | Lodestar operation |
+| --- | --- |
+| Keel install / update | `lodestar skills install` / `lodestar skills sync` |
+| Keel verify / uninstall | `lodestar skills verify` / `lodestar skills remove` |
+| Keel templates | Lodestar skill `assets/templates/` |
+| Glimpse status / start / done / history | `lodestar work status|start|done|history` |
+| Standalone handoff validation / store | `lodestar handoff validate|save|status|clear` |
+| Context Buddy start / project | `lodestar start` |
+| Context Buddy get / resolve | `lodestar get` |
+| Context Buddy find / doctor / put | `lodestar find|doctor|put` |
+
+AgentLink retains only the deprecated `context_buddy_*` MCP names required for
+compatibility. Each alias directly calls the corresponding Lodestar controller
+method. AgentLink health exposes one Lodestar capability and runs one read-only
+`lodestar doctor`; it has no controller or durable state for the retired tools.
+
+## Retirement gate
+
+Only after package, plugin, WSL, client-sync, and AgentLink checks pass:
+
+- retire separate launchers and stores;
+- remove standalone handoff skill roots;
+- move historical product repositories intact to the cutover backup so dirty
+  work remains recoverable;
+- retain no active client config or model-facing skill instruction that invokes
+  an old command.
 
 ## Frozen rubric
 
@@ -90,8 +132,8 @@ self-initializing, and active guidance still advertises retired product names.
 5. Preserve `get`, `find`, `links`, and `put` behavior and envelope consistency.
 6. Replace active old-suite instructions with Lodestar syntax; keep old stores
    only as inert rollback material.
-7. Publish the dependency-free npm tarball as the executable release asset via
-   the existing cross-platform workflow.
+7. Build and install the dependency-free npm tarball locally. Do not publish or
+   cut an external release until that separate cutover is authorized.
 
 ## Verification gate
 
@@ -104,3 +146,11 @@ self-initializing, and active guidance still advertises retired product names.
 - Active-instruction search proving old product command names are absent.
 - Regression Scout checks across adjacent success, error/config, installed
   consumers, and built artifacts.
+
+## Implementation status — 2026-08-13
+
+Implemented and locally installed. The complete Lodestar suite, AgentLink suite,
+packed-artifact startup/handoff/client checks, plugin transports on Windows and
+WSL, four requested client sync/verify paths, and real AgentLink doctor health
+all passed. The live database hash and timestamp were unchanged across the
+read-only health proof. No external package publish or release cutover occurred.

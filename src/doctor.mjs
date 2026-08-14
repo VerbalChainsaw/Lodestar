@@ -6,6 +6,8 @@ import {
   SCHEMA_VERSION,
 } from "./schema.mjs";
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
+import { diagnoseDecisions } from "./decision.mjs";
+import { diagnoseHandoff } from "./continuity.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { LIMITS, validateTimestamp } from "./validate.mjs";
 
@@ -273,6 +275,21 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     if (!add(issue.code, issue.message, issue.identifiers)) break;
   }
 
+  const decisions = validColumns.records ? diagnoseDecisions(db)
+    : { events: null, invalid: [], healthy: false };
+  if (validColumns.records) {
+    for (const id of decisions.invalid) {
+      if (!add("decision_event_invalid", "A decision event is invalid.", { id })) break;
+    }
+  }
+  const handoff = validColumns.records ? diagnoseHandoff(db)
+    : { records: null, invalid: [], healthy: false };
+  if (validColumns.records) {
+    for (const id of handoff.invalid) {
+      if (!add("handoff_record_invalid", "A continuity record is invalid.", { id })) break;
+    }
+  }
+
   if (validColumns.aliases && validColumns.records) {
     const collisions = db.prepare(
       "SELECT a.alias, a.record_id, r.id AS conflicting_id "
@@ -304,6 +321,8 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       expected_tables: same(tables, SCHEMA_TABLES),
       expected_indexes: same(indexes, SCHEMA_INDEXES),
       expected_definitions: definitions.matches,
+      decisions,
+      handoff,
     },
     issues,
     issues_truncated: omittedIssues > 0,

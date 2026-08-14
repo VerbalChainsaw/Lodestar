@@ -1,7 +1,7 @@
 # Lodestar schema version 3
 
-One SQLite database is the source of truth. Schema version 3 uses one universal
-record model:
+One Windows-owned SQLite database is the source of truth for every Lodestar
+capability. Schema version 3 uses one universal record model:
 
 ```text
 metadata(key, value)
@@ -93,10 +93,15 @@ is independently `current`, `stale`, or `unknown`; source inspection is
 - `project` records provide canonical roots for longest-prefix identity
   resolution.
 - `work` records store actor-scoped advisory open and closed reports.
-- `handoff` records store one project baton lineage and its pending, claimed,
-  or cleared state.
+- `decision-event` records form an append-only per-project history; current and
+  dead values are derived from those events.
+- `handoff-lane`, `handoff-packet`, `handoff-tail`, `handoff-recovery`, and
+  `handoff-state` records store session-isolated continuity, validated packet
+  lineage, bounded redacted tails, and atomic startup claims.
+- `migration-source` records bind imported source identity and checksum to the
+  records created by the one idempotent migration path.
 
-Kind-specific fields remain inside record `data`. Work and handoff operations
+Kind-specific fields remain inside record `data`. Work, decision, and continuity operations
 use the same revision allocator and record transaction core as `put`.
 
 ## Bounds
@@ -129,3 +134,7 @@ and semantic checks.
 - Unknown schema versions fail closed.
 - The v0.7 generation-store importer remains one-way and never mutates its
   source.
+- A version-1 migration manifest may also import work SQLite, decision JSONL,
+  continuity JSON, and another current Lodestar SQLite source. It backs up the
+  destination, fingerprints every source, verifies imports, and records source
+  identity so a repeat does not duplicate state.
