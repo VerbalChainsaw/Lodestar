@@ -27,7 +27,8 @@ test("doctor reports a healthy schema without writing", async (t) => {
   const report = diagnoseDatabase(db, { database: file });
   db.close();
   assert.equal(report.healthy, true);
-  assert.deepEqual(report.checks, {
+  const { startup_budget: budget, ...checks } = report.checks;
+  assert.deepEqual(checks, {
     integrity: "ok",
     foreign_key_violations: 0,
     expected_tables: true,
@@ -36,6 +37,16 @@ test("doctor reports a healthy schema without writing", async (t) => {
     decisions: { events: 0, invalid: [], healthy: true },
     handoff: { records: 0, invalid: [], healthy: true },
   });
+  // An empty registry still carries the injected governance record, so the standing
+  // startup cost is never zero and the remaining headroom is the budget minus it.
+  assert.equal(budget.budget_bytes, 16 * 1024);
+  assert.equal(budget.global_required_records, 1);
+  assert.ok(budget.global_required_bytes > 0);
+  assert.equal(
+    budget.project_headroom_bytes,
+    budget.budget_bytes - budget.global_required_bytes,
+  );
+  assert.equal(budget.healthy, true);
 });
 
 test("doctor validates the stable database instance identity", async (t) => {

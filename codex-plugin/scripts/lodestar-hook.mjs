@@ -2,7 +2,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  authorizePrompt, attestTool, recordTail, startupContext,
+  authorizePrompt, attestTool, captureNotes, recordTail, startupContext,
 } from "./lodestar-runtime.mjs";
 import { resolvePluginData } from "./lodestar-mcp.mjs";
 
@@ -27,7 +27,9 @@ export async function handleHook(input, dataDir) {
     hookSpecificOutput: { hookEventName: "SessionStart",
       additionalContext: await startupContext(input) } };
   if (input.hook_event_name === "Stop") {
-    await recordTail(input, "assistant", input.last_assistant_message ?? "");
+    const message = input.last_assistant_message ?? "";
+    await recordTail(input, "assistant", message);
+    await captureNotes(input, message);
     return { continue: true };
   }
   return { continue: true };
