@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "bootstrap": "bootstrap.json",
+  "governance": "governance.json",
+  "skills": [
+    "director-protocol",
+    "codeplan",
+    "center-multigeometry",
+    "center-audit",
+    "ladder-audit",
+    "lodestar"
+  ]
+}

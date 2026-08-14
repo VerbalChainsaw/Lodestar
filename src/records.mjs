@@ -1,5 +1,6 @@
 import { lodestarError } from "./errors.mjs";
 import { transaction } from "./database.mjs";
+import { allocateRevision } from "./revisions.mjs";
 import {
   FRESHNESS_STATES,
   LIMITS,
@@ -9,7 +10,6 @@ import {
   validateSourceMetadata,
   validateTimestamp,
 } from "./validate.mjs";
-
 function storedJson(text, validate, identifiers) {
   try {
     const value = JSON.parse(text);
@@ -27,33 +27,34 @@ function storedJson(text, validate, identifiers) {
     );
   }
 }
-
 export function parseStoredContent(text, identifiers = {}) {
   return storedJson(text, validateContent, {
     field: "content_json",
     ...identifiers,
   });
 }
-
 export function parseStoredMetadata(text, identifiers = {}) {
   return storedJson(text, validateSourceMetadata, {
     field: "metadata_json",
     ...identifiers,
   });
 }
-
 function parsedRecord(row) {
+  const stored = parseStoredContent(row.content_json, { id: row.id });
+  const metadata = stored._lodestar ?? {};
+  const { _lodestar: _ignored, ...content } = stored;
   return {
     id: row.id,
     type: row.type,
     name: row.name,
     scope: row.scope,
-    content: parseStoredContent(row.content_json, { id: row.id }),
+    priority: Number(metadata.priority ?? 0),
+    revision: Number(metadata.revision ?? 0),
+    content,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
-
 function assertOwnedRowLimit(rows, maximum, resource, id) {
   if (rows.length > maximum) {
     throw lodestarError(
@@ -72,7 +73,6 @@ function assertOwnedRowLimit(rows, maximum, resource, id) {
   }
   return rows;
 }
-
 export function resolveRecordId(db, identifier) {
   validateIdentifier(identifier, "identifier");
   const exact = db.prepare(
@@ -92,7 +92,6 @@ export function resolveRecordId(db, identifier) {
     },
   );
 }
-
 export function getRecordById(db, id) {
   const row = db.prepare(
     "SELECT id, type, name, scope, content_json, created_at, updated_at "
@@ -171,11 +170,9 @@ export function getRecordById(db, id) {
   }
   return record;
 }
-
 export function getRecord(db, identifier) {
   return getRecordById(db, resolveRecordId(db, identifier));
 }
-
 function assertAliasAvailability(db, id, aliases) {
   const aliasOwner = db.prepare(
     "SELECT record_id FROM aliases WHERE alias = ?",
@@ -232,7 +229,6 @@ function assertAliasAvailability(db, id, aliases) {
     }
   }
 }
-
 function replaceRecord(
   db,
   input,
@@ -266,9 +262,8 @@ function replaceRecord(
     }
   }
   db.prepare(
-    "INSERT INTO records("
-      + "id, type, name, scope, content_json, created_at, updated_at"
-      + ") VALUES (?, ?, ?, ?, ?, ?, ?) "
+    "INSERT INTO records(id, type, name, scope, content_json, created_at, updated_at) "
+      + "VALUES (?, ?, ?, ?, ?, ?, ?) "
       + "ON CONFLICT(id) DO UPDATE SET "
       + "type = excluded.type, name = excluded.name, scope = excluded.scope, "
       + "content_json = excluded.content_json, updated_at = excluded.updated_at",
@@ -330,42 +325,39 @@ function replaceRecord(
     );
   }
 }
-
-export function putRecord(
-  db,
-  value,
-  {
-    now = () => new Date(),
-    database = null,
-  } = {},
-) {
+export function putRecord(db, value, {
+  now = () => new Date(), database = null,
+} = {}) {
+  if (value?.type === "work" || value?.type === "decision-event"
+      || value?.type === "migration-source" || value?.type?.startsWith("handoff-")) {
+    throw lodestarError(
+      "reserved_record_type",
+      "This record type is owned by a Lodestar command family.",
+      { identifiers: { type: value.type } },
+    );
+  }
   const timestamp = now().toISOString();
-  transaction(
-    db,
-    () => writeRecordSnapshot(db, value, {
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }),
-    database,
-  );
+  transaction(db, () => writeRecordSnapshot(db, value, {
+    createdAt: timestamp, updatedAt: timestamp, revision: allocateRevision(db),
+  }), database);
   return getRecordById(db, value.id);
 }
 
-export function writeRecordSnapshot(
-  db,
-  value,
-  {
-    createdAt,
-    updatedAt,
-    enforceRecordLimit = true,
-  },
-) {
-  const input = validatePutInput(value);
-  replaceRecord(db, input, {
-    createdAt,
-    updatedAt,
-    enforceRecordLimit,
+export function writeRecordSnapshot(db, value, {
+  createdAt, updatedAt, revision, enforceRecordLimit = true,
+}) {
+  const priorityValue = value.priority ?? value.content?.value?.priority ?? 0;
+  const priority = Number.isSafeInteger(priorityValue) ? priorityValue : 0;
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw lodestarError("invalid_transaction",
+      "A record write requires a positive transaction revision.");
+  }
+  const { priority: _priority, ...validatedValue } = value;
+  const input = validatePutInput({
+    ...validatedValue,
+    content: { ...validatedValue.content, _lodestar: { priority, revision } },
   });
+  replaceRecord(db, input, { createdAt, updatedAt, enforceRecordLimit });
   return input.id;
 }
 
@@ -375,28 +367,62 @@ function countRows(db, sql, ...values) {
 
 export function deleteRecord(db, identifier, { database = null } = {}) {
   return transaction(db, () => {
+    const revision = allocateRevision(db);
     const id = resolveRecordId(db, identifier);
+    const owned = db.prepare("SELECT type FROM records WHERE id=?").get(id);
+    if (owned?.type === "work" || owned?.type === "decision-event"
+        || owned?.type === "migration-source" || owned?.type?.startsWith("handoff-")) {
+      throw lodestarError(
+        "reserved_record_type",
+        "Use the owning Lodestar command family instead of deleting this record.",
+        { identifiers: { id, type: owned.type } },
+      );
+    }
     const deleted = {
       records: 1,
-      aliases: countRows(
-        db,
-        "SELECT count(*) AS count FROM aliases WHERE record_id = ?",
-        id,
-      ),
-      sources: countRows(
-        db,
-        "SELECT count(*) AS count FROM sources WHERE record_id = ?",
-        id,
-      ),
-      links: countRows(
-        db,
-        "SELECT count(*) AS count FROM links "
-          + "WHERE from_id = ? OR to_id = ?",
-        id,
-        id,
-      ),
+      aliases: countRows(db,
+        "SELECT count(*) AS count FROM aliases WHERE record_id = ?", id),
+      sources: countRows(db,
+        "SELECT count(*) AS count FROM sources WHERE record_id = ?", id),
+      links: countRows(db, "SELECT count(*) AS count FROM links "
+        + "WHERE from_id = ? OR to_id = ?", id, id),
     };
     db.prepare("DELETE FROM records WHERE id = ?").run(id);
-    return { id, deleted };
+    return { id, deleted, revision };
   }, database);
+}
+
+export function normalizeRecord(record) {
+  const value = contentData(record.content);
+  const data = value && Object.getPrototypeOf(value) === Object.prototype
+    ? { name: record.name, ...value, aliases: record.aliases }
+    : { name: record.name, value, aliases: record.aliases };
+  return { v: 1, id: record.id, kind: record.type, scope: record.scope,
+    availability: record.content.state, priority: record.priority,
+    revision: record.revision, updated_at: record.updated_at, data,
+    links: record.links.map(({ relationship, to_id: toId }) =>
+      ({ relationship, to_id: toId })), sources: record.sources };
+}
+
+export function contentData(content) {
+  if (Object.hasOwn(content, "value")) return content.value;
+  const { state: _state, ...data } = content;
+  return data;
+}
+
+export function coercePutRecord(value) {
+  if (!value || Object.getPrototypeOf(value) !== Object.prototype) return value;
+  if (value.content !== undefined) return value;
+  if (value.v !== 1 || typeof value.kind !== "string" || value.data === undefined) return value;
+  const data = value.data && Object.getPrototypeOf(value.data) === Object.prototype
+    ? { ...value.data }
+    : { value: value.data };
+  const name = typeof data.name === "string" ? data.name : value.id;
+  const aliases = Array.isArray(data.aliases) ? data.aliases : [];
+  delete data.name;
+  delete data.aliases;
+  return { id: value.id, type: value.kind, name, scope: value.scope,
+    priority: value.priority ?? 0,
+    content: { state: value.availability ?? "known", value: data }, aliases,
+    links: value.links ?? [], sources: value.sources ?? [] };
 }

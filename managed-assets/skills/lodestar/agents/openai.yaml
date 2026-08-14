@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lodestar"
+  short_description: "Unified local context and agent workflow suite"
+  default_prompt: "Use $lodestar to load project context and continue this work safely."

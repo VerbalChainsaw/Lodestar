@@ -1,6 +1,17 @@
-export const SCHEMA_VERSION = 1;
+import { randomBytes } from "node:crypto";
 
-export const SCHEMA_TABLES = Object.freeze([
+import {
+  CONTINUITY_SCHEMA_SQL,
+} from "./continuity-schema.mjs";
+export const SCHEMA_VERSION = 3;
+export const LEGACY_SCHEMA_VERSION = 1;
+export const PREVIOUS_SCHEMA_VERSION = 2;
+
+export function createDatabaseInstanceId() {
+  return randomBytes(32).toString("hex");
+}
+
+export const LEGACY_SCHEMA_TABLES = Object.freeze([
   "aliases",
   "links",
   "metadata",
@@ -8,13 +19,13 @@ export const SCHEMA_TABLES = Object.freeze([
   "sources",
 ]);
 
-export const SCHEMA_INDEXES = Object.freeze([
+export const LEGACY_SCHEMA_INDEXES = Object.freeze([
   "aliases_record_id",
   "links_to_id",
   "records_scope_type_id",
 ]);
 
-export const EXPECTED_COLUMNS = Object.freeze({
+export const LEGACY_EXPECTED_COLUMNS = Object.freeze({
   metadata: ["key", "value"],
   records: [
     "id",
@@ -30,7 +41,7 @@ export const EXPECTED_COLUMNS = Object.freeze({
   sources: ["record_id", "origin", "freshness", "metadata_json"],
 });
 
-export const SCHEMA_SQL = String.raw`
+export const LEGACY_SCHEMA_SQL = String.raw`
 CREATE TABLE metadata (
   key TEXT PRIMARY KEY
     CHECK(length(CAST(key AS BLOB)) BETWEEN 1 AND 64),
@@ -130,6 +141,12 @@ CREATE INDEX aliases_record_id
   ON aliases(record_id, alias);
 `;
 
+export const PREVIOUS_SCHEMA_SQL = `${LEGACY_SCHEMA_SQL}\n${CONTINUITY_SCHEMA_SQL}`;
+export const SCHEMA_SQL = LEGACY_SCHEMA_SQL;
+export const SCHEMA_TABLES = LEGACY_SCHEMA_TABLES;
+export const SCHEMA_INDEXES = LEGACY_SCHEMA_INDEXES;
+export const EXPECTED_COLUMNS = LEGACY_EXPECTED_COLUMNS;
+
 function normalizedSql(value) {
   return value.replace(/\s+/gu, " ").trim();
 }
@@ -154,12 +171,13 @@ function isSqliteStatisticsTable({ type, name, tbl_name: table, sql }) {
     && normalizedSql(sql) === expected.sql;
 }
 
-function expectedDefinitions() {
+function expectedDefinitions(schemaSql) {
   const definitions = {};
-  for (const statement of SCHEMA_SQL.split(";")) {
+  for (const statement of schemaSql.split(";")) {
     const sql = statement.trim();
     if (!sql) continue;
-    const match = /^CREATE\s+(TABLE|INDEX)\s+([a-z0-9_]+)/iu.exec(sql);
+    const match = /^CREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX)\s+([a-z0-9_]+)/iu
+      .exec(sql);
     if (!match) throw new Error("Lodestar schema contains an unknown statement.");
     definitions[match[2]] = Object.freeze({
       type: match[1].toLowerCase(),
@@ -169,9 +187,20 @@ function expectedDefinitions() {
   return Object.freeze(definitions);
 }
 
-export const EXPECTED_SCHEMA_DEFINITIONS = expectedDefinitions();
+export const LEGACY_EXPECTED_SCHEMA_DEFINITIONS =
+  expectedDefinitions(LEGACY_SCHEMA_SQL);
+export const PREVIOUS_EXPECTED_SCHEMA_DEFINITIONS =
+  expectedDefinitions(PREVIOUS_SCHEMA_SQL);
+export const EXPECTED_SCHEMA_DEFINITIONS = expectedDefinitions(SCHEMA_SQL);
 
-export function inspectSchemaDefinitions(db) {
+export function inspectSchemaDefinitions(db, { version = SCHEMA_VERSION } = {}) {
+  const expectedDefinitionsForVersion = version === LEGACY_SCHEMA_VERSION
+    ? LEGACY_EXPECTED_SCHEMA_DEFINITIONS
+    : version === PREVIOUS_SCHEMA_VERSION ? PREVIOUS_EXPECTED_SCHEMA_DEFINITIONS
+    : version === SCHEMA_VERSION ? EXPECTED_SCHEMA_DEFINITIONS : null;
+  if (expectedDefinitionsForVersion === null) {
+    throw new Error(`Unsupported schema inspection version: ${version}`);
+  }
   const rows = db.prepare(
     "SELECT type, name, tbl_name, sql FROM sqlite_schema "
       + "WHERE type IN ('table', 'index', 'trigger', 'view') "
@@ -184,15 +213,15 @@ export function inspectSchemaDefinitions(db) {
       sql: typeof sql === "string" ? normalizedSql(sql) : null,
     },
   ]));
-  const expectedNames = Object.keys(EXPECTED_SCHEMA_DEFINITIONS).sort();
+  const expectedNames = Object.keys(expectedDefinitionsForVersion).sort();
   const actualNames = Object.keys(actual).sort();
   const missing = expectedNames.filter((name) => !Object.hasOwn(actual, name));
   const unexpected = actualNames.filter(
-    (name) => !Object.hasOwn(EXPECTED_SCHEMA_DEFINITIONS, name),
+    (name) => !Object.hasOwn(expectedDefinitionsForVersion, name),
   );
   const mismatched = expectedNames.filter((name) => {
     if (!Object.hasOwn(actual, name)) return false;
-    const expected = EXPECTED_SCHEMA_DEFINITIONS[name];
+    const expected = expectedDefinitionsForVersion[name];
     return actual[name].type !== expected.type
       || actual[name].sql !== expected.sql;
   });
@@ -209,11 +238,16 @@ export function inspectSchemaDefinitions(db) {
   };
 }
 
-export function createSchema(db, { createdAt }) {
+export function createSchema(
+  db,
+  { createdAt, databaseInstanceId = createDatabaseInstanceId() },
+) {
   db.exec(SCHEMA_SQL);
   const insert = db.prepare(
     "INSERT INTO metadata(key, value) VALUES (?, ?)",
   );
   insert.run("schema_version", String(SCHEMA_VERSION));
   insert.run("created_at", createdAt);
+  insert.run("database_instance_id", databaseInstanceId);
+  insert.run("database_revision", "0");
 }

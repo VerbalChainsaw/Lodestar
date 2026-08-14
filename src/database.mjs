@@ -1,10 +1,22 @@
-import { lstat, mkdir, open as openFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  open as openFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { lodestarError, wrapError } from "./errors.mjs";
-import { createSchema, inspectSchemaDefinitions, SCHEMA_VERSION } from "./schema.mjs";
+import {
+  assertSupportedSchema,
+  readMetadata,
+} from "./database-schema.mjs";
+import {
+  createDatabaseInstanceId,
+  createSchema,
+  SCHEMA_VERSION,
+} from "./schema.mjs";
 import { validateTimestamp } from "./validate.mjs";
 
 export const DATABASE_BUSY_TIMEOUT_MS = 5_000;
@@ -195,94 +207,16 @@ export function transaction(db, operation, file = null) {
   return result;
 }
 
-export function readMetadata(db, file = null) {
-  try {
-    const rows = db.prepare(
-      "SELECT key, substr(value, 1, 4097) AS value, "
-        + "length(CAST(value AS BLOB)) AS bytes FROM metadata "
-        + "WHERE key IN ('schema_version', 'created_at') ORDER BY key",
-    ).all();
-    if (rows.some(({ bytes }) => Number(bytes) > 4096)) {
-      throw lodestarError(
-        "invalid_database",
-        "Required Lodestar metadata exceeds its storage limit.",
-        {
-          identifiers: { database: file },
-          action: "Run lodestar doctor and use a valid Lodestar database.",
-        },
-      );
-    }
-    return Object.fromEntries(rows.map(({ key, value }) => [key, value]));
-  } catch (error) {
-    const mapped = sqliteError(error, file);
-    if (
-      mapped.code === "database_busy"
-      || mapped.code === "database_integrity"
-    ) {
-      throw mapped;
-    }
-    throw lodestarError(
-      "invalid_database",
-      "The file does not contain Lodestar metadata.",
-      {
-        identifiers: { database: file },
-        action:
-          "Choose a Lodestar database or write the first record to a new path.",
-        cause: error,
-      },
-    );
-  }
-}
+export { readMetadata } from "./database-schema.mjs";
 
-export function assertSupportedSchema(db, file = null) {
-  const metadata = readMetadata(db, file);
-  if (metadata.schema_version !== String(SCHEMA_VERSION)) {
-    throw lodestarError(
-      "unsupported_schema",
-      "The database schema version is not supported.",
-      {
-        identifiers: {
-          database: file,
-          expected: SCHEMA_VERSION,
-          actual: metadata.schema_version ?? null,
-        },
-        action: "Use a database created by this Lodestar version.",
-      },
-    );
-  }
-  try {
-    validateTimestamp(metadata.created_at, "metadata.created_at");
-  } catch (error) {
-    throw lodestarError(
-      "invalid_database",
-      "The database creation timestamp is invalid.",
-      {
-        identifiers: {
-          database: file,
-          created_at: metadata.created_at ?? null,
-        },
-        action: "Run lodestar doctor and use a valid Lodestar database.",
-        cause: error,
-      },
-    );
-  }
-  const schema = inspectSchemaDefinitions(db);
-  if (!schema.matches) {
-    throw lodestarError(
-      "invalid_database",
-      "The database schema does not match Lodestar schema version 1.",
-      {
-        identifiers: {
-          database: file,
-          missing: schema.missing,
-          unexpected: schema.unexpected,
-          mismatched: schema.mismatched,
-        },
-        action: "Run lodestar doctor and use a valid Lodestar database.",
-      },
-    );
-  }
-  return metadata;
+export { assertSupportedSchema } from "./database-schema.mjs";
+
+export async function migrateDatabase(
+  file,
+  options = {},
+) {
+  const migration = await import("./schema-migration.mjs");
+  return await migration.migrateDatabase(file, options);
 }
 
 export async function openReadDatabase(file) {
@@ -307,6 +241,11 @@ export async function openReadDatabase(file) {
       ? error
       : sqliteError(error, file);
   }
+}
+
+export async function openOrMigrateReadDatabase(file, options = {}) {
+  await migrateDatabase(file, options);
+  return await openReadDatabase(file);
 }
 
 export async function openDiagnosticDatabase(file) {
@@ -356,11 +295,16 @@ export async function openWriteDatabase(file) {
   }
 }
 
+export async function openOrMigrateWriteDatabase(file, options = {}) {
+  await migrateDatabase(file, options);
+  return await openWriteDatabase(file);
+}
+
 async function waitForInitializedWriteDatabase(file) {
   const deadline = Date.now() + DATABASE_BUSY_TIMEOUT_MS;
   while (true) {
     try {
-      return await openWriteDatabase(file);
+      return await openOrMigrateWriteDatabase(file);
     } catch (error) {
       if (!["database_busy", "invalid_database"].includes(error?.code)
         || Date.now() >= deadline) throw error;
@@ -400,9 +344,20 @@ export async function reserveNewDatabase(file) {
   }
 }
 
-export function initializeConnection(db, { createdAt, database = null }) {
+export function initializeConnection(
+  db,
+  {
+    createdAt,
+    database = null,
+    databaseInstanceId = createDatabaseInstanceId(),
+  },
+) {
   validateTimestamp(createdAt, "created_at");
-  return transaction(db, () => createSchema(db, { createdAt }), database);
+  return transaction(
+    db,
+    () => createSchema(db, { createdAt, databaseInstanceId }),
+    database,
+  );
 }
 
 export async function initializeDatabase(
@@ -414,7 +369,9 @@ export async function initializeDatabase(
   let resumableEmptyFile = false;
   if (await existingFile(file)) {
     try {
-      const db = await openReadDatabase(file);
+      const migration = await migrateDatabase(file, { now });
+      const db = openConnection(file, { readOnly: true });
+      assertSupportedSchema(db, file);
       const metadata = readMetadata(db, file);
       db.close();
       return {
@@ -422,6 +379,8 @@ export async function initializeDatabase(
         schema_version: SCHEMA_VERSION,
         created: false,
         created_at: metadata.created_at,
+        database_instance_id: metadata.database_instance_id,
+        migration,
       };
     } catch (error) {
       if (!await databaseFileIsEmpty(file)) throw error;
@@ -437,7 +396,12 @@ export async function initializeDatabase(
       await reserveNewDatabase(file);
     }
     db = openConnection(file);
-    initializeConnection(db, { createdAt, database: file });
+    const databaseInstanceId = createDatabaseInstanceId();
+    initializeConnection(db, {
+      createdAt,
+      database: file,
+      databaseInstanceId,
+    });
     db.close();
     db = null;
     return {
@@ -445,6 +409,7 @@ export async function initializeDatabase(
       schema_version: SCHEMA_VERSION,
       created: true,
       created_at: createdAt,
+      database_instance_id: databaseInstanceId,
     };
   } catch (error) {
     try {
@@ -464,6 +429,7 @@ export async function initializeDatabase(
         schema_version: SCHEMA_VERSION,
         created: false,
         created_at: metadata.created_at,
+        database_instance_id: metadata.database_instance_id,
       };
     } catch {
       // Preserve the initialization error when no concurrent creator won.

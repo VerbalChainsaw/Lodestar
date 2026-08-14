@@ -22,6 +22,7 @@ import {
 } from "./legacy-v070/read.mjs";
 import { assertImportDestinationOutsideSource } from "./paths.mjs";
 import { writeRecordSnapshot } from "./records.mjs";
+import { allocateRevision } from "./revisions.mjs";
 import { createSchema, SCHEMA_VERSION } from "./schema.mjs";
 import { LIMITS, validateTimestamp } from "./validate.mjs";
 
@@ -71,6 +72,7 @@ function writeConvertedRecords(db, records, timestamp) {
     writeRecordSnapshot(db, { ...record, links: [] }, {
       createdAt: timestamp,
       updatedAt: timestamp,
+      revision: allocateRevision(db),
       enforceRecordLimit: false,
     });
   }

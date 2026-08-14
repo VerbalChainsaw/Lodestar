@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.2.0 - 2026-08-13
+
+- Generate one required governance record and one canonical bootstrap from the
+  managed assets, return the rule on every startup, and transactionally manage
+  explicitly configured client bootstrap files alongside the skill payload.
+- Fold work presence, continuity, and durable decisions into the Lodestar
+  umbrella skill while keeping one executable and one SQLite authority.
+- Bundle the managed client skills and instruction templates in the Lodestar
+  package, with one `skills install|sync|verify|remove` lifecycle for Codex,
+  Claude, Hermes, and OpenCode.
+- Add session-isolated `handoff arm|status|checkpoint|now|disarm`, atomic
+  next-session startup claiming, append-only `decision` events, and deterministic
+  FACTS/DEAD startup projection.
+- Import supported historical knowledge, work, decision, continuity, and current
+  Lodestar state through one checksummed, backup-first, idempotent manifest.
+- Keep WSL skill staging and backups on the Linux filesystem, translate client
+  roots at the one-shot shim boundary, and verify the installed shim is
+  executable before returning success.
+- Preflight and stage the complete managed-skill batch before client mutation,
+  compensate handled cross-client failures in reverse order, and keep each
+  stage on its destination filesystem.
+- Exercise the packed package through every public command family, the real
+  Codex MCP stdio transport, real AgentLink subprocess delegation, and a
+  disposable live-scale latency/concurrency benchmark.
+- Open the current-schema migration probe read-only and document the exact
+  mutation boundary for startup, schema migration, state, and skill commands.
+
+## 1.1.0 - 2026-08-13
+
+- Unify startup context, durable knowledge, advisory work presence, and
+  cross-session handoff behind one `lodestar` executable and one JSON envelope.
+- Add monotonic database and record revisions allocated inside every mutation
+  transaction.
+- Normalize Windows and WSL project paths and cross the Windows-owned one-shot
+  runtime boundary from WSL.
+- Preserve original direct-content and wrapped record forms through one
+  universal output adapter.
+- Replace specialized continuity persistence with typed universal records;
+  schema-v2 migration drops its old tables only when all are empty.
+- Include the Lodestar Codex plugin for one startup injection and the validated,
+  redacted natural `handoff now` flow.
+- Retire old service, discovery, successor-creation, and separate-suite runtime
+  surfaces.
+- Rebuild the GitHub and npm front page and publish the packed executable with
+  cross-platform verification.
+- Normalize WSL, MSYS, and Cygwin path arguments at the Windows process
+  boundary, including `--db`, `--file`, and legacy import sources.
+- Route WSL execution through `/init` so Lodestar remains available when a
+  second distro changes the shared `WSLInterop` binary-format registration.
+- Enforce the 16 KiB startup budget before transaction commit, cap oversized
+  handoff heads, report exact omitted counts, and roll back an unreturned
+  handoff claim.
+- Make the complete test suite portable across Windows, Linux, and macOS
+  fixtures under the required Node 24.15 runtime.
+
 ## 1.0.3 - 2026-07-31
 
 - Put the central original-to-1.0 product comparison near the top of the

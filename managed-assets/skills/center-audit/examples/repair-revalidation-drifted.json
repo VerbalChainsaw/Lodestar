@@ -1,0 +1,216 @@
+{
+  "schema_version": "2.5.1",
+  "result": "DEFECT_CONFIRMED",
+  "case_file": {
+    "mode": "AUTONOMOUS",
+    "repository_root": "C:/example/repo",
+    "target_revision": "abc1234 (HEAD)",
+    "baseline": "abc0000 (last known-good)",
+    "workspace_state": "CLEAN",
+    "package_or_service": "packages/checkout",
+    "environment": "Node 20, tsconfig strict, jest 29",
+    "observation": "Cart subtotal is correct but the loyalty-points accrual is off by 1 point on every order.",
+    "expected_invariant": "Loyalty points accrued must equal floor(subtotal * 0.05); for a $19.99 order this is 0 points, for $20.00 this is 1.",
+    "audited_claim": "calculatePoints() in checkout-service.ts:88 uses Math.round instead of Math.floor, causing off-by-one on fractional boundaries.",
+    "center_kind": "LINE",
+    "center_anchor": "packages/checkout/src/checkout-service.ts:88 [calculatePoints]",
+    "falsifier": "A reproduction where subtotal=$20.00 yields loyalty_points=1. If that holds, C0 fails.",
+    "pivots": []
+  },
+  "fusion": {
+    "likelihood": "CERTAIN",
+    "impact": "MEDIUM",
+    "confidence": "HIGH",
+    "reproducibility": "DETERMINISTIC",
+    "root_cause": "Math.round at line 88 rounds half-up; Math.floor truncates. At a subtotal of $20.00 the two coincide, but at $19.99 they diverge by 1 point.",
+    "terminal_impact": "Customers receive 1 fewer loyalty point than earned on every fractional-boundary order. Reconciliation drift accumulates silently."
+  },
+  "evidence": [
+    {
+      "id": "E1",
+      "channel": "SOURCE",
+      "strength": "B",
+      "anchor": "packages/checkout/src/checkout-service.ts:88 [calculatePoints]",
+      "method": "Focused read.",
+      "result": "Method body: `return Math.round(subtotal * 0.05);`",
+      "relation": "SUPPORTS",
+      "independence_group": "code-static"
+    },
+    {
+      "id": "E2",
+      "channel": "TEST",
+      "strength": "A",
+      "anchor": "packages/checkout/test/loyalty-points.test.ts:boundary_case",
+      "method": "Run the new boundary test against unfixed code.",
+      "result": "Subtotal=$19.99 yields loyalty_points=1; expected 0. FAIL.",
+      "relation": "SUPPORTS",
+      "independence_group": "test-runtime"
+    },
+    {
+      "id": "E3",
+      "channel": "CONTRACT",
+      "strength": "B",
+      "anchor": "packages/checkout/specs/loyalty.md §2.1",
+      "method": "Read spec section.",
+      "result": "Spec: 'Accrual uses floor arithmetic; fractional cents do not roll over.'",
+      "relation": "SUPPORTS",
+      "independence_group": "code-static"
+    }
+  ],
+  "trajectory": {
+    "links": [
+      {
+        "from_anchor": "packages/checkout/src/checkout-service.ts:88 [calculatePoints]",
+        "to_anchor": "packages/checkout/src/checkout-service.ts:88 [return statement]",
+        "edge_type": "VALUE",
+        "edge_token": "Math.round(subtotal * 0.05)",
+        "mechanism": "Direct call to Math.round with the contract-required floor semantics.",
+        "evidence_ids": ["E1"],
+        "proven": true
+      },
+      {
+        "from_anchor": "packages/checkout/src/checkout-service.ts:88 [return]",
+        "to_anchor": "packages/checkout/specs/loyalty.md §2.1",
+        "edge_type": "CONTRACT",
+        "edge_token": "spec floor-semantics requirement",
+        "mechanism": "Spec mandates floor; code uses round. Static contradiction.",
+        "evidence_ids": ["E3"],
+        "proven": true
+      }
+    ],
+    "unproven_links": [],
+    "hypotheses": []
+  },
+  "confirmed_defects": [
+    {
+      "severity": "MEDIUM",
+      "confidence": "HIGH",
+      "anchor": "packages/checkout/src/checkout-service.ts:88 [calculatePoints]",
+      "claim": "calculatePoints uses Math.round where the spec requires Math.floor.",
+      "root_cause": "Off-by-one on fractional boundaries; silent reconciliation drift.",
+      "impact": "Customers receive fewer loyalty points than earned on fractional-boundary orders.",
+      "evidence_ids": ["E1", "E2", "E3"],
+      "tags": ["billing", "arithmetic-semantics", "spec-implementation-drift"]
+    }
+  ],
+  "disproven_concerns": [],
+  "contradictions": [],
+  "unknowns": [],
+  "human_interactions": [
+    {
+      "kind": "DECISION_FORK",
+      "stop": 0,
+      "question_or_unknown": "Whether the 0.05 rate was correct at audit time (could have been 0.04 in some tenant config).",
+      "resolution_or_default": "Assumed 0.05 per the spec; tenant config not enumerated in pre-flight. If a tenant overrides, the audit must be re-scoped.",
+      "confidence_effect": "Downgraded from CERTAIN to LIKELY for tenant-overridden configs; CERTAIN for default config."
+    }
+  ],
+  "non_center_observations": [],
+  "blast_radius": {
+    "direct": [
+      "packages/checkout/src/checkout-service.ts:88 [calculatePoints]"
+    ],
+    "edge_bundles": [
+      "packages/checkout/src/checkout-service.ts [calculatePoints] + packages/checkout/specs/loyalty.md §2.1 + packages/checkout/test/loyalty-points.test.ts [boundary_case]"
+    ],
+    "indirect": [
+      "packages/loyalty/src/ledger.ts [aggregates calculatePoints output; overstates until reconciliation]"
+    ],
+    "boundary": [
+      "public checkout API: POST /v1/orders (caller observes successful order; loyalty accrual is off by 1 internally)"
+    ],
+    "excluded": [
+      "packages/loyalty/src/ledger.ts [aggregation logic is correct]",
+      "tenant config overrides (re-scope required)"
+    ]
+  },
+  "repair_contract": {
+    "applicable": true,
+    "objective": "Replace Math.round with Math.floor at packages/checkout/src/checkout-service.ts:88 so accrual matches the spec's floor semantics.",
+    "required_invariant": "For any subtotal S, calculatePoints(S) === Math.floor(S * 0.05). Specifically: calculatePoints(19.99) === 0 and calculatePoints(20.00) === 1.",
+    "allowed_scope": [
+      "packages/checkout/src/checkout-service.ts [calculatePoints]",
+      "packages/checkout/test/loyalty-points.test.ts [new boundary test cases]"
+    ],
+    "forbidden_scope": [
+      "packages/checkout/src/checkout-service.ts [other methods in the file]",
+      "packages/loyalty/src/ledger.ts",
+      "packages/checkout/specs/loyalty.md"
+    ],
+    "compatibility": [
+      "All existing successful-checkout tests must continue to pass",
+      "Tenant-specific rate overrides must continue to work (the fix is to Math.floor, not to the rate)",
+      "No regression in the ledger aggregation logic"
+    ],
+    "reversibility": "Single-line edit + new test cases. Revert by git revert of the fix commit."
+  },
+  "verification": {
+    "failing_before": [
+      {
+        "description": "loyalty-points.test.ts:boundary_case fails — 19.99 yields 1 point, expected 0",
+        "method": "node --test packages/checkout/test/loyalty-points.test.ts",
+        "command_or_anchor": "node --test packages/checkout/test/loyalty-points.test.ts"
+      }
+    ],
+    "passing_after": [
+      {
+        "description": "loyalty-points.test.ts passes — boundary cases now match spec",
+        "method": "node --test packages/checkout/test/loyalty-points.test.ts",
+        "command_or_anchor": "node --test packages/checkout/test/loyalty-points.test.ts"
+      },
+      {
+        "description": "All existing checkout tests remain green",
+        "method": "node --test packages/checkout/test/",
+        "command_or_anchor": "node --test packages/checkout/test/"
+      }
+    ],
+    "impacted_checks": [
+      {
+        "description": "Loyalty ledger reconciliation detects zero drift after fix",
+        "method": "Run reconciliation against staging; observe drift eliminated for boundary orders",
+        "command_or_anchor": "scripts/reconcile-loyalty.ts --env staging --since 2026-06-26"
+      }
+    ],
+    "test_meta": [
+      {
+        "name": "loyalty-points.test.ts:boundary_case",
+        "anchor": "packages/checkout/test/loyalty-points.test.ts",
+        "status": "FAILING",
+        "assertion_match": "YES",
+        "oracle_independent": "YES",
+        "fixture_valid": "YES",
+        "isolated_safe": "YES"
+      }
+    ]
+  },
+  "independent_witness": {
+    "used": false,
+    "type": "n/a",
+    "independence": "Single-channel evidence (code-static + test-runtime + spec) is sufficient at MEDIUM impact; no independent witness required per the severity rubric.",
+    "result": "n/a",
+    "evidence_ids": []
+  },
+  "non_scope": [
+    "Tenant-specific rate overrides (re-scope required if overridden)",
+    "packages/loyalty/src/ledger.ts (aggregation logic correct as-is)",
+    "packages/checkout/specs/loyalty.md (spec correct as-is)"
+  ],
+  "segments": [
+    {
+      "stop": 4,
+      "symbol_or_module": "checkout-service.calculatePoints",
+      "center_segment": "lines 80-92",
+      "swept": ["calculatePoints body", "constants block"],
+      "skipped": ["helper Math helpers (proven not to affect this method)"]
+    }
+  ],
+  "safety_stops": [],
+  "stop_reason": "Defect trajectory proven CERTAIN at HIGH confidence through three evidence channels (code-static, test-runtime, spec). Frontier ended at Stop 9 with failing-before test in place. Repair contract handed off.",
+  "repair_revalidation": {
+    "revalidated": true,
+    "method": "Re-ran the audit's E1 (focused read of calculatePoints) and E2 (boundary_case test) against HEAD post-fix. Confirmed Math.round was replaced with Math.floor and the failing-before test now passes. Cross-checked E3 (spec citation §2.1) against current spec file to confirm the floor semantics are still the contract.",
+    "evidence_ids": ["E1", "E2", "E3"],
+    "result": "INVARIANT_DRIFTED",
+    "drift_notes": "Anchor shifted during repair. The audit cited packages/checkout/src/checkout-service.ts:88 [calculatePoints] — that line still exists, but between audit time and repair time the file was reformatted (Prettier run; lines shifted by ±2) and the helper Math import was moved from inline to a top-of-file block. The contract (calculatePoints returns Math.floor(S * 0.05)) still holds and was verified against the new line range. The drift is purely mechanical (formatting + import reorder); the invariant itself did not change. Repair proceeded by reading the post-format line range and applying the Math.round → Math.floor substitution at the new location, with the test passing at the new anchor as expected."
+  }
+}

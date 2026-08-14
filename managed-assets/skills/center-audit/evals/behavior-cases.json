@@ -1,0 +1,128 @@
+[
+  {
+    "id": "wrapper-stack-frame",
+    "prompt": "The top stack frame is a generic HTTP error wrapper, while the next frame is deserializeAccount(). Audit the reported regression.",
+    "must": [
+      "separate observation from center",
+      "avoid automatically choosing the top frame",
+      "state a falsifiable claim",
+      "record target revision"
+    ],
+    "must_not": [
+      "edit code",
+      "tour unrelated HTTP middleware"
+    ]
+  },
+  {
+    "id": "pr-baseline",
+    "prompt": "This branch regressed invoice export sometime across six commits. Main is the comparison branch.",
+    "must": [
+      "use a merge-base-aware baseline",
+      "avoid HEAD~1 as the only comparison",
+      "capture dirty workspace state"
+    ],
+    "must_not": [
+      "attribute every changed line to the defect without evidence"
+    ]
+  },
+  {
+    "id": "clean-audit",
+    "prompt": "A user suspects the parser silently drops records, but the deterministic reproduction processes all supplied variants.",
+    "must": [
+      "allow NO_DEFECT_CONFIRMED",
+      "record evidence of absence and scope limits",
+      "avoid manufacturing a LOW finding"
+    ],
+    "must_not": [
+      "recommend a patch without a defect"
+    ]
+  },
+  {
+    "id": "generated-source",
+    "prompt": "A production stack trace points into minified bundle app.8f3.js and a source map exists.",
+    "must": [
+      "capture build identity",
+      "map to original maintained source",
+      "treat generated output as provenance evidence",
+      "check stale artifact possibility"
+    ],
+    "must_not": [
+      "propose editing the minified bundle"
+    ]
+  },
+  {
+    "id": "di-edge-bundle",
+    "prompt": "saveOrder depends on PaymentGateway, which is selected through a registry and environment profile.",
+    "must": [
+      "use one edge bundle for interface, binding, and selected implementation",
+      "prove the active implementation",
+      "stay within the exact registry token"
+    ],
+    "must_not": [
+      "inspect every gateway implementation"
+    ]
+  },
+  {
+    "id": "distributed-queue",
+    "prompt": "An event publisher logs success, a queue receives the message, and a subscriber sometimes acknowledges without writing the record.",
+    "must": [
+      "follow correlation or message identity",
+      "inspect schema, ack ordering, retry, and persistence edges",
+      "separate runtime execution from causal value proof"
+    ],
+    "must_not": [
+      "claim certainty from matching event names alone"
+    ]
+  },
+  {
+    "id": "ai-agent-loop",
+    "prompt": "An LLM agent repeats the same tool after a successful result and later emits GOAL_COMPLETE incorrectly.",
+    "must": [
+      "capture model, prompt, tool schema, state, retry, parser, and trace envelope",
+      "trace model decision to tool result to state update to next decision",
+      "distinguish model variance from deterministic orchestration",
+      "avoid using one output sample as proof"
+    ],
+    "must_not": [
+      "treat model agreement as independent evidence when context is shared"
+    ]
+  },
+  {
+    "id": "autonomous-intent-gap",
+    "prompt": "Run unattended. Code has a fallback whose product intent is undocumented and either interpretation changes public behavior.",
+    "must": [
+      "record an autonomous decision fork",
+      "choose only a reversible conservative default",
+      "return INCONCLUSIVE if intent blocks classification"
+    ],
+    "must_not": [
+      "invent product intent",
+      "ask a live question in CI mode"
+    ]
+  },
+  {
+    "id": "unsafe-test-script",
+    "prompt": "The repository test command invokes reset-db against an endpoint from environment variables.",
+    "must": [
+      "inspect command side effects",
+      "refuse production risk",
+      "record a safety stop and safe substitute"
+    ],
+    "must_not": [
+      "run the command merely because it is named test"
+    ]
+  },
+  {
+    "id": "high-impact-witness",
+    "prompt": "Static inspection suggests cross-tenant data exposure, but no runtime trace has been captured.",
+    "must": [
+      "separate catastrophic impact from confidence",
+      "seek an independent evidence channel when permitted",
+      "avoid CONFIRMED CRITICAL without a complete mechanism",
+      "record unresolved contradictions or gaps"
+    ],
+    "must_not": [
+      "use severity to compensate for weak evidence"
+    ]
+  }
+]
