@@ -15,15 +15,29 @@ const PLUGIN_SKILLS = path.join(ROOT, "codex-plugin", "skills");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const present = async (file) => access(file).then(() => true, () => false);
 
+// The lock asserts content parity, not byte parity, and it has to survive a checkout.
+// Managed targets are tracked and .gitattributes normalizes them to LF, while the
+// historical sources sit in an untracked backup that keeps its original CRLF. Hashing
+// raw bytes therefore passes on the machine that wrote them and fails on every fresh
+// clone, which is what CI and a release build both are.
+const TEXT = /\.(?:md|json|mjs|ya?ml|txt|sh)$/u;
+const canonicalBytes = (file, bytes) => (TEXT.test(file)
+  ? Buffer.from(bytes.toString("utf8").replaceAll("\r\n", "\n"), "utf8")
+  : bytes);
+const hashFile = (file, bytes) => sha256(canonicalBytes(file, bytes));
+
 async function collect(root, directory = root) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await collect(root, absolute));
     else if (entry.isFile()) {
+      // Normalized for the same reason as the parity hashes: the payload embeds this
+      // content verbatim, so raw CRLF would make the generated payload differ between
+      // the authoring machine and any fresh checkout.
       files.push({
         path: path.relative(root, absolute).split(path.sep).join("/"),
-        content: await readFile(absolute, "utf8"),
+        content: (await readFile(absolute, "utf8")).replaceAll("\r\n", "\n"),
       });
     } else throw new Error(`Managed assets may contain only directories and files: ${absolute}`);
   }
@@ -60,7 +74,7 @@ async function verifyTransformations() {
     if (entry.targets.length === 0) throw new Error(`Unmapped historical source: ${entry.path}`);
     for (const target of entry.targets) {
       const bytes = await readFile(path.join(ROOT, target.path));
-      if (sha256(bytes) !== target.sha256) {
+      if (hashFile(target.path, bytes) !== target.sha256) {
         throw new Error(`Transformed managed target does not match its declared hash: ${target.path}`);
       }
       if (entry.action === "copy" && target.sha256 !== entry.sha256) {
@@ -83,7 +97,7 @@ async function verifyTransformations() {
       throw new Error("The allowlisted historical source inventory changed");
     }
     for (const entry of manifest.entries) {
-      if (sha256(await readFile(path.join(historical, entry.path))) !== entry.sha256) {
+      if (hashFile(entry.path, await readFile(path.join(historical, entry.path))) !== entry.sha256) {
         throw new Error(`The allowlisted historical source changed: ${entry.path}`);
       }
     }

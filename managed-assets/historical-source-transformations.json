@@ -12,13 +12,13 @@
   "entries": [
     {
       "path": "00-doctrine/CLAUDE.template.md",
-      "sha256": "c6bfd5f01dfac1c8865bb32713a2f4eaa40dedeb200990958646de69d91b65d1",
+      "sha256": "73357dafe09dc010b0da79153697876d1b14fc8693981a49f48f21af186e8f24",
       "bytes": 1933,
       "action": "copy",
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/assets/templates/CLAUDE.template.md",
-          "sha256": "c6bfd5f01dfac1c8865bb32713a2f4eaa40dedeb200990958646de69d91b65d1"
+          "sha256": "73357dafe09dc010b0da79153697876d1b14fc8693981a49f48f21af186e8f24"
         }
       ],
       "reason": "byte-for-byte managed copy"
@@ -311,13 +311,13 @@
     },
     {
       "path": "01-skills/center-audit/SKILL.md",
-      "sha256": "8d05ef4525eb33c8842370cf09c1231e90276fcc894bf76b263689e6d5529fbc",
+      "sha256": "b895462b7c62c4893f14968585e6f8c89e24b33d6f3d18c79706e7f0a67891ba",
       "bytes": 36435,
       "action": "copy",
       "targets": [
         {
           "path": "managed-assets/skills/center-audit/SKILL.md",
-          "sha256": "8d05ef4525eb33c8842370cf09c1231e90276fcc894bf76b263689e6d5529fbc"
+          "sha256": "b895462b7c62c4893f14968585e6f8c89e24b33d6f3d18c79706e7f0a67891ba"
         }
       ],
       "reason": "byte-for-byte managed copy"
@@ -405,13 +405,13 @@
     },
     {
       "path": "01-skills/center-multigeometry/manifest.json",
-      "sha256": "46aaf22aac17f7674ca1547c18161f0d3eba4d6db61b1e6e2d82461a87637f9c",
+      "sha256": "f8a75873b5509184b8e41177c30db1bd1fb8e159893d53fac10d488eb8ce5e12",
       "bytes": 865,
       "action": "copy",
       "targets": [
         {
           "path": "managed-assets/skills/center-multigeometry/manifest.json",
-          "sha256": "46aaf22aac17f7674ca1547c18161f0d3eba4d6db61b1e6e2d82461a87637f9c"
+          "sha256": "f8a75873b5509184b8e41177c30db1bd1fb8e159893d53fac10d488eb8ce5e12"
         }
       ],
       "reason": "byte-for-byte managed copy"
@@ -591,13 +591,13 @@
     },
     {
       "path": "02-agents-md-library/AGENTS.template.md",
-      "sha256": "2a8568a8595799cf376b53ea1d54fba50bd101fafa981581faf6e5f32c9eed12",
+      "sha256": "ee5816f65efddd5b286d2cc179d434845a5c7df9d8893a09b0fb135fabf45de7",
       "bytes": 5431,
       "action": "rewrite",
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/assets/templates/AGENTS.template.md",
-          "sha256": "025cc90e9a1b43d9894d93ff1b10637a04a4d49f9f7828dc5e2e87b26324c8ff"
+          "sha256": "b0933ae42e85586c27b6e4dc18d813d069685162a1af04064d61adca4d75c1e6"
         }
       ],
       "reason": "product identity rewritten to Lodestar; capability content retained"
