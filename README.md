@@ -143,8 +143,33 @@ lodestar pending drop <id>       # discard
 ```
 
 Promotion never marks a record required. `lodestar doctor` reports `startup_budget` —
-the standing cost of global required records, charged to every project — and raises
-`startup_budget_low` while there is still room to act.
+the standing cost of required records and the project closest to exceeding it — and
+raises `startup_budget_low` while there is still room to act.
+
+## The startup budget
+
+`start` renders a bounded projection. Anything that does not fit is demoted to a stub —
+`id`, `name` and `kind` in `data.available` — so one `lodestar get` recovers it. `start`
+never refuses to run; the governance record is the last thing demoted.
+
+The default budget is 16 KiB, roughly 4K tokens. Set your own, most immediate first:
+
+```text
+lodestar start --startup-budget 65536      # this run
+LODESTAR_STARTUP_BUDGET=65536              # this host
+```
+
+For a durable setting, write a `config` record — project scope overrides global:
+
+```json
+{ "id": "config:startup", "type": "config", "name": "Startup budget",
+  "scope": "global",
+  "content": { "state": "known", "value": { "startup_budget_bytes": 65536 } } }
+```
+
+Every projection reports `data.budget` with the value in force and its source, so a
+raise is a visible choice rather than silent drift. Values outside 8 KiB–256 KiB are
+treated as typos and ignored.
 
 ## Commands
 

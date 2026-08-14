@@ -1,8 +1,9 @@
 export const COMMANDS = Object.freeze({
   start: {
-    usage: "lodestar start [--cwd <path>] [--session <id>] [--agent <name>] [--harness <name>]",
+    usage: "lodestar start [--cwd <path>] [--session <id>] [--agent <name>] "
+      + "[--harness <name>] [--startup-budget <bytes>]",
     summary: "Resolve one project and return its bounded startup projection.",
-    values: ["--cwd", "--session", "--agent", "--harness"],
+    values: ["--cwd", "--session", "--agent", "--harness", "--startup-budget"],
     booleans: [],
     positionals: 0,
   },

@@ -188,6 +188,72 @@ test("an over-budget startup sheds to names instead of refusing to run", async (
   assert.ok(result.data.required.length >= 1, "startup never sheds below the contract");
 });
 
+test("the startup budget is configurable, and every source is stated", async (t) => {
+  const { db, file, project } = await fixture(t);
+  const prior = process.env.LODESTAR_STARTUP_BUDGET;
+  t.after(() => {
+    if (prior === undefined) delete process.env.LODESTAR_STARTUP_BUDGET;
+    else process.env.LODESTAR_STARTUP_BUDGET = prior;
+  });
+  delete process.env.LODESTAR_STARTUP_BUDGET;
+  const budget = (options = {}) => startProjection(db, project, IDENTITY,
+    { database: file, ...options }).data.budget;
+
+  // 16 KiB is roughly 4K tokens — generous for a small local model, negligible for a
+  // 200K-context host. It is a starting point, so it must be a default and not a wall.
+  assert.deepEqual(budget(), { bytes: 16 * 1024, source: "default" });
+
+  // Precedence runs from most immediate to most durable, and a project setting beats a
+  // machine one because it is the narrower statement.
+  putRecord(db, { id: "config:startup", type: "config", name: "Machine budget",
+    scope: "global", content: { state: "known", value: { startup_budget_bytes: 40_960 } } }, {});
+  assert.deepEqual(budget(), { bytes: 40_960, source: "global" });
+  putRecord(db, { id: "p:config:startup", type: "config", name: "Project budget",
+    scope: project.scope,
+    content: { state: "known", value: { startup_budget_bytes: 24_576 } } }, {});
+  assert.deepEqual(budget(), { bytes: 24_576, source: "project" });
+  process.env.LODESTAR_STARTUP_BUDGET = "32768";
+  assert.deepEqual(budget(), { bytes: 32_768, source: "environment" });
+  assert.deepEqual(budget({ startupBudget: "49152" }), { bytes: 49_152, source: "option" });
+
+  // A budget outside the sane range is a typo, not an instruction. Honouring one would
+  // either strangle startup or defeat the bound entirely, so it falls back to default.
+  delete process.env.LODESTAR_STARTUP_BUDGET;
+  putRecord(db, { id: "config:startup", type: "config", name: "Machine budget",
+    scope: "global", content: { state: "known", value: { startup_budget_bytes: 10 } } }, {});
+  putRecord(db, { id: "p:config:startup", type: "config", name: "Project budget",
+    scope: project.scope, content: { state: "known", value: { startup_budget_bytes: 0 } } }, {});
+  assert.deepEqual(budget(), { bytes: 16 * 1024, source: "default" });
+  for (const bogus of ["10", "999999999", "abc", "", "16384.5"]) {
+    assert.equal(budget({ startupBudget: bogus }).source, "default", bogus);
+  }
+
+  // Config describes how the projection is built, so carrying it would spend the budget
+  // describing the budget.
+  const projected = startProjection(db, project, IDENTITY, { database: file }).data;
+  const shown = [...projected.context, ...projected.available].map(({ id }) => id);
+  assert.equal(shown.some((id) => id.includes("config:startup")), false);
+});
+
+test("a raised budget carries what a default one has to shed", async (t) => {
+  const { db, file, project } = await fixture(t);
+  for (let index = 0; index < 40; index += 1) {
+    putRecord(db, { id: `p:ctx${index}`, type: "note", name: `Note ${index}`,
+      scope: project.scope,
+      content: { state: "known", value: { text: `${index}:${"x".repeat(900)}` } } }, {});
+  }
+  const tight = startProjection(db, project, IDENTITY, { database: file }).data;
+  const roomy = startProjection(db, project, IDENTITY,
+    { database: file, startupBudget: 128 * 1024 }).data;
+
+  assert.ok(roomy.context.length > tight.context.length, "a bigger budget carries more");
+  assert.ok(!roomy.omitted.hidden, "and stops hiding names entirely");
+  // Whatever the budget, the projection stays inside it.
+  for (const [data, limit] of [[tight, 16 * 1024], [roomy, 128 * 1024]]) {
+    assert.ok(Buffer.byteLength(JSON.stringify(data), "utf8") <= limit);
+  }
+});
+
 test("marking a record required reports the budget it just spent", async (t) => {
   const { db, file, project } = await fixture(t);
   const put = (id, scope, text, required) => putRecord(db, { id, type: "rule", name: id, scope,

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0 - 2026-08-14
+
+- The startup budget is yours to set. 16 KiB is about 4K tokens — generous for a small
+  local model, negligible for a 200K-context host — and it was applied uniformly to
+  every host with no way to change it. It is now a default, not a wall.
+- Four sources, most immediate to most durable: `--startup-budget`,
+  `LODESTAR_STARTUP_BUDGET`, a project `config` record, a global `config` record. A
+  project setting beats a machine one because it is the narrower statement.
+- `start` states the budget in force and where it came from, in `data.budget`, so a
+  raise is deliberate and visible rather than silent drift. That visibility is what keeps
+  the budget a forcing function now that it is adjustable.
+- `doctor` measures against the configured budget instead of its own copy of the number,
+  and reports against the strictest budget any project in the registry runs under.
+- A budget outside 8 KiB–256 KiB is treated as a typo and ignored, so a stray value can
+  neither strangle startup nor quietly defeat the bound.
+- `config` records are never projected as context — carrying one would spend the budget
+  describing the budget.
+
 ## 1.3.0 - 2026-08-14
 
 - `start` never refuses to run. Required records larger than the 16 KiB budget used to

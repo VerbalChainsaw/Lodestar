@@ -7,6 +7,7 @@ import {
   SCHEMA_VERSION,
 } from "./schema.mjs";
 import { REQUIRED_GOVERNANCE } from "./bootstrap.mjs";
+import { STARTUP_BYTES } from "./agent-state.mjs";
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
 import { diagnoseDecisions } from "./decision.mjs";
 import { diagnoseHandoff } from "./continuity.mjs";
@@ -30,14 +31,32 @@ function same(left, right) {
 }
 
 // Required records are charged to every session, and global ones are charged to every
-// project on the machine. `start` only fails once the total already exceeds the budget,
-// which is the worst moment to discover it. Reporting the standing cost here turns a
-// future outage into a number that can be watched.
-const STARTUP_BUDGET_BYTES = 16 * 1024;
+// project on the machine. `start` demotes once the total exceeds the budget, so a
+// projection silently thins rather than announcing itself. Reporting the standing cost
+// here turns a future degradation into a number that can be watched.
 const STARTUP_BUDGET_LOW_BYTES = 4096;
+
+// Read the same way `start` reads it, or the check measures against a number nobody is
+// using. A per-project budget is the narrower statement and wins, exactly as at startup.
+function configuredBudget(db, recordsUsable) {
+  if (!recordsUsable) return STARTUP_BYTES;
+  try {
+    const rows = db.prepare("SELECT scope,json_extract(content_json,"
+      + "'$.value.startup_budget_bytes') AS bytes FROM records WHERE type='config'").all();
+    const environment = Number(process.env.LODESTAR_STARTUP_BUDGET);
+    if (Number.isInteger(environment) && environment > 0) return environment;
+    const global = rows.find(({ scope, bytes }) => scope === "global" && Number(bytes) > 0);
+    // Doctor is machine-wide, so it reports against the strictest budget any project in
+    // the registry would run under — the first place a shed will actually be felt.
+    const strictest = rows.map(({ bytes }) => Number(bytes)).filter((value) => value > 0);
+    if (strictest.length) return Math.min(...strictest);
+    return global ? Number(global.bytes) : STARTUP_BYTES;
+  } catch { return STARTUP_BYTES; }
+}
 
 function startupBudget(db, recordsUsable) {
   if (!recordsUsable) return null;
+  const STARTUP_BUDGET_BYTES = configuredBudget(db, recordsUsable);
   const rows = db.prepare("SELECT id FROM records WHERE scope='global' "
     + "AND json_extract(content_json,'$.value.required')=1")
     .all().filter(({ id }) => id !== REQUIRED_GOVERNANCE.id);

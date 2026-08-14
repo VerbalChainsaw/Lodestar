@@ -23,10 +23,43 @@ import { currentRevision } from "./revisions.mjs";
 import { LIMITS, validatePutInput } from "./validate.mjs";
 import { workDone, workExpire, workStart, workStatus } from "./work.mjs";
 export { normalizeMachinePath, resolveIdentity, resolveProject } from "./project.mjs";
-const STARTUP_BYTES = 16 * 1024;
+// The budget belongs to whoever reads the projection, not to Lodestar. 16 KiB is a
+// starting point — about 4K tokens, which is generous for a small local model and
+// negligible for a 200K-context host — so it is a default, not a wall. What keeps it a
+// forcing function is that a raise is deliberate and visible: `start` reports the budget
+// in force and where it came from, and `doctor` measures against the same number.
+export const STARTUP_BYTES = 16 * 1024;
+// A floor that always leaves room for the governance record plus a real projection, and
+// a ceiling at the per-record storage limit. Outside these a budget is a typo.
+const BUDGET_FLOOR = 8 * 1024;
+const BUDGET_CEILING = 256 * 1024;
 // How many in-scope records the projection will name but not carry. Stubs are cheap
 // enough that this is bounded by usefulness rather than by bytes.
 const STUB_LIMIT = 200;
+
+const readBudget = (raw) => {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < BUDGET_FLOOR || value > BUDGET_CEILING) return null;
+  return value;
+};
+
+// Precedence runs from most immediate to most durable: an explicit flag, then the host's
+// environment, then a project's own configuration, then the machine's. A project setting
+// wins over a global one because the project is the narrower statement.
+export function resolveStartupBudget(db, project, options = {}) {
+  const flag = readBudget(options.startupBudget);
+  if (flag) return { bytes: flag, source: "option" };
+  const environment = readBudget(process.env.LODESTAR_STARTUP_BUDGET);
+  if (environment) return { bytes: environment, source: "environment" };
+  const rows = db.prepare("SELECT scope,json_extract(content_json,"
+    + "'$.value.startup_budget_bytes') AS bytes FROM records "
+    + "WHERE type='config' AND scope IN ('global',?)").all(project.scope);
+  for (const [wanted, source] of [[project.scope, "project"], ["global", "global"]]) {
+    const found = rows.find(({ scope: at, bytes }) => at === wanted && readBudget(bytes));
+    if (found) return { bytes: readBudget(found.bytes), source };
+  }
+  return { bytes: STARTUP_BYTES, source: "default" };
+}
 export const operationResult = (data, options = {}) => ({ data,
   revision: options.revision ?? 0, scope: options.scope ?? scope(),
   more: options.more ?? false, next: options.next ?? [] });
@@ -72,9 +105,12 @@ export function startProjection(db, project, identity, options = {}) {
         + "AND json_extract(content_json,'$.value.required')=1 " + order, project.scope);
     const required = [REQUIRED_GOVERNANCE,
       ...storedRequired.filter(({ id }) => id !== REQUIRED_GOVERNANCE.id)];
+    const budget = resolveStartupBudget(db, project, options);
     const limit = options.optionalLimit ?? 12;
+    // `config` joins the types startup never projects as context: it describes how the
+    // projection is built, so carrying it would spend the budget describing the budget.
     const optionalWhere = "FROM records WHERE scope IN ('global',?) "
-      + "AND type NOT IN ('work','handoff','project','decision-event') "
+      + "AND type NOT IN ('work','handoff','project','decision-event','config') "
       + "AND type NOT LIKE 'handoff-%' "
       + "AND COALESCE(json_extract(content_json,'$.value.required'),0)!=1 ";
     const optionalTotal = Number(db.prepare(`SELECT count(*) AS count ${optionalWhere}`)
@@ -110,13 +146,16 @@ export function startProjection(db, project, identity, options = {}) {
       handoff,
       pending: pendingCount(db, project),
       available,
+      // Stated so a reader can tell a shed projection from a small one, and can see that
+      // a non-default budget is in force rather than wondering why the numbers moved.
+      budget: { bytes: budget.bytes, source: budget.source },
       omitted,
     };
     const next = [];
     if (handoff?.packet?.summary) next.push(`lodestar handoff status --cwd "${project.cwd}"`);
     const revision = currentRevision(db);
     const fits = () => startupBytes(data, revision, project, identity,
-      Object.keys(omitted).length > 0, next) <= STARTUP_BYTES;
+      Object.keys(omitted).length > 0, next) <= budget.bytes;
     // Shedding demotes in one direction: optional context, then advisory work, then the
     // least important required records. Each demotion leaves a stub behind, so the
     // projection always names everything that exists in scope even when it cannot carry
@@ -227,7 +266,8 @@ export async function dispatch(command, parsed, database, io) {
     return withDatabase(openOrInitializeWriteDatabase, database, (db) => {
       const actor = identity(options);
       const project = resolveProject(db, cwd(options));
-      const result = startProjection(db, project, actor, { database });
+      const result = startProjection(db, project, actor,
+        { database, startupBudget: options["--startup-budget"] });
       return scoped(db, project, actor, result.data, result);
     });
   }
