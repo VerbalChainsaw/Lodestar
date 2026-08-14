@@ -63,7 +63,9 @@ function recordFields(row) {
     validateScope(row.scope);
     validateTimestamp(row.created_at, "records.created_at");
     validateTimestamp(row.updated_at, "records.updated_at");
-    return parseStoredContent(row.content_json, { id: row.id });
+    const stored = parseStoredContent(row.content_json, { id: row.id });
+    const { _lodestar: _ignored, ...content } = stored;
+    return content;
   } catch (error) {
     if (error?.code === "database_integrity") throw error;
     invalidStoredRow("record", { id: row.id ?? null }, error);
@@ -84,6 +86,8 @@ function summary(db, row) {
     name: row.name,
     scope: row.scope,
     state: content.state,
+    priority: Number(JSON.parse(row.content_json)._lodestar?.priority ?? 0),
+    revision: Number(JSON.parse(row.content_json)._lodestar?.revision ?? 0),
     aliases,
     updated_at: row.updated_at,
   };

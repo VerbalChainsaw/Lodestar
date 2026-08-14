@@ -1,0 +1,659 @@
+{
+  "schema": 1,
+  "purpose": "Historical governance source-to-managed-asset parity lock",
+  "source_root_hint": "../.lodestar-unified-backup-20260813T180925Z/retired/keel-repository",
+  "allowlist": [
+    "README.md",
+    "00-doctrine/**",
+    "01-skills/**",
+    "02-agents-md-library/**",
+    "03-toolchain.md"
+  ],
+  "entries": [
+    {
+      "path": "00-doctrine/CLAUDE.template.md",
+      "sha256": "73357dafe09dc010b0da79153697876d1b14fc8693981a49f48f21af186e8f24",
+      "bytes": 1933,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/assets/templates/CLAUDE.template.md",
+          "sha256": "73357dafe09dc010b0da79153697876d1b14fc8693981a49f48f21af186e8f24"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "00-doctrine/SOUL.template.md",
+      "sha256": "9fd2952b63bf6f66034e34bff5c8f65259abdf769ab38ed64675e779613c8a55",
+      "bytes": 4271,
+      "action": "rewrite",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/assets/templates/SOUL.template.md",
+          "sha256": "9c398720ce3d29bf10c3aefc739e8b9c17dc9baf2af06bac7957f54cf366b409"
+        }
+      ],
+      "reason": "product identity rewritten to Lodestar; capability content retained"
+    },
+    {
+      "path": "01-skills/center-audit/assets/center-audit-output.schema.json",
+      "sha256": "fed0b514cbeabeaf7d465c58e11bfae605cb736a7a7c7be35146436fb85ab1b3",
+      "bytes": 18011,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/assets/center-audit-output.schema.json",
+          "sha256": "fed0b514cbeabeaf7d465c58e11bfae605cb736a7a7c7be35146436fb85ab1b3"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/evals/behavior-cases.json",
+      "sha256": "955b9ef05f5870d140f82716a0e278c7d8b7888b4129abc7b53f39a04969501c",
+      "bytes": 4375,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/evals/behavior-cases.json",
+          "sha256": "955b9ef05f5870d140f82716a0e278c7d8b7888b4129abc7b53f39a04969501c"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/evals/behavior-rubric.md",
+      "sha256": "cf52fb8cd352702e161779bc06ed467210e754b1e90752cac104b5b38c80e3db",
+      "bytes": 4057,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/evals/behavior-rubric.md",
+          "sha256": "cf52fb8cd352702e161779bc06ed467210e754b1e90752cac104b5b38c80e3db"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/evals/trigger-cases.json",
+      "sha256": "dd0629eccce6b969653118ead05a530f685264ab860debc3f53740d02e85918c",
+      "bytes": 3266,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/evals/trigger-cases.json",
+          "sha256": "dd0629eccce6b969653118ead05a530f685264ab860debc3f53740d02e85918c"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/examples/repair-revalidation-drifted.json",
+      "sha256": "5ad86d2dbd4a59d1ff85d3ae562807796ff429608a6da6e38f46ce9ad9669012",
+      "bytes": 10257,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/examples/repair-revalidation-drifted.json",
+          "sha256": "5ad86d2dbd4a59d1ff85d3ae562807796ff429608a6da6e38f46ce9ad9669012"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/examples/sample-audit-output.json",
+      "sha256": "0f71a332e3adffabc0567d4fac609d6a17e5c5f1f6fbf64e31318e3f86f31cec",
+      "bytes": 11897,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/examples/sample-audit-output.json",
+          "sha256": "0f71a332e3adffabc0567d4fac609d6a17e5c5f1f6fbf64e31318e3f86f31cec"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/LICENSE",
+      "sha256": "960dae46b2ce538c8da1697933880e5b4af88c7fe62da1006f7967ae0c66f926",
+      "bytes": 1085,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/LICENSE",
+          "sha256": "960dae46b2ce538c8da1697933880e5b4af88c7fe62da1006f7967ae0c66f926"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/compact-mode.md",
+      "sha256": "e87fc050f5b7f747abe88af3cba7ec86ee33efe5a4d9d9d9aabdb5219d98d2b5",
+      "bytes": 4651,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/compact-mode.md",
+          "sha256": "e87fc050f5b7f747abe88af3cba7ec86ee33efe5a4d9d9d9aabdb5219d98d2b5"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/evidence-model.md",
+      "sha256": "f3e38c145ae79c14d986f201d6a4bcc798ac90603a56b78d469ec9cf5adbb9c8",
+      "bytes": 7130,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/evidence-model.md",
+          "sha256": "f3e38c145ae79c14d986f201d6a4bcc798ac90603a56b78d469ec9cf5adbb9c8"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/execution-safety.md",
+      "sha256": "f4a2d09a4b691c313eada879991612a87e020650a28d29cea82eb37697e707c1",
+      "bytes": 4623,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/execution-safety.md",
+          "sha256": "f4a2d09a4b691c313eada879991612a87e020650a28d29cea82eb37697e707c1"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/formats.md",
+      "sha256": "19318ae693ea3f5949fa579b6b8952c5195f096c5bb933c27953791689ca8cbc",
+      "bytes": 4065,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/formats.md",
+          "sha256": "19318ae693ea3f5949fa579b6b8952c5195f096c5bb933c27953791689ca8cbc"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/machine-output.md",
+      "sha256": "42b92dce264da923fc6878b012d9aa772f89ca8517356450481361cab78864e4",
+      "bytes": 1378,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/machine-output.md",
+          "sha256": "42b92dce264da923fc6878b012d9aa772f89ca8517356450481361cab78864e4"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/modern-systems.md",
+      "sha256": "cabcd839d176bf36f921308084062e22b276f9064a697ae760aa371bd4871399",
+      "bytes": 10532,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/modern-systems.md",
+          "sha256": "cabcd839d176bf36f921308084062e22b276f9064a697ae760aa371bd4871399"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/multi-perspective-audit.md",
+      "sha256": "3a5aeadf94b689fec0c7b906518d6d105b49fa8fa810a5507c0c7b1e6350e39a",
+      "bytes": 8337,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/multi-perspective-audit.md",
+          "sha256": "3a5aeadf94b689fec0c7b906518d6d105b49fa8fa810a5507c0c7b1e6350e39a"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/multi-perspective-cascade.md",
+      "sha256": "ed89909b5c7ff2a1faea2a1c1481615c6bc34efa0635c09dfdbd86e4c482a18d",
+      "bytes": 9419,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/multi-perspective-cascade.md",
+          "sha256": "ed89909b5c7ff2a1faea2a1c1481615c6bc34efa0635c09dfdbd86e4c482a18d"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/output-format.md",
+      "sha256": "9c19c31f494cd17f04b719feeeebea9a54c993396c6b47087338843ebe1232d6",
+      "bytes": 4856,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/output-format.md",
+          "sha256": "9c19c31f494cd17f04b719feeeebea9a54c993396c6b47087338843ebe1232d6"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/prime-tags.md",
+      "sha256": "dcfb4713b5ecfa68f363177825d618de9fe3de5cbeeaebbafca715c85d8d5f98",
+      "bytes": 1402,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/prime-tags.md",
+          "sha256": "dcfb4713b5ecfa68f363177825d618de9fe3de5cbeeaebbafca715c85d8d5f98"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/severity-rubric.md",
+      "sha256": "1d983b5d7fed54324b52a2a04d53c60399f2506fcdf43262739f8184c3a416fe",
+      "bytes": 3675,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/severity-rubric.md",
+          "sha256": "1d983b5d7fed54324b52a2a04d53c60399f2506fcdf43262739f8184c3a416fe"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/references/worked-example-autogoal-bridge-webhook.md",
+      "sha256": "56c5e0049b8fa437ed8e96eaf37e5257abd033bfb71143bc0165d5141b897e03",
+      "bytes": 10970,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/references/worked-example-autogoal-bridge-webhook.md",
+          "sha256": "56c5e0049b8fa437ed8e96eaf37e5257abd033bfb71143bc0165d5141b897e03"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/scripts/package_skill.py",
+      "sha256": "765c70fc2f481fd01954be2959b0bcc9eae485b5f26cd334c22a78a1c0038a7d",
+      "bytes": 2671,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/scripts/package_skill.py",
+          "sha256": "765c70fc2f481fd01954be2959b0bcc9eae485b5f26cd334c22a78a1c0038a7d"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/scripts/validate_skill.py",
+      "sha256": "f5ef7c6cb0222cd45f71dc76a1d7c09d91c60a67175d4e3f609ded3e5d37ae27",
+      "bytes": 8970,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/scripts/validate_skill.py",
+          "sha256": "f5ef7c6cb0222cd45f71dc76a1d7c09d91c60a67175d4e3f609ded3e5d37ae27"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-audit/SKILL.md",
+      "sha256": "b895462b7c62c4893f14968585e6f8c89e24b33d6f3d18c79706e7f0a67891ba",
+      "bytes": 36435,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-audit/SKILL.md",
+          "sha256": "b895462b7c62c4893f14968585e6f8c89e24b33d6f3d18c79706e7f0a67891ba"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/__pycache__/install_skill.cpython-314.pyc",
+      "sha256": "73b1198616c69253828f24158d698a2c4f751fac057e825c3aba40fe087f84e0",
+      "bytes": 13785,
+      "action": "omit",
+      "targets": [],
+      "reason": "generated Python bytecode is not a source or runtime asset"
+    },
+    {
+      "path": "01-skills/center-multigeometry/__pycache__/validate_skill.cpython-314.pyc",
+      "sha256": "7f0b239b8ae63fd23703735309e9e7593902afc1ab41f5fa068482cd017ff5a6",
+      "bytes": 43719,
+      "action": "omit",
+      "targets": [],
+      "reason": "generated Python bytecode is not a source or runtime asset"
+    },
+    {
+      "path": "01-skills/center-multigeometry/AGENTS.md",
+      "sha256": "82654f5d45de6d3715ebd27eddb8915e8c768403070cdea8265376d7a05dbf77",
+      "bytes": 1574,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/AGENTS.md",
+          "sha256": "82654f5d45de6d3715ebd27eddb8915e8c768403070cdea8265376d7a05dbf77"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/CHANGELOG.md",
+      "sha256": "c4341ca98106c3a3637d6b13ed3306035efb3debdb9fec3b85ab57a9623777d4",
+      "bytes": 1310,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/CHANGELOG.md",
+          "sha256": "c4341ca98106c3a3637d6b13ed3306035efb3debdb9fec3b85ab57a9623777d4"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/evals/trigger-cases.json",
+      "sha256": "f8cb507d35c213768da0547a64d3e63a13ef4ff7ba0791c009148dc787da40a6",
+      "bytes": 1158,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/evals/trigger-cases.json",
+          "sha256": "f8cb507d35c213768da0547a64d3e63a13ef4ff7ba0791c009148dc787da40a6"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/install_skill.py",
+      "sha256": "a24aeb0e84ec5d2f2a8f6ad303f5a653676142ef2ba3c6849a67b125d36a67d9",
+      "bytes": 7536,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/install_skill.py",
+          "sha256": "a24aeb0e84ec5d2f2a8f6ad303f5a653676142ef2ba3c6849a67b125d36a67d9"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/LICENSE",
+      "sha256": "702ab85bb649424b323bada15b0e37c41d180ba97eff5c0932e04da4e75cd3d4",
+      "bytes": 1069,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/LICENSE",
+          "sha256": "702ab85bb649424b323bada15b0e37c41d180ba97eff5c0932e04da4e75cd3d4"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/manifest.json",
+      "sha256": "f8a75873b5509184b8e41177c30db1bd1fb8e159893d53fac10d488eb8ce5e12",
+      "bytes": 865,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/manifest.json",
+          "sha256": "f8a75873b5509184b8e41177c30db1bd1fb8e159893d53fac10d488eb8ce5e12"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/README.md",
+      "sha256": "4d0f1351612b44e4b68701851bf041b95c8275c92874d3a975561798a26dec0d",
+      "bytes": 2811,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/README.md",
+          "sha256": "4d0f1351612b44e4b68701851bf041b95c8275c92874d3a975561798a26dec0d"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/SKILL.md",
+      "sha256": "069dd81e084593546015ce40b4aebb7c612f8e94ea996f1b6cc541afd5483734",
+      "bytes": 10385,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/SKILL.md",
+          "sha256": "069dd81e084593546015ce40b4aebb7c612f8e94ea996f1b6cc541afd5483734"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/center-multigeometry/validate_skill.py",
+      "sha256": "fc4abfd5a0a0aa97b74f488273d623c16a54701494203702ad74bf50ef0714e2",
+      "bytes": 30556,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/center-multigeometry/validate_skill.py",
+          "sha256": "fc4abfd5a0a0aa97b74f488273d623c16a54701494203702ad74bf50ef0714e2"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/codeplan/SKILL.md",
+      "sha256": "c96bc85517ff2fa2012c9b6e04d5dc945ad698feb9b5d0460009db3b31b456f5",
+      "bytes": 24814,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/codeplan/SKILL.md",
+          "sha256": "c96bc85517ff2fa2012c9b6e04d5dc945ad698feb9b5d0460009db3b31b456f5"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/director-protocol/agents/openai.yaml",
+      "sha256": "37d39e71173a3effa82ab0f5113515e5635e22c830949726fa2728227dd96fca",
+      "bytes": 252,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/director-protocol/agents/openai.yaml",
+          "sha256": "37d39e71173a3effa82ab0f5113515e5635e22c830949726fa2728227dd96fca"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/director-protocol/SKILL.md",
+      "sha256": "f2b9de4f734dadf99b85afa92cca1b981d479980c0ed3828ff8e3ff9b7fe0b12",
+      "bytes": 4182,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/director-protocol/SKILL.md",
+          "sha256": "f2b9de4f734dadf99b85afa92cca1b981d479980c0ed3828ff8e3ff9b7fe0b12"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/glimpse/references/hermes-setup.md",
+      "sha256": "a7c5a1c92d44d9ea5a1ffbe9de6ce9eeeac00655c054d416d13b491ba8434e14",
+      "bytes": 2024,
+      "action": "fold",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/references/work-presence.md",
+          "sha256": "0aeaecc66f424b8a947138a5ade8c1605cdf9e0ecac8676f0b6a87ae404d1655"
+        },
+        {
+          "path": "managed-assets/skills/lodestar/references/bootstrap-and-failures.md",
+          "sha256": "1a35271bee9d7161ff5769112dcd1d4f500041199efe6f4a195608413881ec53"
+        }
+      ],
+      "reason": "useful behavior folded into the Lodestar umbrella; retired packaging and topology omitted"
+    },
+    {
+      "path": "01-skills/glimpse/SKILL.md",
+      "sha256": "f62650ccdf96100ef6486c35713fc487e67638bde19d0839a5eefc387228fae6",
+      "bytes": 1854,
+      "action": "fold",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/references/work-presence.md",
+          "sha256": "0aeaecc66f424b8a947138a5ade8c1605cdf9e0ecac8676f0b6a87ae404d1655"
+        }
+      ],
+      "reason": "useful behavior folded into the Lodestar umbrella; retired packaging and topology omitted"
+    },
+    {
+      "path": "01-skills/ladder-audit/README.md",
+      "sha256": "0fdd960ee35ca16d7c439a809e3648e1c64511ac76cd45a8d495ef93b57d33b7",
+      "bytes": 2738,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/ladder-audit/README.md",
+          "sha256": "0fdd960ee35ca16d7c439a809e3648e1c64511ac76cd45a8d495ef93b57d33b7"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/ladder-audit/references/output-template.md",
+      "sha256": "74efcdad722fec6d4e4203888a22b67ed97438880e760a46821589090b4ebe73",
+      "bytes": 4403,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/ladder-audit/references/output-template.md",
+          "sha256": "74efcdad722fec6d4e4203888a22b67ed97438880e760a46821589090b4ebe73"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/ladder-audit/references/worked-examples.md",
+      "sha256": "7b2724b83826f480799429af39868de2e3817bf5b70fd889776f520cebe898c7",
+      "bytes": 5747,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/ladder-audit/references/worked-examples.md",
+          "sha256": "7b2724b83826f480799429af39868de2e3817bf5b70fd889776f520cebe898c7"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "01-skills/ladder-audit/SKILL.md",
+      "sha256": "21634131ea5c7208412188d097b38152533dea1b78061401ea7f27ec2add60ff",
+      "bytes": 15824,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/ladder-audit/SKILL.md",
+          "sha256": "21634131ea5c7208412188d097b38152533dea1b78061401ea7f27ec2add60ff"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "02-agents-md-library/_stub-pattern.AGENTS.md",
+      "sha256": "fd0d49c25dcbc3361aada4a44171a83f376c9f2cf206e9f9ada2948eb29958d6",
+      "bytes": 231,
+      "action": "copy",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md",
+          "sha256": "fd0d49c25dcbc3361aada4a44171a83f376c9f2cf206e9f9ada2948eb29958d6"
+        }
+      ],
+      "reason": "byte-for-byte managed copy"
+    },
+    {
+      "path": "02-agents-md-library/AGENTS.template.md",
+      "sha256": "ee5816f65efddd5b286d2cc179d434845a5c7df9d8893a09b0fb135fabf45de7",
+      "bytes": 5431,
+      "action": "rewrite",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/assets/templates/AGENTS.template.md",
+          "sha256": "b0933ae42e85586c27b6e4dc18d813d069685162a1af04064d61adca4d75c1e6"
+        }
+      ],
+      "reason": "product identity rewritten to Lodestar; capability content retained"
+    },
+    {
+      "path": "02-agents-md-library/minecraft-companion-brain-v2.AGENTS.md",
+      "sha256": "a9645c5b0b7f8b0318b4ad357c9a76dd74ceef6336570261cf21c858e8d75ad6",
+      "bytes": 4853,
+      "action": "omit",
+      "targets": [],
+      "reason": "Project-specific agent instructions for a private repository. Kept inventoried and hash-locked, but not shipped: publishing it would expose private repository names and local filesystem paths to every consumer.",
+      "private": true
+    },
+    {
+      "path": "02-agents-md-library/minecraft-companion.AGENTS.md",
+      "sha256": "d9c34e34d915d0ded304898affedc8585d010ee711b615657514451aa1300f72",
+      "bytes": 1038,
+      "action": "omit",
+      "targets": [],
+      "reason": "Project-specific agent instructions for a private repository. Kept inventoried and hash-locked, but not shipped: publishing it would expose private repository names and local filesystem paths to every consumer.",
+      "private": true
+    },
+    {
+      "path": "02-agents-md-library/SunoSavvy.AGENTS.md",
+      "sha256": "3530fe2dba9a66711a7e77903b792c11c42116a83f9f11962806e85895af584b",
+      "bytes": 4853,
+      "action": "omit",
+      "targets": [],
+      "reason": "Project-specific agent instructions for a private repository. Kept inventoried and hash-locked, but not shipped: publishing it would expose private repository names and local filesystem paths to every consumer.",
+      "private": true
+    },
+    {
+      "path": "03-toolchain.md",
+      "sha256": "b3306911c3a61ba7ff4a590cd49abe0a650fdbb9af6cbe9543407858bb81ce2a",
+      "bytes": 6417,
+      "action": "rewrite",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/references/toolchain.md",
+          "sha256": "738de930cb424ec3ff66db988c58ff8a3d1b75dc6b6b95e0a0e37f6f8363fbe1"
+        }
+      ],
+      "reason": "product identity rewritten to Lodestar; capability content retained"
+    },
+    {
+      "path": "README.md",
+      "sha256": "b1b455f443cf1cb7ed1b80ef953aaea62ae8212f7653e9ee27cedde7803311fc",
+      "bytes": 10953,
+      "action": "fold",
+      "targets": [
+        {
+          "path": "managed-assets/skills/lodestar/references/governance-package.md",
+          "sha256": "712ef650b0c19a24ee60d865ba6c28bbe4c4f8f5ccb345ef51a699ff51d8eb3c"
+        }
+      ],
+      "reason": "useful behavior folded into the Lodestar umbrella; retired packaging and topology omitted"
+    }
+  ]
+}

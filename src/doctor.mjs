@@ -6,6 +6,8 @@ import {
   SCHEMA_VERSION,
 } from "./schema.mjs";
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
+import { diagnoseDecisions } from "./decision.mjs";
+import { diagnoseHandoff } from "./continuity.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { LIMITS, validateTimestamp } from "./validate.mjs";
 
@@ -69,6 +71,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       database,
       schema_version: null,
       database_created_at: null,
+      database_instance_id: null,
       counts: {
         records: null,
         links: null,
@@ -92,7 +95,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   if (!same(tables, SCHEMA_TABLES)) {
     add(
       "schema_tables_invalid",
-      "The database table set does not match schema version 1.",
+      `The database table set does not match schema version ${SCHEMA_VERSION}.`,
       { expected: SCHEMA_TABLES, actual: tables },
     );
   }
@@ -100,7 +103,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   if (!same(indexes, SCHEMA_INDEXES)) {
     add(
       "schema_indexes_invalid",
-      "The database index set does not match schema version 1.",
+      `The database index set does not match schema version ${SCHEMA_VERSION}.`,
       { expected: SCHEMA_INDEXES, actual: indexes },
     );
   }
@@ -108,7 +111,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   if (!definitions.matches) {
     add(
       "schema_definitions_invalid",
-      "The database DDL does not match schema version 1.",
+      `The database DDL does not match schema version ${SCHEMA_VERSION}.`,
       {
         missing: definitions.missing,
         unexpected: definitions.unexpected,
@@ -134,11 +137,14 @@ export function diagnoseDatabase(db, { database = null } = {}) {
 
   let schemaVersion = null;
   let databaseCreatedAt = null;
+  let databaseInstanceId = null;
   if (validColumns.metadata) {
     const metadataRows = db.prepare(
       "SELECT key, substr(value, 1, 4097) AS value, "
         + "length(CAST(value AS BLOB)) AS bytes FROM metadata "
-        + "WHERE key IN ('schema_version', 'created_at') ORDER BY key",
+      + "WHERE key IN ("
+      + "'schema_version', 'created_at', 'database_instance_id'"
+      + ") ORDER BY key",
     ).all();
     const metadata = Object.fromEntries(
       metadataRows.map(({ key, value }) => [key, value]),
@@ -149,6 +155,10 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       : boundedDiagnosticValue(schemaValue, { maximumBytes: 1024 });
     databaseCreatedAt = boundedDiagnosticValue(
       metadata.created_at ?? null,
+      { maximumBytes: 1024 },
+    );
+    databaseInstanceId = boundedDiagnosticValue(
+      metadata.database_instance_id ?? null,
       { maximumBytes: 1024 },
     );
     for (const row of metadataRows) {
@@ -181,6 +191,13 @@ export function diagnoseDatabase(db, { database = null } = {}) {
         { created_at: databaseCreatedAt },
       );
     }
+    if (!/^[0-9a-f]{64}$/u.test(metadata.database_instance_id ?? "")) {
+      add(
+        "database_instance_id_invalid",
+        "The database instance ID is invalid.",
+        { database_instance_id: databaseInstanceId },
+      );
+    }
   }
 
   let foreignKeyRows = [];
@@ -203,7 +220,12 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   }
 
   const counts = {};
-  for (const table of ["records", "links", "aliases", "sources"]) {
+  for (const table of [
+    "records",
+    "links",
+    "aliases",
+    "sources",
+  ]) {
     if (!tables.includes(table)) {
       counts[table] = null;
       continue;
@@ -253,6 +275,21 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     if (!add(issue.code, issue.message, issue.identifiers)) break;
   }
 
+  const decisions = validColumns.records ? diagnoseDecisions(db)
+    : { events: null, invalid: [], healthy: false };
+  if (validColumns.records) {
+    for (const id of decisions.invalid) {
+      if (!add("decision_event_invalid", "A decision event is invalid.", { id })) break;
+    }
+  }
+  const handoff = validColumns.records ? diagnoseHandoff(db)
+    : { records: null, invalid: [], healthy: false };
+  if (validColumns.records) {
+    for (const id of handoff.invalid) {
+      if (!add("handoff_record_invalid", "A continuity record is invalid.", { id })) break;
+    }
+  }
+
   if (validColumns.aliases && validColumns.records) {
     const collisions = db.prepare(
       "SELECT a.alias, a.record_id, r.id AS conflicting_id "
@@ -274,6 +311,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     database,
     schema_version: schemaVersion,
     database_created_at: databaseCreatedAt,
+    database_instance_id: databaseInstanceId,
     counts,
     checks: {
       integrity: integrity.length === 1 && integrity[0] === "ok"
@@ -283,6 +321,8 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       expected_tables: same(tables, SCHEMA_TABLES),
       expected_indexes: same(indexes, SCHEMA_INDEXES),
       expected_definitions: definitions.matches,
+      decisions,
+      handoff,
     },
     issues,
     issues_truncated: omittedIssues > 0,

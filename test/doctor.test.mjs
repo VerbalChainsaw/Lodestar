@@ -33,7 +33,25 @@ test("doctor reports a healthy schema without writing", async (t) => {
     expected_tables: true,
     expected_indexes: true,
     expected_definitions: true,
+    decisions: { events: 0, invalid: [], healthy: true },
+    handoff: { records: 0, invalid: [], healthy: true },
   });
+});
+
+test("doctor validates the stable database instance identity", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.prepare(
+    "UPDATE metadata SET value = ? WHERE key = 'database_instance_id'",
+  ).run("not-a-digest");
+  raw.close();
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(report.healthy, false);
+  assert.ok(
+    report.issues.some(({ code }) => code === "database_instance_id_invalid"),
+  );
 });
 
 test("doctor detects foreign-key and schema-shape problems", async (t) => {
@@ -100,7 +118,7 @@ test("doctor reports objects whose names only resemble SQLite internals", async 
 test("doctor reports forged objects inside SQLite's reserved namespace", async (t) => {
   const file = await fixture(t);
   const raw = new DatabaseSync(file);
-  raw.enableDefensive(false);
+  if (typeof raw.enableDefensive === "function") raw.enableDefensive(false);
   raw.exec(
     "CREATE TRIGGER schema_probe AFTER UPDATE ON records "
       + "BEGIN SELECT 1; END",

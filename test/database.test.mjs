@@ -16,11 +16,16 @@ import test from "node:test";
 import {
   initializeDatabase,
   openConnection,
+  beginImmediate,
+  commit,
   openReadDatabase,
   openWriteDatabase,
   transaction,
 } from "../src/database.mjs";
-import { defaultDatabasePath, resolveDatabasePath } from "../src/paths.mjs";
+import {
+  defaultDatabasePath,
+  resolveDatabasePath,
+} from "../src/paths.mjs";
 
 async function temporaryDirectory(t) {
   const directory = await import("node:fs/promises")
@@ -33,7 +38,7 @@ async function digest(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 
-test("initializes exactly the five-table schema and is read-only when repeated", async (t) => {
+test("initializes the universal-record schema and is read-only when repeated", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "state", "lodestar.db");
   const now = () => new Date("2026-07-30T10:00:00.000Z");
@@ -62,18 +67,22 @@ test("initializes exactly the five-table schema and is read-only when repeated",
     ).all()
       .map(({ name }) => name)
       .filter((name) => !name.toLowerCase().startsWith("sqlite_")),
-    ["aliases", "links", "metadata", "records", "sources"],
+    [
+      "aliases",
+      "links",
+      "metadata",
+      "records",
+      "sources",
+    ],
   );
-  assert.deepEqual(
-    Object.fromEntries(
-      db.prepare("SELECT key, value FROM metadata ORDER BY key").all()
-        .map(({ key, value }) => [key, value]),
-    ),
-    {
-      created_at: "2026-07-30T10:00:00.000Z",
-      schema_version: "1",
-    },
+  const metadata = Object.fromEntries(
+    db.prepare("SELECT key, value FROM metadata ORDER BY key").all()
+      .map(({ key, value }) => [key, value]),
   );
+  assert.equal(metadata.created_at, "2026-07-30T10:00:00.000Z");
+  assert.equal(metadata.schema_version, "3");
+  assert.equal(metadata.database_revision, "0");
+  assert.match(metadata.database_instance_id, /^[0-9a-f]{64}$/u);
   db.close();
 });
 
@@ -101,7 +110,7 @@ test("schema validation rejects forged reserved-prefix objects", async (t) => {
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
   const raw = new DatabaseSync(file);
-  raw.enableDefensive(false);
+  if (typeof raw.enableDefensive === "function") raw.enableDefensive(false);
   raw.exec(
     "CREATE TRIGGER schema_probe AFTER UPDATE ON records "
       + "BEGIN SELECT 1; END",
@@ -198,7 +207,7 @@ test("commit ambiguity is explicit and preserves a possibly committed init", asy
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "1",
+    "3",
   );
   db.close();
 });
@@ -232,7 +241,7 @@ test("definite init commit failure preserves a resumable reservation", async (t)
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "1",
+    "3",
   );
   db.close();
 });
@@ -295,7 +304,7 @@ test("initialization resumes an interrupted zero-byte reservation", async (t) =>
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "1",
+    "3",
   );
   db.close();
 });
@@ -373,7 +382,7 @@ test("concurrent initialization never overwrites another creator", async (t) => 
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "1",
+    "3",
   );
   db.close();
   if (process.platform !== "win32") {
@@ -416,6 +425,33 @@ test("resolves platform data paths without touching the filesystem", () => {
       pathApi: path.posix,
     }),
     "/workspace/custom.db",
+  );
+  assert.equal(
+    resolveDatabasePath({
+      explicit: "/mnt/c/Users/demo/state.db",
+      cwd: "C:\\workspace",
+      platform: "win32",
+      pathApi: path.win32,
+    }),
+    "C:\\Users\\demo\\state.db",
+  );
+  assert.equal(
+    resolveDatabasePath({
+      explicit: "/c/Users/demo/state.db",
+      cwd: "C:\\workspace",
+      platform: "win32",
+      pathApi: path.win32,
+    }),
+    "C:\\Users\\demo\\state.db",
+  );
+  assert.equal(
+    resolveDatabasePath({
+      explicit: "/cygdrive/c/Users/demo/state.db",
+      cwd: "C:\\workspace",
+      platform: "win32",
+      pathApi: path.win32,
+    }),
+    "C:\\Users\\demo\\state.db",
   );
   assert.throws(
     () => resolveDatabasePath({

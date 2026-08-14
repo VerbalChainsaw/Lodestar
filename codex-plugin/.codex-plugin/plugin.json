@@ -1,0 +1,25 @@
+{
+  "name": "lodestar",
+  "version": "1.1.0",
+  "description": "Lodestar startup, knowledge, work, continuity, and decisions integration",
+  "author": {
+    "name": "VerbalChainsaw"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Lodestar",
+    "shortDescription": "One suite for context, work, continuity, and decisions.",
+    "longDescription": "Loads bounded Lodestar context at session start and provides thin, redacted, one-shot knowledge, work, continuity, decision, skill, and doctor operations.",
+    "developerName": "VerbalChainsaw",
+    "category": "Productivity",
+    "capabilities": [
+      "skills",
+      "hooks",
+      "MCP tools"
+    ],
+    "defaultPrompt": [
+      "Use handoff now to save this project context for the next session."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -192,6 +192,7 @@ test("delete cascades aliases, sources, and incoming and outgoing links", async 
   const result = deleteRecord(db, "lodestar project");
   assert.deepEqual(result, {
     id: "project:lodestar",
+    revision: 3,
     deleted: {
       records: 1,
       aliases: 1,

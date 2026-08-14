@@ -1,0 +1,82 @@
+[
+  {
+    "query": "Before you touch the code, investigate why saved drafts disappear after restart and prove the root cause and blast radius.",
+    "should_trigger": true
+  },
+  {
+    "query": "A deep link can open an arbitrary local project path. Root-cause the specific bug, follow the path to the filesystem boundary, and do not patch yet.",
+    "should_trigger": true
+  },
+  {
+    "query": "This PR changed our API response shape and one client now crashes. Audit the regression against main before proposing a fix.",
+    "should_trigger": true
+  },
+  {
+    "query": "Queue messages are sometimes acknowledged without being processed. Trace the causal path and tell me whether this is a real defect.",
+    "should_trigger": true
+  },
+  {
+    "query": "The React status panel says a job is running when nothing is active. Investigate the state propagation without redesigning the UI.",
+    "should_trigger": true
+  },
+  {
+    "query": "Our timestamp migration appears to shift some rows by a day. Perform an evidence-first audit before anyone edits the migration.",
+    "should_trigger": true
+  },
+  {
+    "query": "The feature flag is off in staging but the behavior remains enabled. Find whether config precedence, caching, or code is responsible.",
+    "should_trigger": true
+  },
+  {
+    "query": "The generated TypeScript client accepts a field that the server rejects. Map the generated code to its schema and isolate the contract mismatch.",
+    "should_trigger": true
+  },
+  {
+    "query": "Our coding agent loops after a tool result and falsely reports success. Audit the prompt, tool schema, state transition, and termination path before fixing it.",
+    "should_trigger": true
+  },
+  {
+    "query": "Use $center-audit on the failing persistDraft test and return a repair contract, not an implementation.",
+    "should_trigger": true
+  },
+  {
+    "query": "Review this entire repository for code quality, maintainability, architecture, security, and performance issues.",
+    "should_trigger": false
+  },
+  {
+    "query": "Refactor this 900-line function into clean modules and modernize the code while you are there.",
+    "should_trigger": false
+  },
+  {
+    "query": "Build a new chain-builder feature with drag and drop, templates, and per-step budgets.",
+    "should_trigger": false
+  },
+  {
+    "query": "Change the button color, spacing, and border radius to match the mockup.",
+    "should_trigger": false
+  },
+  {
+    "query": "The root cause is already proven: the boolean is inverted on line 88. Flip it and run the existing regression test.",
+    "should_trigger": false
+  },
+  {
+    "query": "Write unit tests for this already-correct utility function and increase coverage.",
+    "should_trigger": false
+  },
+  {
+    "query": "Explain what this stack trace means in plain English. I am not asking you to inspect the repository.",
+    "should_trigger": false
+  },
+  {
+    "query": "Do a broad security audit and threat model for the whole application.",
+    "should_trigger": false
+  },
+  {
+    "query": "Upgrade all dependencies, replace deprecated APIs, and clean up the lockfile.",
+    "should_trigger": false
+  },
+  {
+    "query": "Optimize the whole monorepo for faster builds and smaller bundles.",
+    "should_trigger": false
+  }
+]
