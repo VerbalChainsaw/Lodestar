@@ -185,6 +185,21 @@ test("the published artifact leaks no local machine or private project detail", 
     (name) => !/\.template\.md$/u.test(name) && !name.startsWith("_"),
   );
   assert.deepEqual(generic, [], "only generic templates may ship");
+
+  // Removing a template is not enough: 1.2.0 shipped a reference table still listing
+  // three deleted ones, which named private projects and pointed at missing files. The
+  // link check above misses this because the table cites them as code, not as links.
+  const shipped = new Set(artifact.files.map(({ path: file }) => file));
+  const dangling = [];
+  for (const { path: file } of artifact.files) {
+    if (!file.endsWith(".md")) continue;
+    const text = await readFile(path.join(ROOT, file), "utf8");
+    for (const [, cited] of text.matchAll(/`(assets\/templates\/[^`]+)`/gu)) {
+      const resolved = path.posix.join(path.posix.dirname(file), "..", cited);
+      if (!shipped.has(path.posix.normalize(resolved))) dangling.push(`${file} -> ${cited}`);
+    }
+  }
+  assert.deepEqual(dangling, [], "packaged docs must not cite templates that do not ship");
 });
 
 test("package metadata and bootstrap have one source of truth", async () => {
