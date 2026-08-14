@@ -11,6 +11,12 @@ import { allocateRevision } from "./revisions.mjs";
 // promotion spends budget, and only a person does that.
 export const pendingScope = (project) => `pending:${project.scope}`;
 
+// A review queue exists to be reviewed. Past a few screens nobody triages it, so the
+// queue is a bounded rolling window rather than an unbounded pile: reaching the cap
+// means review already stopped, and keeping the most recent candidates is more useful
+// than hoarding stale ones. Eviction is reported so it is never silent.
+export const PENDING_MAXIMUM = 100;
+
 const LIST = "SELECT id FROM records WHERE type='pending' AND scope=? "
   + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id";
 
@@ -44,7 +50,10 @@ export function pendingAdd(db, project, identity, rawText, options = {}) {
       pendingScope(project), 0, { v: 1, required: false, text, source,
         actor: identity.actor, session: identity.session, captured_at: now }),
     { createdAt: now, updatedAt: now, revision });
-    return { added: true, record: normalizeRecord(getRecordById(db, id)) };
+    const evicted = db.prepare(`${LIST} LIMIT -1 OFFSET ?`)
+      .all(pendingScope(project), PENDING_MAXIMUM).map(({ id: stale }) => stale);
+    for (const stale of evicted) db.prepare("DELETE FROM records WHERE id=?").run(stale);
+    return { added: true, evicted, record: normalizeRecord(getRecordById(db, id)) };
   }, options.database);
 }
 

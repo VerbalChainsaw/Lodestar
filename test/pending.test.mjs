@@ -7,7 +7,8 @@ import test from "node:test";
 import { initializeDatabase, openWriteDatabase } from "../src/database.mjs";
 import { diagnoseDatabase } from "../src/doctor.mjs";
 import {
-  pendingAdd, pendingCount, pendingDrop, pendingList, pendingPromote, pendingScope,
+  PENDING_MAXIMUM, pendingAdd, pendingCount, pendingDrop, pendingList, pendingPromote,
+  pendingScope,
 } from "../src/pending.mjs";
 import { resolveProject } from "../src/project.mjs";
 import { putRecord } from "../src/records.mjs";
@@ -133,6 +134,49 @@ test("capture rejects control characters and secret material", async (t) => {
     );
   }
   assert.equal(pendingCount(db, project), 0);
+});
+
+test("the queue is a bounded rolling window and reports what it evicted", async (t) => {
+  const { db, file, project } = await fixture(t);
+  let evicted = [];
+  let firstId = null;
+  for (let index = 0; index < PENDING_MAXIMUM + 5; index += 1) {
+    const added = pendingAdd(db, project, IDENTITY, `candidate ${index}`, { database: file, now });
+    firstId ??= added.record.id;
+    if (added.evicted?.length) evicted = evicted.concat(added.evicted);
+  }
+  assert.equal(pendingCount(db, project), PENDING_MAXIMUM);
+  // Reaching the cap means review already stopped; keeping the newest is more useful
+  // than hoarding, and the eviction is reported rather than silent.
+  assert.ok(evicted.includes(firstId), "the oldest candidate is the one evicted");
+  const texts = pendingList(db, project, PENDING_MAXIMUM).records.map(({ data }) => data.text);
+  assert.equal(texts.includes("candidate 0"), false);
+  assert.equal(texts.includes(`candidate ${PENDING_MAXIMUM + 4}`), true);
+});
+
+test("an over-budget startup names the records that caused it", async (t) => {
+  const { db, file, project } = await fixture(t);
+  for (let index = 0; index < 6; index += 1) {
+    putRecord(db, {
+      id: `g:bulk${index}`, type: "rule", name: `Bulk ${index}`, scope: "global",
+      content: { state: "known", value: { required: true, text: "x".repeat(3000) } },
+    }, {});
+  }
+
+  // start is the first command of every session, so this failure stops all work. It has
+  // to say which records to shrink, or the operator is left guessing.
+  try {
+    startProjection(db, project, IDENTITY, { database: file });
+    assert.fail("expected the startup budget to be exceeded");
+  } catch (error) {
+    assert.equal(error.code, "resource_limit");
+    const largest = error.identifiers.largest_required;
+    assert.ok(Array.isArray(largest) && largest.length > 0);
+    assert.ok(largest[0].bytes >= largest.at(-1).bytes, "largest first");
+    assert.match(largest[0].id, /^g:bulk\d$/u);
+    assert.ok(error.identifiers.required_records >= 6);
+    assert.match(error.action, /lodestar get g:bulk\d/u);
+  }
 });
 
 test("doctor reports the standing startup cost of global required records", async (t) => {
