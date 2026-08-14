@@ -62,9 +62,14 @@ const readJson = async (file) => JSON.parse(await readFile(file, "utf8"));
 const sanitize = (input) => Object.fromEntries(Object.entries(input ?? {})
   .filter(([field]) => field !== "_attestation"));
 
+// The whole prompt must be the command and nothing else: that anchoring is the security
+// property, because it stops a passing mention ("don't handoff now") from authorizing a
+// baton write. Decoration that cannot change intent is not part of that property, and
+// rejecting it made a working plugin look broken — `$handoff now` and `/handoff now` are
+// how agents habitually type commands, and refusal sends them to the raw CLI instead.
 export function parseHandoffCommand(prompt) {
-  return /^(?:handoff) (arm|status|checkpoint|now|disarm)$/u
-    .exec(String(prompt).trim())?.[1] ?? null;
+  return /^[/$!>]?\s*(?:lodestar\s+)?handoff\s+(arm|status|checkpoint|now|disarm)\s*[.!]?$/iu
+    .exec(String(prompt).trim())?.[1]?.toLowerCase() ?? null;
 }
 
 // A host may present the same tool as lodestar_x, lodestar__lodestar_x, or
