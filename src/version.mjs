@@ -1,1 +1,1 @@
-export const LODESTAR_VERSION = "1.2.3";
+export const LODESTAR_VERSION = "1.2.4";
