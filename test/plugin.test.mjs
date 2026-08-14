@@ -82,12 +82,23 @@ const packet = {
   evidence: [],
 };
 
-test("only the five exact continuity commands receive host authorization", () => {
+// The security property is that the whole prompt is the command and nothing else, which
+// is what stops a passing mention from authorizing a baton write. Case, spacing, a
+// command sigil and a trailing period are not part of that property. Rejecting them
+// bounced `$handoff now` in Codex Desktop, and the agent fell back to the raw CLI.
+test("only the five continuity commands receive host authorization", () => {
   for (const command of ["arm", "status", "checkpoint", "now", "disarm"]) {
     assert.equal(parseHandoffCommand(`handoff ${command}`), command);
   }
-  for (const prompt of ["handoff now please", "please handoff now", "handoff save",
-    "lodestar handoff now", "Handoff now", "handoff  now"]) {
+  for (const prompt of ["$handoff now", "/handoff now", "!handoff now", "> handoff now",
+    "lodestar handoff now", "Handoff Now", "handoff  now", "handoff now.", "HANDOFF NOW"]) {
+    assert.equal(parseHandoffCommand(prompt), "now", prompt);
+  }
+  // Anything with words of its own around it is prose, not a command. "don't handoff
+  // now" must never authorize the thing it is refusing.
+  for (const prompt of ["handoff now please", "please handoff now", "don't handoff now",
+    "handoff save", "handoff", "handoff now and then disarm", "why did handoff now fail",
+    "```handoff now```", "handoff now?"]) {
     assert.equal(parseHandoffCommand(prompt), null, prompt);
   }
 });
