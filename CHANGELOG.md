@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.4 - 2026-08-14
+
+- Let a resumed session read its own baton. `lodestar_handoff_status` mutates nothing
+  but still required the exact spoken phrase, so checking continuity — the first thing
+  an agent does on resume — was denied and surfaced only as
+  `Missing host attestation`. Reads are now attested directly; every command that
+  writes a lane still requires the phrase.
+- Fail closed instead of crashing when the plugin data directory cannot be written. A
+  hook that throws takes the host session with it.
+
 ## 1.2.3 - 2026-08-14
 
 - Give advisory work the same host-attested identity continuity already used. Codex
