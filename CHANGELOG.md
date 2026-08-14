@@ -13,6 +13,11 @@
 - Let a session supersede its own undelivered baton instead of failing with
   `A pending or claimed project recovery is owned by another session`, which named the
   wrong situation when the owner was the caller.
+- Accept the continuity phrase however it is typed. `$handoff now`, `/handoff now`,
+  `Handoff Now`, `lodestar handoff now` and `handoff now.` are the same command, but only
+  the exact lowercase spelling was authorized, so agents that habitually prefix a sigil
+  were refused and fell back to the raw CLI. The whole prompt must still be the command
+  and nothing else — `don't handoff now` and `handoff now please` remain unauthorized.
 
 ## 1.2.5 - 2026-08-14
 
