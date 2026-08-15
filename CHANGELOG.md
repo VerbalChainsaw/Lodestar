@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.1 - 2026-08-15
+
+- Make the package bootstrap the canonical source for minimal native agent files. The
+  shipped `AGENTS.md` stub now matches that bootstrap byte for byte, so changes to the
+  supported Lodestar commands cannot leave an older hand-written redirect behind.
+- State the ownership boundary explicitly: a project may keep its durable operating
+  rules in a full native agent file, or use the minimal Lodestar bootstrap when startup
+  is proven to carry every required rule. It must not maintain both as competing
+  rulebooks.
+- Reject retired handoff verbs anywhere in published model-facing assets. This catches
+  stale instructions such as `handoff save`, `handoff validate`, and `handoff clear`
+  before they can be installed into Codex, Claude, Hermes, or OpenCode clients.
+
 ## 1.4.0 - 2026-08-14
 
 - The startup budget is yours to set. 16 KiB is about 4K tokens — generous for a small

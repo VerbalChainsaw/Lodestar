@@ -3,6 +3,9 @@
 > Lodestar template. Delete what does not apply. Every line should exist because an
 > agent actually did the wrong thing, not because a rule sounded prudent.
 > A rule you cannot trace to a real failure is a rule you will regret.
+> Use this full template only when version-controlled project rules intentionally
+> remain native. If Lodestar startup returns every required project rule completely,
+> use the minimal bootstrap stub instead. Never maintain the same rule in both.
 
 ## What this project is
 
