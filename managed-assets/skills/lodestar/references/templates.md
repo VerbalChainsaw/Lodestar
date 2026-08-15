@@ -5,10 +5,31 @@ user or a repository's existing instructions.
 
 | Template | Purpose |
 | --- | --- |
-| `assets/templates/AGENTS.template.md` | General repository instructions |
+| `assets/templates/AGENTS.template.md` | Version-controlled project operating rules |
 | `assets/templates/CLAUDE.template.md` | Claude-compatible project guidance |
 | `assets/templates/SOUL.template.md` | Named agent persona guidance |
-| `assets/templates/_stub-pattern.AGENTS.md` | Minimal repository stub |
+| `assets/templates/_stub-pattern.AGENTS.md` | Canonical minimal Lodestar bootstrap |
+
+## Choose one owner for each rule
+
+Lodestar does not inspect or synchronize repository instruction files. The full
+template and the minimal stub are alternatives, not layers to install together:
+
+- Keep a project-specific rule in the repository when it must be versioned with
+  the code or available before and independently of Lodestar startup. Store only
+  a narrow durable decision or source pointer in Lodestar when cross-session
+  projection is useful.
+- Use the minimal stub only after `lodestar start` is proven to return every
+  required project rule completely under the normal startup budget. A record that
+  can be shed, summarized, or retrieved only by follow-up is not bootstrap
+  authority for removing the native rule.
+- Never maintain the same detailed doctrine in both places. Move a rule only with
+  an explicit authority decision, verify the destination, then remove the former
+  copy in the same change.
+
+The minimal stub is the canonical package bootstrap text. It deliberately names
+command families rather than individual subcommands so an evolving capability
+cannot leave a retired command in a generated agent file.
 
 Before copying a template:
 

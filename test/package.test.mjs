@@ -119,6 +119,12 @@ function relativeMarkdownTargets(text) {
   return targets;
 }
 
+test("the minimal agent stub is the canonical package bootstrap", async () => {
+  const stub = await readFile(path.join(ROOT,
+    "codex-plugin/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md"), "utf8");
+  assert.equal(stub, AGENT_BOOTSTRAP.text);
+});
+
 test("the package publishes one executable and only the reduced runtime", () => {
   const artifact = packageArtifact();
   assert.deepEqual(
@@ -150,14 +156,18 @@ test("relative links in packaged Markdown resolve inside the artifact", async ()
 
 test("published model-facing surfaces contain only the Lodestar brand", async () => {
   const pattern = /Context Buddy|context_buddy|Glimpse|Keel|Durable Handoff|DriftGuard|drift_guard/iu;
+  const retiredHandoff = /lodestar handoff (?:save|validate|clear)\b/u;
   const artifact = packageArtifact();
   const contaminated = [];
+  const staleCommands = [];
   for (const { path: file } of artifact.files) {
     if (!/\.(?:json|md|mjs)$/u.test(file) && file !== "package.json") continue;
     const text = await readFile(path.join(ROOT, file), "utf8");
     if (pattern.test(text)) contaminated.push(file);
+    if (retiredHandoff.test(text)) staleCommands.push(file);
   }
   assert.deepEqual(contaminated, []);
+  assert.deepEqual(staleCommands, [], "published files must not name retired handoff commands");
 });
 
 // A published tarball is permanent: npm mirrors it and unpublishing does not erase
