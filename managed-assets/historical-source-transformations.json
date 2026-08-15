@@ -584,10 +584,10 @@
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md",
-          "sha256": "3923308a3dd089b05883eedfb68e98f2e8eb5fde377ea2d46651a2c6a875d154"
+          "sha256": "df1d19ed2a558bc8999b4a5054e6eb66b93bb4331dcda0d0fbb4a390d37e6d73"
         }
       ],
-      "reason": "byte-for-byte managed copy Advisory work guidance now points at the host-attested lodestar_work_* tools, because a shell cannot supply the session id that work records are keyed by."
+      "reason": "Replaced the historical command list with the canonical package bootstrap so generated agent instructions cannot retain retired subcommands."
     },
     {
       "path": "02-agents-md-library/AGENTS.template.md",
@@ -597,10 +597,10 @@
       "targets": [
         {
           "path": "managed-assets/skills/lodestar/assets/templates/AGENTS.template.md",
-          "sha256": "b0933ae42e85586c27b6e4dc18d813d069685162a1af04064d61adca4d75c1e6"
+          "sha256": "20a63e7cafefd7fe72c2300ee50e19bf93bac38efb064d532d309d46abb9a16a"
         }
       ],
-      "reason": "product identity rewritten to Lodestar; capability content retained"
+      "reason": "Product identity rewritten to Lodestar; capability content retained; ownership guard distinguishes native project rules from the canonical minimal bootstrap."
     },
     {
       "path": "02-agents-md-library/minecraft-companion-brain-v2.AGENTS.md",
