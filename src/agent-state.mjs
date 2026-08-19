@@ -23,12 +23,12 @@ import { currentRevision } from "./revisions.mjs";
 import { LIMITS, validatePutInput } from "./validate.mjs";
 import { workDone, workExpire, workStart, workStatus } from "./work.mjs";
 export { normalizeMachinePath, resolveIdentity, resolveProject } from "./project.mjs";
-// The budget belongs to whoever reads the projection, not to Lodestar. 16 KiB is a
-// starting point — about 4K tokens, which is generous for a small local model and
+// The budget belongs to whoever reads the projection, not to Lodestar. 24 KiB is a
+// starting point — about 6K tokens, which is generous for a small local model and
 // negligible for a 200K-context host — so it is a default, not a wall. What keeps it a
 // forcing function is that a raise is deliberate and visible: `start` reports the budget
 // in force and where it came from, and `doctor` measures against the same number.
-export const STARTUP_BYTES = 16 * 1024;
+export const STARTUP_BYTES = 24 * 1024;
 // A floor that always leaves room for the governance record plus a real projection, and
 // a ceiling at the per-record storage limit. Outside these a budget is a typo.
 const BUDGET_FLOOR = 8 * 1024;

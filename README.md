@@ -27,7 +27,7 @@ lodestar start --cwd .
 
 That returns the project identity, its governing rules, current and superseded
 decisions, relevant knowledge, who else is working, and any handoff waiting for
-this session — as JSON, bounded to 16 KiB, with exact follow-up commands when
+this session — as JSON, bounded to 24 KiB by default, with exact follow-up commands when
 something was left out.
 
 ## Why
@@ -152,7 +152,7 @@ raises `startup_budget_low` while there is still room to act.
 `id`, `name` and `kind` in `data.available` — so one `lodestar get` recovers it. `start`
 never refuses to run; the governance record is the last thing demoted.
 
-The default budget is 16 KiB, roughly 4K tokens. Set your own, most immediate first:
+The default budget is 24 KiB, roughly 6K tokens. Set your own, most immediate first:
 
 ```text
 lodestar start --startup-budget 65536      # this run
