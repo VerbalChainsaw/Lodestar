@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.2 - 2026-08-18
+
+- Restore the Golden Rules as package-owned required global defaults. Startup now
+  carries the single-operator prototype assumption, owner-authorized WIP,
+  fold-forward behavior, anti-rollback protections, operating order, surgical
+  reading, evidence boundaries, architecture discipline, and stop condition.
+- Make the startup governance record the sole always-on owner of the universal
+  worktree covenant. `director-protocol` now references that owner instead of
+  maintaining a second copy that can drift.
+- Add semantic regression tests that compare the canonical source, generated
+  payload, and live `lodestar start` projection at the minimum supported 8 KiB
+  budget. A missing clause, stale generated payload, or demoted governance record
+  now fails the build.
+
 ## 1.4.1 - 2026-08-15
 
 - Make the package bootstrap the canonical source for minimal native agent files. The

@@ -485,14 +485,14 @@
       "path": "01-skills/director-protocol/SKILL.md",
       "sha256": "f2b9de4f734dadf99b85afa92cca1b981d479980c0ed3828ff8e3ff9b7fe0b12",
       "bytes": 4182,
-      "action": "copy",
+      "action": "rewrite",
       "targets": [
         {
           "path": "managed-assets/skills/director-protocol/SKILL.md",
-          "sha256": "f2b9de4f734dadf99b85afa92cca1b981d479980c0ed3828ff8e3ff9b7fe0b12"
+          "sha256": "18e3f17e2d73f84f2f3578706b3ad7be8295b717540f2b946b8219ada930df92"
         }
       ],
-      "reason": "byte-for-byte managed copy"
+      "reason": "Universal worktree covenant moved to required Lodestar governance; Director-specific routing retained without a competing copy."
     },
     {
       "path": "01-skills/glimpse/references/hermes-setup.md",
