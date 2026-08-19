@@ -1,0 +1,282 @@
+name: one-shot bootstrap authority repair
+
+on:
+  push:
+    branches:
+      - codex/lodestar-1.4.2-bootstrap-authority-repair
+    paths:
+      - .github/workflows/zz-bootstrap-authority-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.15.0
+
+      - name: Apply guarded source repair
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { readFile, writeFile } from 'node:fs/promises';
+
+          const writeJson = async (file, value) =>
+            writeFile(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+          const replaceOnce = (text, before, after, label) => {
+            const count = text.split(before).length - 1;
+            assert.equal(count, 1, `${label}: expected exactly one source match, found ${count}`);
+            return text.replace(before, after);
+          };
+          const digest = (text) => createHash('sha256')
+            .update(text.replaceAll('\r\n', '\n'), 'utf8').digest('hex');
+
+          // 1. Golden Rules: current user requirements are machine-global invariants.
+          const governancePath = 'managed-assets/governance.json';
+          const governance = JSON.parse(await readFile(governancePath, 'utf8'));
+          const sections = new Map(governance.data.sections.map((section) => [section.id, section]));
+          for (const id of ['authority', 'visible-state', 'workflow-routing',
+            'implementation-verification']) {
+            assert.ok(sections.has(id), `missing governance section ${id}`);
+          }
+
+          sections.get('authority').rules[0] =
+            'Higher-priority system, developer, and current user instructions remain authoritative. '
+            + 'These Golden Rules are machine-global invariants. Repo-local AGENTS.md, CLAUDE.md, '
+            + 'skills, plans, and project contracts may specialize them but may never weaken, negate, '
+            + 'or contradict them; on conflict, the Golden Rules win unless a higher-priority current '
+            + 'instruction explicitly overrides the specific rule.';
+
+          sections.get('visible-state').rules = [
+            'Maintain a concise visible TODO list and scratchpad throughout work. Update them whenever task state, evidence, assumptions, constraints, or durable decisions materially change.',
+            'Use ACCEPTED and DEAD only for durable decisions, assertions, engineering claims, chosen or rejected changes, or knowledge that must be carried forward or explicitly omitted. State the concise evidence or rationale. Do not label routine progress, transient findings, tool results, narration, or ordinary commentary ACCEPTED or DEAD.',
+            'Keep visible working state operational and brief. It must not replace implementation, become a process diary, expose private chain-of-thought, or disclose hidden reasoning.'
+          ];
+
+          sections.get('workflow-routing').title = 'Mandatory non-trivial engineering workflows; bounded execution';
+          sections.get('workflow-routing').rules = [
+            'Before mutation on every non-trivial change, invoke both codeplan and center-audit. Invocation is mandatory; neither workflow may be skipped merely because the mechanism looks obvious or the defect appears understood.',
+            'Use codeplan full mode when multiple credible mechanisms exist. When one viable mechanism appears to exist, use its bounded single-mechanism mode to verify that the mechanism is truly singular, requirement-faithful, compatible with current WIP, and architecturally sound; do not manufacture variants.',
+            'Use center-audit full defect mode for an unresolved suspected defect. Otherwise use its bounded pre-change center mode to identify the owning seam, relevant WIP overlap, changed contract, frozen accepted capabilities, blast radius, and direct verification boundary; do not expand into a broad audit.',
+            'Keep both workflows proportional to the requested change. They may not create repository-wide review, speculative edge-case hunting, broad test construction, automatic delegation, or process theater.',
+            'Do not automatically invoke TDD or test-first, soak, broad verification, or completion-review machinery. Tests remain evidence, not the product.'
+          ];
+
+          const verification = sections.get('implementation-verification');
+          const oldFreeze = verification.rules.findIndex((rule) =>
+            rule.startsWith('Verify independently through observable real state'));
+          assert.notEqual(oldFreeze, -1, 'missing accepted-capability freeze rule');
+          verification.rules[oldFreeze] =
+            'Verify independently through observable real state rather than implementation self-report. '
+            + 'After a capability passes real acceptance, freeze its exercised contract. A higher-layer '
+            + 'change may traverse that frozen capability once when necessary to prove the changed '
+            + 'higher-layer contract, but traversal does not reopen lower-layer certification. Reopen a '
+            + 'frozen capability only when source in its owning contract changed, a dependency or contract '
+            + 'it relies on changed, or new runtime evidence directly contradicts the prior acceptance. '
+            + 'Repetition, noun, quantity, caller, or scenario variation, preparation, curiosity, and '
+            + 'confidence-building are not reopening evidence.';
+
+          const startupIndex = governance.data.sections.findIndex(({ id }) => id === 'startup-completeness');
+          const startupSection = {
+            id: 'startup-completeness',
+            title: 'Bootstrap completeness and transport recovery',
+            rules: [
+              'Startup authority is all-or-nothing. If any required rule, current decision, required continuity state, or user task is clipped, truncated, malformed, unparseable, contradictory, or otherwise incomplete, stop all repository reads, searches, mutations, provider calls, and tests. Bootstrap recovery itself is the only allowed activity until authority is complete.',
+              'A startup attempt whose response is lost or clipped by transport does not consume startup authority. Retrying the same Lodestar startup operation in the same agent session is explicitly permitted and required; same-session retries are recovery, not a second independent bootstrap.',
+              'If the host has already injected a complete context beginning with the Lodestar SessionStart marker, apply that injected context and do not manually run lodestar start through a shell or tool.',
+              'Never create or request a fresh agent session solely because one startup response was clipped. Recover the current session through the same-session bootstrap path; if the host cannot carry the minimum complete authority packet, report a transport incompatibility and stop.'
+            ]
+          };
+          if (startupIndex === -1) governance.data.sections.splice(1, 0, startupSection);
+          else governance.data.sections[startupIndex] = startupSection;
+          governance.updated_at = '2026-08-19T09:21:24.000Z';
+          governance.sources[0].metadata.role = 'sole package-owned global operating doctrine and bootstrap completeness authority';
+          governance.data.recovery_invariants = [
+            'managed-assets/governance.json is the sole canonical source for g:lodestar:required-governance',
+            'the generated runtime payload and docs/GOLDEN-RULES.md exactly reflect that source',
+            'Codex SessionStart injects complete required authority within its declared transport limit and Codex bootstrap instructions never require a redundant shell start',
+            'transport clipping is recoverable by same-session bootstrap retry and never poisons an otherwise valid session',
+            'repo-local contracts may specialize but never weaken or contradict the Golden Rules',
+            'accepted lower-layer capabilities remain frozen unless changed ownership code, changed dependency contracts, or contradictory runtime evidence reopens them',
+            'no other required global record duplicates or contradicts this operating doctrine',
+            'legacy governance IDs remain, if needed, only as non-required tombstones or migration history'
+          ];
+          await writeJson(governancePath, governance);
+
+          // 2. Bootstrap: automatic host injection owns Codex; transport loss is retryable.
+          const bootstrap = {
+            version: 3,
+            instructions: [
+              'If the current session already contains a complete Lodestar SessionStart context, apply it and do not manually invoke lodestar start.',
+              'Otherwise run lodestar start --cwd <cwd> and apply all returned required authority before any repository inspection or execution.',
+              'If startup output is clipped, truncated, malformed, or unparseable, do nothing except retry the same startup operation in the same session. A transport-failed attempt does not consume the startup obligation.',
+              'No repository reads, searches, mutations, provider calls, tests, or other task work are allowed while required startup authority is incomplete.',
+              'Use returned project, decisions, knowledge, advisory work, and continuity only after required authority is complete. Retrieve exact additional knowledge with lodestar get/find/links.',
+              'Never infer missing authority or create a fresh session solely to recover clipped startup output.'
+            ],
+            text: '# Lodestar Bootstrap\n\nIf this session already contains a complete context beginning with `Lodestar SessionStart COMPLETE`, apply that injected Lodestar context and **do not** manually run `lodestar start`. The host-managed SessionStart path owns bootstrap for that session.\n\nIf no complete Lodestar SessionStart context is present, run:\n\n`lodestar start --cwd "<current working directory>"`\n\nApply all returned required authority before doing any task work. A startup call is idempotent for the same session. If the tool or shell reports clipped/truncated output, the JSON is malformed or unparseable, or required authority is incomplete, **stop everything except bootstrap recovery and retry the same startup operation in the same session**. A transport-failed attempt does not consume the startup obligation. Do not inspect the repository, search files, mutate anything, call a provider, or run tests while startup authority is incomplete. Do not create a fresh session merely to recover clipped output.\n\nAfter authority is complete, use the returned project, decision facts and dead values, relevant knowledge, advisory active work, and eligible continuity recovery as current context. Use `lodestar get`, `lodestar find`, and `lodestar links` for exact additional knowledge, and use the `work`, `handoff`, `decision`, `skills`, and `doctor` namespaces for their capabilities.\n'
+          };
+          await writeJson('managed-assets/bootstrap.json', bootstrap);
+
+          // Keep the canonical minimal native stub byte-identical to bootstrap text.
+          await writeFile('managed-assets/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md',
+            bootstrap.text, 'utf8');
+          await writeFile('codex-plugin/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md',
+            bootstrap.text, 'utf8');
+
+          // 3. Make skill contracts obey mandatory global invocation without adding ceremony.
+          const codeplanPath = 'managed-assets/skills/codeplan/SKILL.md';
+          let codeplan = await readFile(codeplanPath, 'utf8');
+          const codeplanAnchor = '# Codeplan\n\n';
+          assert.ok(codeplan.startsWith('---\n') && codeplan.includes(codeplanAnchor));
+          const codeplanInsert = `## Lodestar mandatory invocation\n\nThe Golden Rules invoke codeplan before every non-trivial change. This requirement\noverrides conditional wording elsewhere in this skill. Use **full mode** when two or\nmore credible mechanisms exist. When one viable mechanism appears to exist, use a\n**bounded single-mechanism mode**: confirm that it is genuinely singular, preserves\nall user requirements and current WIP, fits the owning architecture and contracts,\nand has a direct verification boundary; record the durable mechanism decision and\nexit. Do not manufacture variants, scoring, delegation, or planning artifacts merely\nto satisfy invocation. Trivial changes remain outside this requirement.\n\n`;
+          if (!codeplan.includes('## Lodestar mandatory invocation')) {
+            codeplan = codeplan.replace(codeplanAnchor, codeplanAnchor + codeplanInsert);
+          }
+          await writeFile(codeplanPath, codeplan, 'utf8');
+
+          const centerPath = 'managed-assets/skills/center-audit/SKILL.md';
+          let center = await readFile(centerPath, 'utf8');
+          const centerAnchor = '# CENTER-AUDIT: Evidence-Gated Goalpost / Delta / Fusion Method\n\n';
+          assert.ok(center.includes(centerAnchor));
+          const centerInsert = `## Lodestar mandatory pre-change invocation\n\nThe Golden Rules invoke center-audit before every non-trivial change. This requirement\noverrides conditional invocation wording elsewhere in this skill. Use the full defect\naudit when a suspected defect has an unresolved cause or repair boundary. Otherwise\nuse **BOUNDED PRE-CHANGE CENTER** mode: read only enough live evidence to identify the\nowning seam, relevant WIP overlap, the exact contract being changed, accepted lower\ncapabilities that remain frozen, plausible blast radius, and the direct verification\nboundary. Then exit read-only audit mode and implement. Do not broaden into general\nreview, edge-case hunting, repository archaeology, or certification of already-accepted\ncapabilities. Trivial changes remain outside this requirement.\n\n`;
+          if (!center.includes('## Lodestar mandatory pre-change invocation')) {
+            center = center.replace(centerAnchor, centerAnchor + centerInsert);
+          }
+          await writeFile(centerPath, center, 'utf8');
+
+          // 4. Reduce dynamic startup duplication and return a transport-sized projection.
+          const statePath = 'src/agent-state.mjs';
+          let state = await readFile(statePath, 'utf8');
+          state = replaceOnce(state,
+            'export const STARTUP_BYTES = 24 * 1024;',
+            'export const STARTUP_BYTES = 12 * 1024;',
+            'startup default budget');
+          state = replaceOnce(state,
+            'export const operationResult = (data, options = {}) => ({ data,\n  revision: options.revision ?? 0, scope: options.scope ?? scope(),\n  more: options.more ?? false, next: options.next ?? [] });',
+            `export const operationResult = (data, options = {}) => ({ data,\n  revision: options.revision ?? 0, scope: options.scope ?? scope(),\n  more: options.more ?? false, next: options.next ?? [] });\n\nfunction startupGovernance(record) {\n  const data = record.data;\n  return {\n    id: record.id, kind: record.kind, priority: record.priority, required: true,\n    scope: record.scope, data: { id: data.id, kind: data.kind, name: data.name,\n      priority: data.priority, required: true, scope: data.scope, sections: data.sections,\n      recovery_invariants: data.recovery_invariants, v: data.v },\n  };\n}\n\nconst startupDecisions = (state) => ({\n  enabled: state.enabled, projection: state.projection,\n});`,
+            'startup compact helpers');
+          state = replaceOnce(state,
+            'const required = [REQUIRED_GOVERNANCE,\n      ...storedRequired.filter(({ id }) => id !== REQUIRED_GOVERNANCE.id)];',
+            'const required = [startupGovernance(REQUIRED_GOVERNANCE),\n      ...storedRequired.filter(({ id }) => id !== REQUIRED_GOVERNANCE.id)];',
+            'startup governance projection');
+          state = replaceOnce(state,
+            'decisions: decisionProjection(db, project),',
+            'decisions: startupDecisions(decisionProjection(db, project)),',
+            'startup decision projection');
+          state = replaceOnce(state,
+            '    if (!fits() && data.handoff) compactHandoff();\n    const more = Object.keys(omitted).length > 0;\n    return { data, revision, more, next };',
+            `    if (!fits() && data.handoff) compactHandoff();\n    // Decisions are durable authority, but their rendered projection can be recovered\n    // exactly with decision show. If they alone would overrun transport, omit only that\n    // projection and mark startup authority incomplete rather than returning oversized\n    // JSON that a host can silently clip.\n    if (!fits() && data.decisions.projection) {\n      data.decisions = { enabled: data.decisions.enabled, projection: \"\", omitted: true };\n      omitted.decisions = 1;\n      next.unshift(\`lodestar decision show --cwd \"\${project.cwd}\"\`);\n    }\n    if (!fits()) throw lodestarError(\"startup_transport_limit\",\n      \"Required startup governance cannot fit the configured transport budget.\", {\n        identifiers: { budget: budget.bytes, project: project.scope },\n        action: \"Increase the startup budget only to a host-supported value.\",\n      });\n    data.authority_complete = !omitted.required && !omitted.decisions;\n    const more = Object.keys(omitted).length > 0;\n    return { data, revision, more, next };`,
+            'final startup transport guard');
+          await writeFile(statePath, state, 'utf8');
+
+          // 5. Codex SessionStart is the sole normal Codex bootstrap path.
+          const runtimePath = 'codex-plugin/scripts/lodestar-runtime.mjs';
+          let runtime = await readFile(runtimePath, 'utf8');
+          runtime = replaceOnce(runtime,
+            'export const STARTUP_CONTEXT_PREFIX = "Lodestar startup context (v1):\\n";',
+            'export const STARTUP_CONTEXT_PREFIX = "Lodestar SessionStart COMPLETE (v2):\\n";',
+            'session start marker');
+          runtime = replaceOnce(runtime,
+            '  const context = `${STARTUP_CONTEXT_PREFIX}${canonical(envelope.data)}`;\n  if (Buffer.byteLength(context, "utf8") > CODEX_SESSION_CONTEXT_LIMIT_BYTES) {',
+            `  if (envelope.data.authority_complete !== true\n      || envelope.data.omitted?.required || envelope.data.omitted?.decisions) {\n    throw new Error(\"Lodestar SessionStart did not carry complete required authority\");\n  }\n  const context = \`\${STARTUP_CONTEXT_PREFIX}\${canonical(envelope.data)}\`;\n  if (Buffer.byteLength(context, \"utf8\") > CODEX_SESSION_CONTEXT_LIMIT_BYTES) {`,
+            'session start completeness gate');
+          await writeFile(runtimePath, runtime, 'utf8');
+
+          // 6. Focused regression tests for the exact failures observed tonight.
+          const regression = `import assert from \"node:assert/strict\";\nimport { mkdtemp, rm } from \"node:fs/promises\";\nimport { Readable } from \"node:stream\";\nimport os from \"node:os\";\nimport path from \"node:path\";\nimport test from \"node:test\";\n\nimport { AGENT_BOOTSTRAP } from \"../src/bootstrap.mjs\";\nimport { runCli } from \"../src/cli.mjs\";\n\nasync function invoke(args) {\n  let stdout = \"\", stderr = \"\";\n  const exitCode = await runCli(args, { stdin: Readable.from([\"\"]),\n    stdout: { write: (value) => { stdout += value; } },\n    stderr: { write: (value) => { stderr += value; } } });\n  assert.equal(exitCode, 0, stderr);\n  return { text: stdout, value: JSON.parse(stdout) };\n}\n\ntest(\"bootstrap transport failure is same-session recoverable rather than session-poisoning\", async (t) => {\n  const directory = await mkdtemp(path.join(os.tmpdir(), \"lodestar-bootstrap-retry-\"));\n  t.after(() => rm(directory, { recursive: true, force: true }));\n  const database = path.join(directory, \"lodestar.db\");\n  const common = [\"start\", \"--db\", database, \"--cwd\", directory,\n    \"--session\", \"same-session\", \"--agent\", \"codex\", \"--harness\", \"codex\"];\n  const first = await invoke(common);\n  const retry = await invoke(common);\n  assert.equal(retry.value.data.authority_complete, true);\n  assert.deepEqual(retry.value.data.required, first.value.data.required);\n  assert.equal(retry.value.data.handoff, first.value.data.handoff);\n  assert.ok(Buffer.byteLength(retry.text, \"utf8\") <= 12 * 1024);\n});\n\ntest(\"bootstrap forbids redundant Codex shell start and all work on partial authority\", () => {\n  assert.match(AGENT_BOOTSTRAP.text, /SessionStart COMPLETE/u);\n  assert.match(AGENT_BOOTSTRAP.text, /do not.*manually run.*lodestar start/iu);\n  assert.match(AGENT_BOOTSTRAP.text, /retry the same startup operation in the same session/iu);\n  assert.match(AGENT_BOOTSTRAP.text, /Do not inspect the repository, search files, mutate anything, call a provider, or run tests/iu);\n  assert.doesNotMatch(AGENT_BOOTSTRAP.text, /run exactly once/iu);\n  assert.doesNotMatch(AGENT_BOOTSTRAP.text, /inspect only what is safely available/iu);\n});\n`;
+          await writeFile('test/bootstrap-authority.test.mjs', regression, 'utf8');
+
+          // 7. Update tests that inspect the startup projection and marker.
+          const pluginTestPath = 'test/plugin.test.mjs';
+          let pluginTest = await readFile(pluginTestPath, 'utf8');
+          pluginTest = replaceOnce(pluginTest,
+            '  assert.ok(governance.data.sections.find(({ id }) => id === "workflow-routing"));',
+            `  assert.ok(governance.data.sections.find(({ id }) => id === \"workflow-routing\"));\n  assert.ok(governance.data.sections.find(({ id }) => id === \"startup-completeness\"));\n  assert.equal(projection.authority_complete, true);`,
+            'plugin governance assertions');
+          await writeFile(pluginTestPath, pluginTest, 'utf8');
+
+          const stateTestPath = 'test/agent-state.test.mjs';
+          let stateTest = await readFile(stateTestPath, 'utf8');
+          stateTest = replaceOnce(stateTest,
+            '  assert.ok(first.value.data.required[0].data.sections\n    .some(({ id }) => id === "workflow-routing"));',
+            `  assert.ok(first.value.data.required[0].data.sections\n    .some(({ id }) => id === \"workflow-routing\"));\n  assert.ok(first.value.data.required[0].data.sections\n    .some(({ id }) => id === \"startup-completeness\"));\n  assert.equal(first.value.data.authority_complete, true);`,
+            'agent state authority assertions');
+          await writeFile(stateTestPath, stateTest, 'utf8');
+
+          // 8. Historical transformation hashes for intentionally rewritten managed assets.
+          const transformationsPath = 'managed-assets/historical-source-transformations.json';
+          const transformations = JSON.parse(await readFile(transformationsPath, 'utf8'));
+          for (const target of [
+            ['managed-assets/skills/codeplan/SKILL.md', 'Golden Rules now require bounded codeplan invocation on every non-trivial change.'],
+            ['managed-assets/skills/center-audit/SKILL.md', 'Golden Rules now require bounded center-audit invocation on every non-trivial change.'],
+            ['managed-assets/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md', 'Canonical bootstrap now prefers host SessionStart injection and permits same-session transport recovery.']
+          ]) {
+            const [path, reason] = target;
+            const entry = transformations.entries.find((item) =>
+              item.targets.some((candidate) => candidate.path === path));
+            assert.ok(entry, `missing transformation entry for ${path}`);
+            const transformed = entry.targets.find((candidate) => candidate.path === path);
+            transformed.sha256 = digest(await readFile(path, 'utf8'));
+            entry.action = 'rewrite';
+            entry.reason = reason;
+          }
+          await writeJson(transformationsPath, transformations);
+
+          // 9. Version surfaces.
+          const VERSION = '1.4.2';
+          const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
+          assert.equal(packageJson.version, '1.4.1');
+          packageJson.version = VERSION;
+          await writeJson('package.json', packageJson);
+          const plugin = JSON.parse(await readFile('codex-plugin/.codex-plugin/plugin.json', 'utf8'));
+          plugin.version = VERSION;
+          await writeJson('codex-plugin/.codex-plugin/plugin.json', plugin);
+          await writeFile('src/version.mjs', `export const LODESTAR_VERSION = \"${VERSION}\";\n`, 'utf8');
+
+          let changelog = await readFile('CHANGELOG.md', 'utf8');
+          const section = `## 1.4.2 - 2026-08-19\n\n- Make startup transport failure recoverable in the same session instead of poisoning the session after one clipped response. Codex SessionStart is the normal Codex owner; the bootstrap no longer orders a redundant shell start when complete injected context already exists.\n- Restore the Golden Rules as non-weakenable machine invariants: repo-local contracts may specialize them but cannot negate them. Non-trivial changes invoke both codeplan and center-audit in bounded modes, and ACCEPTED/DEAD labels are reserved for durable engineering state.\n- Freeze earned capability. Higher-level verification may traverse accepted lower-layer mechanics without reopening their certification; only changed owning code/contracts or contradictory runtime evidence can reopen them.\n- Reduce startup duplication, use a 12 KiB default envelope, and fail before returning oversized required authority rather than emitting JSON that a host can silently clip.\n\n`;
+          assert.ok(changelog.startsWith('# Changelog\n\n'));
+          changelog = changelog.replace('# Changelog\n\n', `# Changelog\n\n${section}`);
+          await writeFile('CHANGELOG.md', changelog, 'utf8');
+
+          const release = `# Lodestar 1.4.2\n\nBootstrap is recoverable, Golden Rules are invariant, and earned capability stays earned.\n\n![Lodestar 1.4.2](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-v1.4.2-social.png)\n\n## What changed\n\n- Codex uses the bounded SessionStart injection as its normal startup authority and does not manually replay the same payload through a shell.\n- A clipped startup response may be retried in the same session. No repository read, provider call, mutation, or test may occur until required authority is complete.\n- Project rules may specialize the Golden Rules but cannot weaken them.\n- Every non-trivial change invokes bounded codeplan and center-audit workflows.\n- Accepted lower-layer capabilities remain frozen unless changed owning code/contracts or contradictory runtime evidence reopens them.\n- Startup uses a smaller transport envelope and refuses to emit oversized required authority.\n\n## Upgrade\n\n\`\`\`text\nnpm install --global lodestar-agent-context@1.4.2\nlodestar skills sync --target all\nlodestar skills verify --target all\n\`\`\`\n\nRequires Node.js 24.15.0 or newer.\n`;
+          await writeFile('docs/releases/v1.4.2.md', release, 'utf8');
+          NODE
+
+      - name: Generate managed artifacts and release card
+        shell: bash
+        run: |
+          npm run assets:build
+          node scripts/build-release-social.mjs 1.4.2
+
+      - name: Focused bootstrap and governance checks
+        shell: bash
+        run: |
+          node --test test/bootstrap-authority.test.mjs test/agent-state.test.mjs test/plugin.test.mjs test/package.test.mjs
+
+      - name: Full repository and package validation
+        shell: bash
+        run: |
+          npm test
+          npm run pack:check
+          git diff --check
+
+      - name: Commit repaired 1.4.2 source and generated surfaces
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Lodestar 1.4.2: repair bootstrap authority and frozen capability"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
