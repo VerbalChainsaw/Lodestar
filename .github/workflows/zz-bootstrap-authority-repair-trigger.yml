@@ -1,6 +1,9 @@
 name: trigger bootstrap authority repair
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - codex/lodestar-1.4.2-bootstrap-authority-repair
@@ -15,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: codex/lodestar-1.4.2-bootstrap-authority-repair
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -50,4 +54,4 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m "Lodestar 1.4.2: repair bootstrap authority and frozen capability"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin HEAD:codex/lodestar-1.4.2-bootstrap-authority-repair
