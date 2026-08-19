@@ -108,7 +108,7 @@ use the same revision allocator and record transaction core as `put`.
 
 | Resource | Limit |
 | --- | ---: |
-| Startup envelope | 16 KiB |
+| Startup envelope | 24 KiB by default |
 | Handoff head within startup | 4 KiB |
 | Put JSON input | 1 MiB |
 | One CLI argument / all arguments | 16 KiB / 64 KiB |
