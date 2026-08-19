@@ -36,6 +36,33 @@ jobs:
           NODE
           node .bootstrap-authority-repair.mjs
           rm .bootstrap-authority-repair.mjs
+      - name: Advance bootstrap schema contract to v3
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFile, writeFile } from 'node:fs/promises';
+          const replaceOnce = (text, before, after, label) => {
+            const count = text.split(before).length - 1;
+            assert.equal(count, 1, `${label}: expected one match, found ${count}`);
+            return text.replace(before, after);
+          };
+
+          let builder = await readFile('scripts/build-managed-assets.mjs', 'utf8');
+          builder = replaceOnce(builder,
+            'if (bootstrap?.version !== 2 || typeof bootstrap.text !== "string"',
+            'if (bootstrap?.version !== 3 || typeof bootstrap.text !== "string"',
+            'managed bootstrap schema gate');
+          await writeFile('scripts/build-managed-assets.mjs', builder, 'utf8');
+
+          let packageTest = await readFile('test/package.test.mjs', 'utf8');
+          packageTest = replaceOnce(packageTest,
+            '  assert.match(payload.bootstrap.text, /truncated or incomplete/u);',
+            '  assert.equal(payload.bootstrap.version, 3);\n'
+              + '  assert.match(payload.bootstrap.text, /retry the same startup operation in the same session/iu);',
+            'bootstrap package test');
+          await writeFile('test/package.test.mjs', packageTest, 'utf8');
+          NODE
       - name: Generate managed artifacts and release card
         run: |
           npm run assets:build
