@@ -1,0 +1,53 @@
+name: trigger bootstrap authority repair
+
+on:
+  push:
+    branches:
+      - codex/lodestar-1.4.2-bootstrap-authority-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.15.0
+      - name: Extract and execute guarded repair script
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          const workflow = await readFile('.github/workflows/zz-bootstrap-authority-repair.yml', 'utf8');
+          const match = /node --input-type=module <<'NODE'\n([\s\S]*?)\n          NODE\n/.exec(workflow);
+          if (!match) throw new Error('Could not extract guarded repair script');
+          const source = match[1].replace(/^          /gmu, '');
+          await writeFile('.bootstrap-authority-repair.mjs', source, 'utf8');
+          NODE
+          node .bootstrap-authority-repair.mjs
+          rm .bootstrap-authority-repair.mjs
+      - name: Generate managed artifacts and release card
+        run: |
+          npm run assets:build
+          node scripts/build-release-social.mjs 1.4.2
+      - name: Focused bootstrap and governance checks
+        run: node --test test/bootstrap-authority.test.mjs test/agent-state.test.mjs test/plugin.test.mjs test/package.test.mjs
+      - name: Full repository and package validation
+        run: |
+          npm test
+          npm run pack:check
+          git diff --check
+      - name: Commit repaired source and generated surfaces
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Lodestar 1.4.2: repair bootstrap authority and frozen capability"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
