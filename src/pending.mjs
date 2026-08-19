@@ -6,7 +6,7 @@ import { getRecordById, normalizeRecord, writeRecordSnapshot } from "./records.m
 import { allocateRevision } from "./revisions.mjs";
 
 // Candidates live in a scope startup never selects. `start` reads scope IN ('global', the
-// project scope), so a quarantined record costs the 16 KiB startup budget nothing until
+// project scope), so a quarantined record costs the startup budget nothing until
 // it is deliberately promoted. Capture can therefore be automatic and generous; only
 // promotion spends budget, and only a person does that.
 export const pendingScope = (project) => `pending:${project.scope}`;

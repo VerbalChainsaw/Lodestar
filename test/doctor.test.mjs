@@ -9,6 +9,7 @@ import {
   initializeDatabase,
   openDiagnosticDatabase,
 } from "../src/database.mjs";
+import { STARTUP_BYTES } from "../src/agent-state.mjs";
 import { diagnoseDatabase } from "../src/doctor.mjs";
 
 async function fixture(t) {
@@ -39,7 +40,7 @@ test("doctor reports a healthy schema without writing", async (t) => {
   });
   // An empty registry still carries the injected governance record, so the standing
   // startup cost is never zero and the remaining headroom is the budget minus it.
-  assert.equal(budget.budget_bytes, 16 * 1024);
+  assert.equal(budget.budget_bytes, STARTUP_BYTES);
   assert.equal(budget.global_required_records, 1);
   assert.ok(budget.global_required_bytes > 0);
   assert.equal(

@@ -12,7 +12,9 @@ import {
 } from "../src/pending.mjs";
 import { resolveProject } from "../src/project.mjs";
 import { putRecord } from "../src/records.mjs";
-import { requiredBudgetNotice, startProjection } from "../src/agent-state.mjs";
+import {
+  requiredBudgetNotice, startProjection, STARTUP_BYTES,
+} from "../src/agent-state.mjs";
 import { extractNotes } from "../codex-plugin/scripts/lodestar-runtime.mjs";
 
 const IDENTITY = { actor: "agent:session", agent: "agent", session: "session", harness: null };
@@ -47,7 +49,7 @@ test("a captured candidate costs the startup budget nothing", async (t) => {
 
   const after = startProjection(db, project, IDENTITY, { database: file });
   // The quarantine scope is not one `start` selects, so capture can be automatic without
-  // competing for the 16 KiB every session must carry.
+  // competing for the startup budget every session must carry.
   assert.equal(after.data.context.length, before.data.context.length);
   assert.equal(after.data.required.length, before.data.required.length);
   assert.equal(after.data.pending, 3);
@@ -166,7 +168,8 @@ test("an over-budget startup sheds to names instead of refusing to run", async (
   // 18 KiB of "always present" inside a 16 KiB budget is a contradiction, and `start`
   // used to resolve it by refusing — stopping every session in the project over a
   // marking mistake made somewhere else. It resolves it by demoting instead.
-  const result = startProjection(db, project, IDENTITY, { database: file });
+  const result = startProjection(db, project, IDENTITY,
+    { database: file, startupBudget: 16 * 1024 });
   const envelope = Buffer.byteLength(JSON.stringify({ v: 1, ok: true, operation: "start",
     revision: result.revision, data: result.data, more: result.more, next: result.next }), "utf8");
   assert.ok(envelope <= 16 * 1024, `envelope ${envelope} must stay within budget`);
@@ -199,9 +202,9 @@ test("the startup budget is configurable, and every source is stated", async (t)
   const budget = (options = {}) => startProjection(db, project, IDENTITY,
     { database: file, ...options }).data.budget;
 
-  // 16 KiB is roughly 4K tokens — generous for a small local model, negligible for a
+  // 24 KiB is roughly 6K tokens — generous for a small local model, negligible for a
   // 200K-context host. It is a starting point, so it must be a default and not a wall.
-  assert.deepEqual(budget(), { bytes: 16 * 1024, source: "default" });
+  assert.deepEqual(budget(), { bytes: STARTUP_BYTES, source: "default" });
 
   // Precedence runs from most immediate to most durable, and a project setting beats a
   // machine one because it is the narrower statement.
@@ -223,7 +226,7 @@ test("the startup budget is configurable, and every source is stated", async (t)
     scope: "global", content: { state: "known", value: { startup_budget_bytes: 10 } } }, {});
   putRecord(db, { id: "p:config:startup", type: "config", name: "Project budget",
     scope: project.scope, content: { state: "known", value: { startup_budget_bytes: 0 } } }, {});
-  assert.deepEqual(budget(), { bytes: 16 * 1024, source: "default" });
+  assert.deepEqual(budget(), { bytes: STARTUP_BYTES, source: "default" });
   for (const bogus of ["10", "999999999", "abc", "", "16384.5"]) {
     assert.equal(budget({ startupBudget: bogus }).source, "default", bogus);
   }
@@ -249,7 +252,7 @@ test("a raised budget carries what a default one has to shed", async (t) => {
   assert.ok(roomy.context.length > tight.context.length, "a bigger budget carries more");
   assert.ok(!roomy.omitted.hidden, "and stops hiding names entirely");
   // Whatever the budget, the projection stays inside it.
-  for (const [data, limit] of [[tight, 16 * 1024], [roomy, 128 * 1024]]) {
+  for (const [data, limit] of [[tight, STARTUP_BYTES], [roomy, 128 * 1024]]) {
     assert.ok(Buffer.byteLength(JSON.stringify(data), "utf8") <= limit);
   }
 });
@@ -270,7 +273,7 @@ test("marking a record required reports the budget it just spent", async (t) => 
   assert.deepEqual(requiredBudgetNotice(db, { scope: project.scope,
     content: { value: { text: "x" } } }), {});
 
-  put("g:heavy", "global", "x".repeat(20_000), true);
+  put("g:heavy", "global", "x".repeat(28_000), true);
   const notice = requiredBudgetNotice(db, { scope: "global",
     content: { value: { required: true } } });
   assert.equal(notice.more, true);
@@ -285,7 +288,7 @@ test("doctor reports the standing startup cost of global required records", asyn
   const { db, file } = await fixture(t);
   const baseline = diagnoseDatabase(db, { database: file }).checks.startup_budget;
   assert.ok(baseline.global_required_bytes > 0, "the injected governance record is counted");
-  assert.equal(baseline.budget_bytes, 16 * 1024);
+  assert.equal(baseline.budget_bytes, STARTUP_BYTES);
   assert.equal(
     baseline.project_headroom_bytes,
     baseline.budget_bytes - baseline.global_required_bytes,

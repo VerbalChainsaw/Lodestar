@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { normalizeMachinePath, resolveIdentity, resolveProject } from "../src/agent-state.mjs";
+import {
+  normalizeMachinePath, resolveIdentity, resolveProject, STARTUP_BYTES,
+} from "../src/agent-state.mjs";
 import { runCli } from "../src/cli.mjs";
 import { initializeDatabase, openWriteDatabase } from "../src/database.mjs";
 import { putRecord } from "../src/records.mjs";
@@ -72,7 +74,7 @@ test("Windows and WSL paths share one project identity and startup stays bounded
   const args = ["start", "--db", database, "--cwd", directory, "--session", "reader"];
   const first = await invoke(args), second = await invoke(args);
   assert.equal(first.text, second.text);
-  assert.ok(Buffer.byteLength(first.text, "utf8") <= 16 * 1024);
+  assert.ok(Buffer.byteLength(first.text, "utf8") <= STARTUP_BYTES);
   assert.equal(first.value.data.required[0].id, "g:lodestar:required-governance");
   assert.equal(first.value.data.required[1].id, "instruction:required");
   assert.ok(first.value.data.required[0].data.sections
@@ -103,7 +105,7 @@ test("startup survives required context larger than the whole budget", async (t)
   const started = await invoke(["start", "--db", database, "--cwd", directory,
     "--session", "claimant"]);
   assert.equal(started.value.ok, true);
-  assert.ok(Buffer.byteLength(started.text, "utf8") <= 16 * 1024, "still bounded");
+  assert.ok(Buffer.byteLength(started.text, "utf8") <= STARTUP_BYTES, "still bounded");
 
   // Nothing is lost: what cannot be carried is named, so one `lodestar get` recovers it
   // instead of a blind search through everything in scope.
@@ -135,7 +137,7 @@ test("startup caps an oversized handoff head and reports exact omitted counts", 
   })));
   const started = await invoke(["start", "--db", database, "--cwd", directory,
     "--session", "claimant"]);
-  assert.ok(Buffer.byteLength(started.text, "utf8") <= 16 * 1024);
+  assert.ok(Buffer.byteLength(started.text, "utf8") <= STARTUP_BYTES);
   assert.ok(Buffer.byteLength(JSON.stringify(started.value.data.handoff.packet), "utf8") <= 6_144);
   assert.equal(started.value.data.handoff.packet.summary, true);
   assert.equal(started.value.data.context.length + started.value.data.omitted.context, 30);
