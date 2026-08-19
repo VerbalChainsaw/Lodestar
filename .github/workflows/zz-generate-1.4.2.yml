@@ -1,0 +1,240 @@
+name: one-shot Lodestar 1.4.2 generation
+
+on:
+  push:
+    branches:
+      - codex/lodestar-1.4.2-golden-rules
+    paths:
+      - .github/workflows/zz-generate-1.4.2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.15.0
+
+      - name: Build canonical 1.4.2 source surfaces
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { createHash } from "node:crypto";
+          import { readFile, writeFile } from "node:fs/promises";
+
+          const VERSION = "1.4.2";
+          const DATE = "2026-08-18";
+          const writeJson = (file, value) =>
+            writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+
+          const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+          assert.ok(
+            ["1.4.1", VERSION].includes(packageJson.version),
+            `unexpected package version ${packageJson.version}`,
+          );
+          packageJson.version = VERSION;
+          await writeJson("package.json", packageJson);
+
+          const plugin = JSON.parse(await readFile(
+            "codex-plugin/.codex-plugin/plugin.json",
+            "utf8",
+          ));
+          assert.ok(
+            ["1.4.1", VERSION].includes(plugin.version),
+            `unexpected plugin version ${plugin.version}`,
+          );
+          plugin.version = VERSION;
+          await writeJson("codex-plugin/.codex-plugin/plugin.json", plugin);
+          await writeFile(
+            "src/version.mjs",
+            `export const LODESTAR_VERSION = "${VERSION}";\n`,
+            "utf8",
+          );
+
+          const changelogSection = `## ${VERSION} - ${DATE}
+
+          - Restore the Golden Rules as package-owned required global defaults. Startup now
+            carries the single-operator prototype assumption, owner-authorized WIP,
+            fold-forward behavior, anti-rollback protections, operating order, surgical
+            reading, evidence boundaries, architecture discipline, and stop condition.
+          - Make the startup governance record the sole always-on owner of the universal
+            worktree covenant. \`director-protocol\` now references that owner instead of
+            maintaining a second copy that can drift.
+          - Add semantic regression tests that compare the canonical source, generated
+            payload, and live \`lodestar start\` projection at the minimum supported 8 KiB
+            budget. A missing clause, stale generated payload, or demoted governance record
+            now fails the build.
+
+          `.replaceAll(/^          /gmu, "");
+          let changelog = await readFile("CHANGELOG.md", "utf8");
+          if (!changelog.includes(`## ${VERSION} - ${DATE}`)) {
+            assert.ok(changelog.startsWith("# Changelog\n\n"));
+            changelog = changelog.replace(
+              "# Changelog\n\n",
+              `# Changelog\n\n${changelogSection}`,
+            );
+            await writeFile("CHANGELOG.md", changelog, "utf8");
+          }
+
+          const release = `# Lodestar ${VERSION}
+
+          The workshop rules are global again.
+
+          ![Lodestar ${VERSION}](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-v${VERSION}-social.png)
+
+          \`\`\`text
+          npm install --global lodestar-agent-context@${VERSION}
+          lodestar skills sync --target all
+          lodestar skills verify --target all
+          \`\`\`
+
+          ## Golden Rules are required startup context
+
+          The package-owned \`g:lodestar:required-governance\` record now carries the
+          universal operating covenant on every \`lodestar start\`:
+
+          - default to a single-operator prototype and development workstation unless a
+            current instruction or project contract says otherwise;
+          - treat dirty, staged, untracked, partial, and committed-in-progress files as
+            valid owner-authorized work;
+          - build on existing work and fold relevant partial work forward;
+          - never quarantine, bypass, ignore, overwrite, reformat, or rebuild around WIP;
+          - never roll back, reset, clean, stash, restore, or checkout over work without
+            explicit permission;
+          - protect work first, honor exact scope, produce the result, verify the claim,
+            report honestly, leave optional improvements alone, and stop;
+          - read surgically, distinguish unknown from absent, preserve existing
+            architecture and data contracts, and reject speculative parallel systems.
+
+          ## One always-on owner
+
+          \`director-protocol\` remains available for Director-specific scope,
+          coordination, and reporting behavior. It now points to required startup
+          governance for universal worktree rules instead of carrying a second copy.
+
+          ## Semantic lock
+
+          New regression tests require the canonical governance source, generated payload,
+          and live startup projection to match exactly. They also exercise startup at the
+          minimum supported 8 KiB budget and fail if the Golden Rules are demoted,
+          truncated, or omitted.
+
+          ## Upgrading
+
+          There is no schema migration. Install the package, then sync and verify managed
+          skills so configured clients receive the updated optional skill package.
+
+          \`\`\`text
+          npm install --global lodestar-agent-context@${VERSION}
+          lodestar skills sync --target all
+          lodestar skills verify --target all
+          \`\`\`
+
+          Requires Node.js 24.15.0 or newer.
+          `.replaceAll(/^          /gmu, "");
+          await writeFile(`docs/releases/v${VERSION}.md`, release, "utf8");
+
+          const target = "managed-assets/skills/director-protocol/SKILL.md";
+          const skill = (await readFile(target, "utf8")).replaceAll("\r\n", "\n");
+          const digest = createHash("sha256").update(skill, "utf8").digest("hex");
+          const transformations = JSON.parse(await readFile(
+            "managed-assets/historical-source-transformations.json",
+            "utf8",
+          ));
+          const entry = transformations.entries.find(
+            ({ path }) => path === "01-skills/director-protocol/SKILL.md",
+          );
+          assert.ok(entry, "director-protocol transformation entry is missing");
+          assert.equal(entry.targets.length, 1);
+          assert.equal(entry.targets[0].path, target);
+          entry.action = "rewrite";
+          entry.targets[0].sha256 = digest;
+          entry.reason = "Universal worktree covenant moved to required Lodestar "
+            + "governance; Director-specific routing retained without a competing copy.";
+          await writeJson(
+            "managed-assets/historical-source-transformations.json",
+            transformations,
+          );
+          NODE
+
+      - name: Generate managed payload and release card
+        shell: bash
+        run: |
+          npm run assets:build
+          node scripts/build-release-social.mjs 1.4.2
+
+      - name: Run complete source and package gates
+        shell: bash
+        run: |
+          npm test
+          npm run pack:check
+
+      - name: Audit canonical ownership and generated output
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { readFile } from "node:fs/promises";
+
+          const source = JSON.parse(await readFile(
+            "managed-assets/governance.json",
+            "utf8",
+          ));
+          const payload = JSON.parse(await readFile(
+            "src/skills-payload.json",
+            "utf8",
+          ));
+          const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+          const plugin = JSON.parse(await readFile(
+            "codex-plugin/.codex-plugin/plugin.json",
+            "utf8",
+          ));
+          const skill = await readFile(
+            "managed-assets/skills/director-protocol/SKILL.md",
+            "utf8",
+          );
+
+          assert.deepEqual(payload.governance, source);
+          assert.equal(source.data.required, true);
+          assert.equal(source.data.scope[0], "global");
+          assert.equal(packageJson.version, "1.4.2");
+          assert.equal(plugin.version, "1.4.2");
+          assert.equal(
+            await readFile("src/version.mjs", "utf8"),
+            'export const LODESTAR_VERSION = "1.4.2";\n',
+          );
+          assert.match(skill, /g:lodestar:required-governance/u);
+          assert.doesNotMatch(
+            skill,
+            /Work-in-progress code is forward motion, not contamination/u,
+          );
+          NODE
+          git diff --check
+          git status --short
+
+      - name: Commit generated 1.4.2 surfaces
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            CHANGELOG.md \
+            package.json \
+            src/version.mjs \
+            codex-plugin/.codex-plugin/plugin.json \
+            managed-assets/historical-source-transformations.json \
+            src/skills-payload.json \
+            docs/agent-bootstrap.json \
+            docs/releases/v1.4.2.md \
+            docs/assets/lodestar-v1.4.2-social.png
+          git diff --cached --check
+          git commit -m "Lodestar 1.4.2: generate global Golden Rules release surfaces"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
