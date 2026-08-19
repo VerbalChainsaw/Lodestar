@@ -75,7 +75,9 @@ test("Windows and WSL paths share one project identity and startup stays bounded
   assert.ok(Buffer.byteLength(first.text, "utf8") <= 16 * 1024);
   assert.equal(first.value.data.required[0].id, "g:lodestar:required-governance");
   assert.equal(first.value.data.required[1].id, "instruction:required");
-  assert.match(JSON.stringify(first.value.data.required[0]), /truncated-clipped-malformed/u);
+  assert.ok(first.value.data.required[0].data.sections
+    .some(({ id }) => id === "workflow-routing"));
+  assert.equal(first.value.data.omitted.required, undefined);
   assert.equal(first.value.more, true);
   assert.match(first.value.next[0], /^lodestar find /u);
   const windowsDialect = await invoke([
