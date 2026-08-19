@@ -31,12 +31,11 @@ jobs:
           const workflow = await readFile('.github/workflows/zz-bootstrap-authority-repair.yml', 'utf8');
           const match = /node --input-type=module <<'NODE'\n([\s\S]*?)\n          NODE\n/.exec(workflow);
           if (!match) throw new Error('Could not extract guarded repair script');
-          const source = match[1].replace(/^          /gmu, '');
-          await writeFile('.bootstrap-authority-repair.mjs', source, 'utf8');
+          await writeFile('.bootstrap-authority-repair.mjs', match[1].replace(/^          /gmu, ''), 'utf8');
           NODE
           node .bootstrap-authority-repair.mjs
           rm .bootstrap-authority-repair.mjs
-      - name: Advance bootstrap schema contract to v3
+      - name: Align schema and flatten authority transport
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -55,6 +54,26 @@ jobs:
             'managed bootstrap schema gate');
           await writeFile('scripts/build-managed-assets.mjs', builder, 'utf8');
 
+          let state = await readFile('src/agent-state.mjs', 'utf8');
+          state = replaceOnce(state,
+            '// The budget belongs to whoever reads the projection, not to Lodestar. 24 KiB is a',
+            '// The budget belongs to whoever reads the projection, not to Lodestar. 16 KiB is a',
+            'startup budget comment');
+          state = replaceOnce(state,
+            'export const STARTUP_BYTES = 12 * 1024;',
+            'export const STARTUP_BYTES = 16 * 1024;',
+            'startup default budget');
+          const helperPattern = /function startupGovernance\(record\) \{[\s\S]*?\n\}\n\nconst startupDecisions = \(state\) => \(\{\n  enabled: state\.enabled, projection: state\.projection,\n\}\);/u;
+          assert.match(state, helperPattern, 'startup projection helpers are missing');
+          state = state.replace(helperPattern, `function startupGovernance(record) {
+  const { data } = record;
+  const rules = data.sections.flatMap((section) => section.rules);
+  return { id: record.id, kind: record.kind, required: true,
+    text: [...rules, ...data.recovery_invariants].join("\\n") };
+}
+const startupDecisions = ({ enabled, projection }) => ({ enabled, projection });`);
+          await writeFile('src/agent-state.mjs', state, 'utf8');
+
           let packageTest = await readFile('test/package.test.mjs', 'utf8');
           packageTest = replaceOnce(packageTest,
             '  assert.match(payload.bootstrap.text, /truncated or incomplete/u);',
@@ -62,6 +81,58 @@ jobs:
               + '  assert.match(payload.bootstrap.text, /retry the same startup operation in the same session/iu);',
             'bootstrap package test');
           await writeFile('test/package.test.mjs', packageTest, 'utf8');
+
+          let stateTest = await readFile('test/agent-state.test.mjs', 'utf8');
+          stateTest = replaceOnce(stateTest,
+            '  assert.ok(first.value.data.required[0].data.sections\n'
+              + '    .some(({ id }) => id === "workflow-routing"));\n'
+              + '  assert.ok(first.value.data.required[0].data.sections\n'
+              + '    .some(({ id }) => id === "startup-completeness"));\n'
+              + '  assert.equal(first.value.data.authority_complete, true);',
+            '  assert.match(first.value.data.required[0].text, /invoke both codeplan and center-audit/iu);\n'
+              + '  assert.match(first.value.data.required[0].text, /same agent session/iu);\n'
+              + '  assert.equal(first.value.data.authority_complete, true);',
+            'agent-state startup authority assertions');
+          await writeFile('test/agent-state.test.mjs', stateTest, 'utf8');
+
+          let pluginTest = await readFile('test/plugin.test.mjs', 'utf8');
+          pluginTest = replaceOnce(pluginTest,
+            '  assert.equal(governance.data.v, 2);\n'
+              + '  assert.equal(governance.data.sections.length, 11);\n'
+              + '  assert.ok(governance.data.sections.find(({ id }) => id === "workflow-routing"));\n'
+              + '  assert.ok(governance.data.sections.find(({ id }) => id === "startup-completeness"));\n'
+              + '  assert.equal(projection.authority_complete, true);',
+            '  assert.equal(governance.required, true);\n'
+              + '  assert.match(governance.text, /invoke both codeplan and center-audit/iu);\n'
+              + '  assert.match(governance.text, /same agent session/iu);\n'
+              + '  assert.equal(projection.authority_complete, true);',
+            'plugin startup authority assertions');
+          await writeFile('test/plugin.test.mjs', pluginTest, 'utf8');
+
+          let retryTest = await readFile('test/bootstrap-authority.test.mjs', 'utf8');
+          retryTest = replaceOnce(retryTest,
+            'import { AGENT_BOOTSTRAP } from "../src/bootstrap.mjs";',
+            'import { AGENT_BOOTSTRAP, REQUIRED_GOVERNANCE } from "../src/bootstrap.mjs";',
+            'bootstrap test imports');
+          retryTest = replaceOnce(retryTest,
+            '  assert.ok(Buffer.byteLength(retry.text, "utf8") <= 12 * 1024);',
+            '  assert.ok(Buffer.byteLength(retry.text, "utf8") <= 16 * 1024);\n'
+              + '  const delivered = retry.value.data.required[0].text;\n'
+              + '  for (const section of REQUIRED_GOVERNANCE.data.sections) {\n'
+              + '    for (const rule of section.rules) assert.ok(delivered.includes(rule));\n'
+              + '  }\n'
+              + '  for (const invariant of REQUIRED_GOVERNANCE.data.recovery_invariants) {\n'
+              + '    assert.ok(delivered.includes(invariant));\n'
+              + '  }',
+            'bootstrap retry transport assertion');
+          await writeFile('test/bootstrap-authority.test.mjs', retryTest, 'utf8');
+
+          let changelog = await readFile('CHANGELOG.md', 'utf8');
+          changelog = changelog.replace(
+            'use a 12 KiB default envelope',
+            'use a 16 KiB default envelope with flattened authority transport',
+          );
+          await writeFile('CHANGELOG.md', changelog, 'utf8');
           NODE
       - name: Generate managed artifacts and release card
         run: |
