@@ -180,6 +180,25 @@ export function startProjection(db, project, identity, options = {}) {
       omitted.hidden = (omitted.hidden ?? 0) + 1;
       chargeRecovery();
     };
+    const compactHandoff = () => {
+      const packet = data.handoff.packet;
+      const omittedPacket = packet.summary ? packet.omitted : {
+        rules: packet.rules.length,
+        entries: packet.entries.length,
+        evidence: packet.evidence.length,
+        tail: packet.recentTail.items.length,
+      };
+      data.handoff = { recovery: data.handoff.recovery, packet: {
+        format: packet.format,
+        id: packet.id,
+        generation: packet.generation,
+        integrity: packet.integrity,
+        summary: true,
+        omitted: { ...omittedPacket, goal: 1, nextMove: 1 },
+      } };
+      omitted.handoff = (omitted.handoff ?? 0) + 1;
+      chargeRecovery();
+    };
     if (omitted.context) chargeRecovery();
     while (!fits() && data.context.length) demote(data.context, "context");
     while (!fits() && data.active_work.length) demote(data.active_work, "work");
@@ -192,6 +211,11 @@ export function startProjection(db, project, identity, options = {}) {
     // only if it is the one thing standing between here and the budget.
     while (!fits() && data.required.length > 1) demote(data.required, "required");
     while (!fits() && available.length) drop();
+    // A large handoff is already summarized before it reaches this projection, but the
+    // governance record can leave less room than that fixed summary target. Keep the
+    // atomic claim and stable packet identity, shed only inline packet detail, and point
+    // the claimant at `handoff status` for exact recovery instead of overrunning start.
+    if (!fits() && data.handoff) compactHandoff();
     const more = Object.keys(omitted).length > 0;
     return { data, revision, more, next };
   }, options.database);

@@ -9,6 +9,8 @@ import { allocateRevision } from "./revisions.mjs";
 
 const STATES = new Set(["fact", "trap", "ask", "unsure", "dead"]);
 const PROVENANCE = new Set(["user", "tool", "repo", "agent", "decision"]);
+export const HANDOFF_ENTRY_KEY_PATTERN = "^[a-z0-9][a-z0-9.-]*$";
+const HANDOFF_ENTRY_KEY = new RegExp(HANDOFF_ENTRY_KEY_PATTERN, "u");
 const SECRET_FIELD = /(?:^|[-_])(?:api[-_]?key|authorization|credential|password|secret|token)/iu;
 const SECRET_TEXT = [
   /\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{12,}|gh[opusr]_[A-Za-z0-9]{20,})\b/gu,
@@ -38,7 +40,11 @@ function finite(value) {
   try { return Number.isFinite(Buffer.byteLength(canonicalStringify(value), "utf8")); }
   catch { return false; }
 }
-
+function entryError(index, field, message, identifiers = {}) {
+  return lodestarError("invalid_input", `Handoff packet entry ${index} ${message}.`, {
+    identifiers: { entry: index, ...(field ? { field } : {}), ...identifiers },
+  });
+}
 export function redactHandoff(value, report = { count: 0, categories: new Set() }) {
   if (typeof value === "string") {
     let text = value;
@@ -84,13 +90,22 @@ function semantic(input) {
     throw lodestarError("invalid_input", "packet.work or packet.evidence is invalid.");
   }
   const keys = new Set();
-  for (const entry of input.entries) {
-    if (!entry || Object.getPrototypeOf(entry) !== Object.prototype
-        || !/^[a-z0-9][a-z0-9.-]*$/u.test(entry.key) || keys.has(entry.key)
-        || !STATES.has(entry.state) || !Number.isInteger(entry.generation)
+  for (const [index, entry] of input.entries.entries()) {
+    if (!entry || Object.getPrototypeOf(entry) !== Object.prototype) {
+      throw entryError(index, null, "must be an object");
+    }
+    if (typeof entry.key !== "string" || !HANDOFF_ENTRY_KEY.test(entry.key)) {
+      throw entryError(index, "key", `key is invalid; entry keys must match `
+        + HANDOFF_ENTRY_KEY_PATTERN, { pattern: HANDOFF_ENTRY_KEY_PATTERN });
+    }
+    if (keys.has(entry.key)) {
+      throw entryError(index, "key", `duplicates key ${entry.key}`, { key: entry.key });
+    }
+    if (!STATES.has(entry.state) || !Number.isInteger(entry.generation)
         || entry.generation < 0 || !Array.isArray(entry.scope) || entry.scope.length > 10
-        || !entry.provenance || !PROVENANCE.has(entry.provenance.kind)) {
-      throw lodestarError("invalid_input", "A handoff packet entry is invalid.");
+        || !entry.provenance || Object.getPrototypeOf(entry.provenance) !== Object.prototype
+        || !PROVENANCE.has(entry.provenance.kind)) {
+      throw entryError(index, null, "is invalid");
     }
     keys.add(entry.key);
     safe(entry.text, `entry ${entry.key}`, 8_192);
