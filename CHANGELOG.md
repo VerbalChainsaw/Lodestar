@@ -2,6 +2,14 @@
 
 ## 1.4.1 - 2026-08-15
 
+- Establish `g:lodestar:required-governance` as the sole required global operating
+  doctrine, generated from `managed-assets/governance.json` together with the complete
+  human-readable recovery copy in `docs/GOLDEN-RULES.md`.
+- Raise Lodestar's general startup default from 16 KiB to 24 KiB so the canonical
+  governance still leaves the doctor's required 4 KiB of project headroom. Explicit
+  host budgets remain authoritative; the Codex adapter keeps its measured 16 KiB limit.
+- Harden Codex startup and stop-hook recovery against oversized continuity content while
+  preserving complete required governance under the adapter's explicit host boundary.
 - Make the package bootstrap the canonical source for minimal native agent files. The
   shipped `AGENTS.md` stub now matches that bootstrap byte for byte, so changes to the
   supported Lodestar commands cannot leave an older hand-written redirect behind.
