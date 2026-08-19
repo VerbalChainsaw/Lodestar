@@ -5,7 +5,8 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import {
-  executeHandoff, executeWork, HANDOFF_COMMANDS, WORK_COMMANDS, workToolCommand,
+  executeHandoff, executeWork, HANDOFF_COMMANDS, HANDOFF_PACKET_SCHEMA,
+  WORK_COMMANDS, workToolCommand,
 } from "./lodestar-runtime.mjs";
 
 // Read from the manifest beside this script rather than a literal. A hardcoded version
@@ -33,14 +34,13 @@ export function resolvePluginData(
     `${path.basename(plugin)}-${path.basename(marketplace)}`);
 }
 
-const packet = { type: "object", additionalProperties: true };
 const tools = HANDOFF_COMMANDS.map((command) => ({
   name: `lodestar_handoff_${command}`,
   description: `${command[0].toUpperCase()}${command.slice(1)} the exact host-authorized `
     + "Lodestar continuity state for this project and session.",
   inputSchema: ["arm", "checkpoint", "now"].includes(command)
     ? { type: "object", additionalProperties: false, required: ["packet"],
-      properties: { packet } }
+      properties: { packet: HANDOFF_PACKET_SCHEMA } }
     : { type: "object", additionalProperties: false, properties: {} },
 }));
 

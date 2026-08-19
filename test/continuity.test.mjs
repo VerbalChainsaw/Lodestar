@@ -73,6 +73,21 @@ test("dead entries require evidence, fresh generations, and cannot resurrect", (
   assert.throws(() => validateHandoff(packet({ entries: [deadEntry] })), /auditable evidence/u);
 });
 
+test("entry-key validation names the rejected field and accepted alphabet", () => {
+  const invalid = packet({ entries: [{ ...packet().entries[0],
+    key: "account.mutation_guard" }] });
+  assert.throws(() => validateHandoff(invalid), (error) => {
+    assert.equal(error.code, "invalid_input");
+    assert.match(error.message, /entry 0.*key/u);
+    assert.ok(error.message.includes("^[a-z0-9][a-z0-9.-]*$"));
+    return true;
+  });
+
+  const valid = packet({ entries: [{ ...packet().entries[0],
+    key: "account.mutation-guard" }] });
+  assert.doesNotThrow(() => validateHandoff(valid));
+});
+
 test("now is idempotent, cannot be stolen, and only the next same-project session claims", async (t) => {
   const { db, database, project, directory } = await fixture(t);
   const source = actor("source"), claimant = actor("claimant"), thief = actor("thief");

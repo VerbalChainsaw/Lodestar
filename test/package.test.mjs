@@ -35,6 +35,7 @@ const EXPECTED_PACKAGE_FILES = [
   "codex-plugin/skills/lodestar/references/templates.md",
   "codex-plugin/skills/lodestar/references/toolchain.md",
   "codex-plugin/skills/lodestar/references/work-presence.md",
+  "docs/GOLDEN-RULES.md",
   "docs/README.md",
   "docs/agent-bootstrap.json",
   "docs/limitations.md",
@@ -248,6 +249,17 @@ test("managed assets generate the complete unified skill, bootstrap, and rule pa
   assert.match(payload.bootstrap.text, /truncated or incomplete/u);
   assert.equal(payload.governance.id, "g:lodestar:required-governance");
   assert.equal(payload.governance.data.required, true);
+  assert.equal(payload.governance.data.v, 2);
+  assert.ok(payload.governance.data.sections.some(({ id }) => id === "workflow-routing"));
+  const golden = await readFile(path.join(ROOT, "docs", "GOLDEN-RULES.md"), "utf8");
+  assert.match(golden, /^# Director Golden Operating Rules\n/u);
+  assert.match(golden, /Generated from `managed-assets\/governance\.json`/u);
+  assert.doesNotMatch(golden,
+    /instruction:global-working-protocol|rule:scope-accretion-guard|g:codex:engineering|C:\/Users/u);
+  for (const section of payload.governance.data.sections) {
+    assert.match(golden, new RegExp(`^## \\d+\\. ${section.title}$`, "mu"));
+    for (const rule of section.rules) assert.ok(golden.includes(`- ${rule}`));
+  }
   const lodestar = payload.skills.find(({ name }) => name === "lodestar");
   assert.ok(lodestar.files.some(({ path: file }) =>
     file === "assets/templates/AGENTS.template.md"));

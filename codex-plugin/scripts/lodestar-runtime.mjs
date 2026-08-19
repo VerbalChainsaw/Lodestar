@@ -18,6 +18,43 @@ const READ_ONLY_COMMANDS = new Set(["status"]);
 const AUTH_TTL_MS = 10 * 60_000;
 const OUTPUT_LIMIT = 1024 * 1024;
 const TIMEOUT_MS = 20_000;
+export const CODEX_SESSION_CONTEXT_LIMIT_BYTES = 16 * 1024;
+export const STARTUP_CONTEXT_PREFIX = "Lodestar startup context (v1):\n";
+const STARTUP_PROJECTION_LIMIT_BYTES = CODEX_SESSION_CONTEXT_LIMIT_BYTES
+  - Buffer.byteLength(STARTUP_CONTEXT_PREFIX, "utf8");
+export const HANDOFF_ENTRY_KEY_PATTERN = "^[a-z0-9][a-z0-9.-]*$";
+export const HANDOFF_PACKET_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: true,
+  required: ["goal", "rules", "entries", "work", "nextMove", "evidence"],
+  properties: {
+    goal: { type: "string", minLength: 1 },
+    rules: { type: "array", maxItems: 10,
+      items: { type: "string", minLength: 1 } },
+    entries: { type: "array", maxItems: 35, items: {
+      type: "object",
+      additionalProperties: true,
+      required: ["key", "state", "text", "scope", "provenance", "generation"],
+      properties: {
+        key: { type: "string", pattern: HANDOFF_ENTRY_KEY_PATTERN,
+          description: "Lowercase letters, digits, dots, and hyphens only." },
+        state: { type: "string", enum: ["fact", "trap", "ask", "unsure", "dead"] },
+        text: { type: "string", minLength: 1 },
+        scope: { type: "array", maxItems: 10, items: { type: "string" } },
+        provenance: { type: "object", additionalProperties: true,
+          required: ["kind", "sourceRef", "observedAt"], properties: {
+            kind: { type: "string", enum: ["user", "tool", "repo", "agent", "decision"] },
+            sourceRef: { type: "string", minLength: 1 },
+            observedAt: { type: "string", minLength: 1 },
+          } },
+        generation: { type: "integer", minimum: 0 },
+      },
+    } },
+    work: { type: "object" },
+    nextMove: { type: "string", minLength: 1 },
+    evidence: { type: "array", maxItems: 50 },
+  },
+});
 const SECRET_FIELD = /(?:^|[-_])(?:authorization|api[-_]?key|credential|password|secret|token)(?:$|[-_])/iu;
 const SECRET_TEXT = [
   /\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{12,}|gh[opusr]_[A-Za-z0-9]{20,})\b/gu,
@@ -94,7 +131,9 @@ export function workToolCommand(name) {
 }
 
 function packetSchema() {
-  return "{goal:string,rules:string[],entries:Array<{key:string,state:'fact'|'trap'|"
+  return "{goal:string,rules:string[],entries:Array<{key:string (entry keys must match "
+    + `${HANDOFF_ENTRY_KEY_PATTERN}; lowercase letters, digits, dots, and hyphens only),`
+    + "state:'fact'|'trap'|"
     + "'ask'|'unsure'|'dead',text:string,scope:string[],provenance:{kind:'user'|'tool'|"
     + "'repo'|'agent'|'decision',sourceRef:string,observedAt:string},generation:integer}>,"
     + "work:object,nextMove:string,evidence:array}. A dead entry requires evidence "
@@ -388,6 +427,11 @@ export async function captureNotes(input, text, options = {}) {
 export async function startupContext(input, options = {}) {
   for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
   const envelope = await runLodestar(["start", "--cwd", input.cwd,
-    "--session", input.session_id, "--agent", "codex", "--harness", "codex"], "", options);
-  return `Lodestar startup context (v1):\n${canonical(envelope.data)}`;
+    "--session", input.session_id, "--agent", "codex", "--harness", "codex",
+    "--startup-budget", String(STARTUP_PROJECTION_LIMIT_BYTES)], "", options);
+  const context = `${STARTUP_CONTEXT_PREFIX}${canonical(envelope.data)}`;
+  if (Buffer.byteLength(context, "utf8") > CODEX_SESSION_CONTEXT_LIMIT_BYTES) {
+    throw new Error("Lodestar startup context exceeds the Codex SessionStart limit");
+  }
+  return context;
 }

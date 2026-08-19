@@ -6,15 +6,23 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { HANDOFF_ENTRY_KEY_PATTERN as CORE_ENTRY_KEY_PATTERN }
+  from "../src/continuity.mjs";
+
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PLUGIN_ROOT = process.env.LODESTAR_PLUGIN_ROOT ?? path.join(ROOT, "codex-plugin");
 const TEST_ENTRY = process.env.LODESTAR_TEST_ENTRY ?? path.join(ROOT, "lodestar.mjs");
 const { handleHook } = await import(pathToFileURL(
   path.join(PLUGIN_ROOT, "scripts", "lodestar-hook.mjs"),
 ));
-const { executeHandoff, parseEnvelope, parseHandoffCommand } = await import(pathToFileURL(
-  path.join(PLUGIN_ROOT, "scripts", "lodestar-runtime.mjs"),
-));
+const {
+  CODEX_SESSION_CONTEXT_LIMIT_BYTES,
+  executeHandoff,
+  HANDOFF_ENTRY_KEY_PATTERN: PLUGIN_ENTRY_KEY_PATTERN,
+  parseEnvelope,
+  parseHandoffCommand,
+  STARTUP_CONTEXT_PREFIX,
+} = await import(pathToFileURL(path.join(PLUGIN_ROOT, "scripts", "lodestar-runtime.mjs")));
 
 // The installed plugin is a separate artifact from the npm package, stamped by hand as
 // <version>+codex.<timestamp>. Nothing forced the two to agree, so a Codex Desktop build
@@ -38,6 +46,20 @@ test("the Codex plugin declares the package version", async () => {
   );
   assert.match(server, /serverInfo:\s*\{\s*name:\s*"lodestar",\s*version:\s*pluginVersion\(\)/u);
   assert.doesNotMatch(server, /version:\s*"\d+\.\d+\.\d+"/u, "no hardcoded version");
+});
+
+test("the core validator and Codex packet contract use the same entry-key pattern", () => {
+  assert.equal(PLUGIN_ENTRY_KEY_PATTERN, CORE_ENTRY_KEY_PATTERN);
+});
+
+test("the SessionStart runtime limit matches the declared Codex hook boundary", async () => {
+  const manifest = JSON.parse(await readFile(
+    path.join(PLUGIN_ROOT, "hooks", "hooks.json"), "utf8",
+  ));
+  assert.equal(
+    manifest.hooks.SessionStart[0].hooks[0].additionalContextLimit,
+    CODEX_SESSION_CONTEXT_LIMIT_BYTES,
+  );
 });
 
 test("the plugin recovers the envelope even when a runtime prepends notices", () => {
@@ -110,10 +132,14 @@ test("the Lodestar plugin runs all five commands, redacts, and restores one reco
     LODESTAR_DB: process.env.LODESTAR_DB,
     LODESTAR_NODE: process.env.LODESTAR_NODE,
     LODESTAR_ENTRY: process.env.LODESTAR_ENTRY,
+    LODESTAR_STARTUP_BUDGET: process.env.LODESTAR_STARTUP_BUDGET,
   };
   process.env.LODESTAR_DB = path.join(directory, "lodestar.db");
   process.env.LODESTAR_NODE = process.execPath;
   process.env.LODESTAR_ENTRY = TEST_ENTRY;
+  // The Codex adapter owns the receiving hook's smaller boundary. A machine-wide CLI
+  // preference must never make a fresh Codex session emit more than the hook accepts.
+  process.env.LODESTAR_STARTUP_BUDGET = "65536";
   t.after(() => {
     for (const [key, value] of Object.entries(prior)) {
       if (value === undefined) delete process.env[key];
@@ -124,7 +150,16 @@ test("the Lodestar plugin runs all five commands, redacts, and restores one reco
   const sourceStart = await handleHook({
     hook_event_name: "SessionStart", session_id: "source", cwd: directory,
   }, directory);
-  assert.match(sourceStart.hookSpecificOutput.additionalContext, /Lodestar startup context/u);
+  const startup = sourceStart.hookSpecificOutput.additionalContext;
+  assert.ok(Buffer.byteLength(startup, "utf8") <= CODEX_SESSION_CONTEXT_LIMIT_BYTES);
+  assert.ok(startup.startsWith(STARTUP_CONTEXT_PREFIX));
+  const projection = JSON.parse(startup.slice(STARTUP_CONTEXT_PREFIX.length));
+  assert.equal(projection.budget.source, "option");
+  const governance = projection.required.find(({ id }) =>
+    id === "g:lodestar:required-governance");
+  assert.equal(governance.data.v, 2);
+  assert.equal(governance.data.sections.length, 11);
+  assert.ok(governance.data.sections.find(({ id }) => id === "workflow-routing"));
 
   let turn = 0;
   const execute = async (command, input = {}) => {
@@ -135,6 +170,10 @@ test("the Lodestar plugin runs all five commands, redacts, and restores one reco
       prompt: `handoff ${command}` }, directory);
     assert.match(authorization.hookSpecificOutput.additionalContext,
       new RegExp(`lodestar_handoff_${command}`, "u"));
+    if (["arm", "checkpoint", "now"].includes(command)) {
+      assert.ok(authorization.hookSpecificOutput.additionalContext
+        .includes("entry keys must match ^[a-z0-9][a-z0-9.-]*$"));
+    }
     const toolName = `lodestar__lodestar_handoff_${command}`;
     const attested = await handleHook({ hook_event_name: "PreToolUse", session_id: "source",
       turn_id: turnId, tool_use_id: `tool-${turn}`, cwd: directory,
@@ -221,6 +260,11 @@ test("the plugin MCP stdio transport initializes, lists, and executes the author
     "lodestar_handoff_now", "lodestar_handoff_disarm",
     "lodestar_work_start", "lodestar_work_done", "lodestar_work_status",
   ]);
+  const arm = replies[1].result.tools.find(({ name }) => name === "lodestar_handoff_arm");
+  assert.equal(
+    arm.inputSchema.properties.packet.properties.entries.items.properties.key.pattern,
+    "^[a-z0-9][a-z0-9.-]*$",
+  );
   assert.equal(replies[2].result.isError, false);
   assert.equal(replies[2].result.structuredContent.result.recovery.data.state, "pending");
 });
