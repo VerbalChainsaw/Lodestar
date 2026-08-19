@@ -1,12 +1,13 @@
 ---
 name: director-protocol
-description: "Lightweight governing guidance for the Director's surgical working style: preserve the request's scope, read only what the change needs, protect dirty WIP, verify the critical path, and never commit without explicit authorization. Use when the Director invokes the opening-prompt style, says to use his rules or workstyle, asks for non-interfering work, says not to read ahead, or explicitly invokes $director-protocol."
+description: "Lightweight Director-specific guidance for exact scope, surgical reading, critical-path verification, and explicit commit authority. Required global worktree and WIP behavior is owned by g:lodestar:required-governance. Use when the Director invokes the opening-prompt style, says to use his rules or workstyle, asks for non-interfering work, says not to read ahead, or explicitly invokes $director-protocol."
 ---
 
 # Follow Director Protocol
 
-Lightweight governing guidance, not ceremony. Stay surgical, protect every live
-workspace state, keep a clean diff, and keep communication terse.
+Lightweight governing guidance, not ceremony. Apply the required Lodestar global
+defaults first. This skill adds Director-specific scope, coordination, and reporting
+behavior without redefining the universal worktree covenant.
 
 ## Preserve intent and scope
 
@@ -29,10 +30,10 @@ workspace state, keep a clean diff, and keep communication terse.
 - Hard-stop when work materially exceeds declared scope, needs a second independent
   subsystem or ownership boundary, introduces abstractions mainly to satisfy size or
   complexity gates, or successive blockers require different mechanism changes.
-- At that stop, preserve all WIP, freeze the dirty-file inventory, run the smallest
-  useful proof, and checkpoint only the coherent completed slice if authorized.
-  Report the trigger and propose the next smallest independently gateable tranche;
-  do not continue into it automatically.
+- At that stop, apply the global worktree defaults, freeze the dirty-file inventory,
+  run the smallest useful proof, and checkpoint only the coherent completed slice if
+  authorized. Report the trigger and propose the next smallest independently gateable
+  tranche; do not continue into it automatically.
 - Keep accepted inner capabilities frozen unless contradictory evidence or a direct
   change reopens their contract.
 
@@ -48,17 +49,19 @@ workspace state, keep a clean diff, and keep communication terse.
   or dependency installation in an existing project unless the Director
   explicitly requests it.
 
-## Protect shared WIP
+## Apply the global worktree owner
 
-- Treat every dirty, untracked, staged, and committed-in-progress file as valid
-  Director-owned work. Never reset, discard, overwrite, or describe it as
-  disposable third-party state.
+- `g:lodestar:required-governance` is the sole always-on owner of universal
+  worktree, WIP, authority, execution-order, and stop rules.
+- Apply that record before this skill. This skill may narrow behavior for the
+  current task, but it must never redefine, weaken, or maintain a competing copy
+  of those defaults.
+- If required governance is missing, clipped, malformed, or incomplete, stop
+  before mutation and report the startup-context failure.
+- Advisory work presence helps avoid collisions. It never turns owner work into
+  disposable state or grants authority to commandeer another active slice.
 - Do not open, edit, stage, or commandeer a file currently active in another
-  session's work unless the Director's task requires that exact file.
-- Account for every dirty path you observe: identify it as this slice, active peer
-  work, or preserved pre-existing WIP. Never silently ignore it.
-- Avoid locks, history rewrites, shared-runtime disruption, and broad process
-  restarts when a peer is active nearby.
+  session unless the Director's task requires that exact file.
 
 ## Verify and commit
 
@@ -74,7 +77,7 @@ workspace state, keep a clean diff, and keep communication terse.
 
 ## Report tersely
 
-- Report intent, scope, evidence, failures, and outcomes — not tool mechanics or
+- Report intent, scope, evidence, failures, and outcomes, not tool mechanics or
   process bookkeeping.
 - Name exact blockers and the safest next action. Never imply completion when
   required proof remains.
