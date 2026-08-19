@@ -24,6 +24,11 @@ armed. A `dead` entry requires matching auditable user or durable-decision
 evidence. It cannot silently become live again. Changed entries advance their
 generation and provenance timestamp.
 
+Entry keys match `^[a-z0-9][a-z0-9.-]*$`: use lowercase letters, digits, dots,
+and hyphens. Underscores, spaces, uppercase letters, and other punctuation are
+invalid. The Codex tool schema publishes this constraint before a packet is
+submitted, and validation errors identify the rejected entry and field.
+
 `arm` creates or updates this session's private lane. `checkpoint` validates a
 new generation and incorporates the current tail. `disarm` is idempotent but
 cannot erase a pending recovery. `status` shows only the caller's lane and a

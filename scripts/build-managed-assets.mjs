@@ -9,6 +9,7 @@ const SKILLS = path.join(ASSETS, "skills");
 const MANIFEST = path.join(ASSETS, "manifest.json");
 const PAYLOAD = path.join(ROOT, "src", "skills-payload.json");
 const DOCUMENTED_BOOTSTRAP = path.join(ROOT, "docs", "agent-bootstrap.json");
+const DOCUMENTED_GOVERNANCE = path.join(ROOT, "docs", "GOLDEN-RULES.md");
 const TRANSFORMATIONS = path.join(ASSETS, "historical-source-transformations.json");
 const PLUGIN_SKILLS = path.join(ROOT, "codex-plugin", "skills");
 
@@ -28,6 +29,40 @@ const canonicalBytes = (bytes) => (bytes.includes(0)
   ? bytes
   : Buffer.from(bytes.toString("utf8").replaceAll("\r\n", "\n"), "utf8"));
 const hashFile = (bytes) => sha256(canonicalBytes(bytes));
+
+function renderGovernance(governance) {
+  const { data } = governance;
+  if (governance?.id !== "g:lodestar:required-governance"
+      || data?.id !== governance.id || data.required !== true || data.v !== 2
+      || !Array.isArray(data.sections) || data.sections.length === 0
+      || !Array.isArray(data.recovery_invariants) || data.recovery_invariants.length === 0) {
+    throw new Error("Managed governance source is malformed");
+  }
+  const ids = new Set();
+  const lines = [
+    "# Director Golden Operating Rules",
+    "",
+    "> Generated from `managed-assets/governance.json`. Do not maintain this view independently.",
+    `> Canonical runtime owner: \`${governance.id}\`.`,
+    "",
+    `These rules apply to ${data.applies_to.join(", ")}.`,
+    "",
+  ];
+  data.sections.forEach((section, index) => {
+    if (typeof section?.id !== "string" || ids.has(section.id)
+        || typeof section.title !== "string" || !Array.isArray(section.rules)
+        || section.rules.length === 0 || section.rules.some((rule) => typeof rule !== "string")) {
+      throw new Error(`Invalid managed governance section at index ${index}`);
+    }
+    ids.add(section.id);
+    lines.push(`## ${index + 1}. ${section.title}`, "");
+    for (const rule of section.rules) lines.push(`- ${rule}`);
+    lines.push("");
+  });
+  lines.push("## Recovery invariants", "");
+  for (const invariant of data.recovery_invariants) lines.push(`- ${invariant}`);
+  return `${lines.join("\n")}\n`;
+}
 
 async function collect(root, directory = root) {
   const files = [];
@@ -146,6 +181,7 @@ async function build() {
   return {
     payload: `${JSON.stringify({ schema: 2, bootstrap, governance, skills })}\n`,
     bootstrap: `${JSON.stringify(bootstrap, null, 2)}\n`,
+    governance: renderGovernance(governance),
   };
 }
 
@@ -153,11 +189,13 @@ const mode = process.argv[2] ?? "--write";
 const generated = await build();
 if (mode === "--check") {
   if (generated.payload !== await readFile(PAYLOAD, "utf8")
-      || generated.bootstrap !== await readFile(DOCUMENTED_BOOTSTRAP, "utf8")) {
-    throw new Error("src/skills-payload.json is stale; run npm run assets:build");
+      || generated.bootstrap !== await readFile(DOCUMENTED_BOOTSTRAP, "utf8")
+      || generated.governance !== await readFile(DOCUMENTED_GOVERNANCE, "utf8")) {
+    throw new Error("Generated managed assets are stale; run npm run assets:build");
   }
 } else if (mode === "--write") {
   await writeFile(PAYLOAD, generated.payload, "utf8");
   await writeFile(DOCUMENTED_BOOTSTRAP, generated.bootstrap, "utf8");
+  await writeFile(DOCUMENTED_GOVERNANCE, generated.governance, "utf8");
 }
 else throw new Error("Usage: build-managed-assets.mjs [--write|--check]");
