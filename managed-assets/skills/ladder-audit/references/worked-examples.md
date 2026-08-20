@@ -20,7 +20,9 @@ intent -> blueprint -> semantic validation -> site binding -> dependencies
 
 Enable natural language, unknown terrain, empty inventory, model-generated geometry, resource discovery, tool preparation, construction, sleep, Stop, and restart in one run. A six-minute failure has nearly every node as a suspect.
 
-### Representative next tranche
+### Provisional capability track
+
+This table maps separable rungs; it is not a quota or a recommendation to detail or run them all at once. Select the smallest evidence-useful next tranche from the current deepest unproven boundary, then stop extending it when another rung no longer reduces uncertainty or its cost approaches graduation.
 
 | Rung | Newly active capability | Supplied scaffolds |
 |---|---|---|
@@ -32,7 +34,7 @@ Enable natural language, unknown terrain, empty inventory, model-generated geome
 | C0 | safe site selection | inventory and blueprint supplied; vicinity loaded |
 | D0 | custom blueprint compilation | physical prerequisites supplied |
 
-Later tracks can cover empty inventory, remote site ownership, natural-language sequencing, and restart. Do not detail them until this tranche passes.
+Later tracks can cover empty inventory, remote site ownership, natural-language sequencing, and restart. Keep them provisional until current evidence makes one of them part of the smallest useful next tranche.
 
 ### Orthogonality correction
 
@@ -52,7 +54,9 @@ Source stores a bed as one ordinary cell even though the game creates foot and h
 
 A user uploads a CSV file. The service authorizes the request, imports rows idempotently, records exact rejected rows, survives a worker restart, and does not duplicate accepted records.
 
-### Representative ladder
+### Provisional capability track
+
+Choose only the smallest evidence-useful next tranche from this map; the table is not a fixed rung count or an instruction to execute every row before graduation.
 
 | Rung | Newly active capability | Supplied scaffolds |
 |---|---|---|
@@ -79,7 +83,9 @@ The job store deletes the terminal result before the status endpoint acknowledge
 
 An agent receives a natural request, selects one typed tool, executes it exactly once against the intended target, persists a correlated result, and resumes after interruption without treating an older run as success.
 
-### Representative ladder
+### Provisional capability track
+
+Choose only the smallest evidence-useful next tranche from this map, and stop adding rungs when they no longer improve failure ownership enough to justify their cost.
 
 | Rung | Newly active capability | Supplied scaffolds |
 |---|---|---|
@@ -105,5 +111,5 @@ The orchestrator declares a deferred command accepted whenever any active tool j
 - Remove one material uncertainty per rung; use a paired boundary only when isolation is demonstrably impossible.
 - Qualify the oracle before trusting a pass, and distinguish `BLOCKED`, `INCONCLUSIVE`, and product `FAIL`.
 - Keep ordinary rungs stateless and recovery rungs intentionally stateful.
-- Detail only the next useful tranche.
+- Detail only the smallest evidence-useful next tranche; stop when added rungs no longer reduce uncertainty or cost approaches graduation.
 - The unchanged graduation gate remains the product claim.

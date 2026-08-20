@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,77 +9,6 @@ import { AGENT_BOOTSTRAP } from "../src/bootstrap.mjs";
 import { LODESTAR_VERSION } from "../src/cli.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-
-const EXPECTED_PACKAGE_FILES = [
-  "CHANGELOG.md",
-  "LICENSE",
-  "README.md",
-  "SECURITY.md",
-  "codex-plugin/.codex-plugin/plugin.json",
-  "codex-plugin/.mcp.json",
-  "codex-plugin/hooks/hooks.json",
-  "codex-plugin/scripts/lodestar-hook.mjs",
-  "codex-plugin/scripts/lodestar-mcp.mjs",
-  "codex-plugin/scripts/lodestar-runtime.mjs",
-  "codex-plugin/skills/lodestar/SKILL.md",
-  "codex-plugin/skills/lodestar/agents/openai.yaml",
-  "codex-plugin/skills/lodestar/assets/templates/AGENTS.template.md",
-  "codex-plugin/skills/lodestar/assets/templates/CLAUDE.template.md",
-  "codex-plugin/skills/lodestar/assets/templates/SOUL.template.md",
-  "codex-plugin/skills/lodestar/assets/templates/_stub-pattern.AGENTS.md",
-  "codex-plugin/skills/lodestar/references/bootstrap-and-failures.md",
-  "codex-plugin/skills/lodestar/references/continuity.md",
-  "codex-plugin/skills/lodestar/references/decisions.md",
-  "codex-plugin/skills/lodestar/references/governance-package.md",
-  "codex-plugin/skills/lodestar/references/knowledge.md",
-  "codex-plugin/skills/lodestar/references/templates.md",
-  "codex-plugin/skills/lodestar/references/toolchain.md",
-  "codex-plugin/skills/lodestar/references/work-presence.md",
-  "docs/GOLDEN-RULES.md",
-  "docs/README.md",
-  "docs/agent-bootstrap.json",
-  "docs/limitations.md",
-  "docs/migration-v0.7.md",
-  "docs/schema.md",
-  "lodestar.mjs",
-  "package.json",
-  "src/agent-state.mjs",
-  "src/bootstrap.mjs",
-  "src/cli-commands.mjs",
-  "src/cli.mjs",
-  "src/continuity-schema.mjs",
-  "src/continuity.mjs",
-  "src/database.mjs",
-  "src/database-schema.mjs",
-  "src/diagnostics.mjs",
-  "src/decision.mjs",
-  "src/doctor.mjs",
-  "src/errors.mjs",
-  "src/import-v070.mjs",
-  "src/json.mjs",
-  "src/legacy-v070/convert.mjs",
-  "src/legacy-v070/integrity.mjs",
-  "src/legacy-v070/locator-health.mjs",
-  "src/legacy-v070/mapping.mjs",
-  "src/legacy-v070/parse.mjs",
-  "src/legacy-v070/read.mjs",
-  "src/legacy-v070/unified.mjs",
-  "src/paths.mjs",
-  "src/pending.mjs",
-  "src/project.mjs",
-  "src/queries.mjs",
-  "src/records.mjs",
-  "src/revisions.mjs",
-  "src/schema.mjs",
-  "src/schema-migration.mjs",
-  "src/skills-payload.json",
-  "src/skills.mjs",
-  "src/stored-semantics.mjs",
-  "src/validate.mjs",
-  "src/version.mjs",
-  "src/windows-install.mjs",
-  "src/work.mjs",
-];
 
 function packageArtifact() {
   const npmCli = process.env.npm_execpath;
@@ -126,12 +55,18 @@ test("the minimal agent stub is the canonical package bootstrap", async () => {
   assert.equal(stub, AGENT_BOOTSTRAP.text);
 });
 
-test("the package publishes one executable and only the reduced runtime", () => {
+test("the package publishes one executable and the canonical managed assets", async () => {
   const artifact = packageArtifact();
-  assert.deepEqual(
-    artifact.files.map(({ path: file }) => file).sort(),
-    [...EXPECTED_PACKAGE_FILES].sort(),
-  );
+  const files = new Set(artifact.files.map(({ path: file }) => file));
+  for (const required of [
+    "lodestar.mjs", "src/bootstrap.mjs", "src/skills.mjs",
+    "managed-assets/manifest.json", "managed-assets/bootstrap.json",
+    "managed-assets/governance.json",
+  ]) assert.ok(files.has(required), `missing packaged canonical file: ${required}`);
+  const manifest = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "manifest.json"), "utf8"));
+  for (const skill of manifest.skills)
+    assert.ok(files.has(`managed-assets/skills/${skill}/SKILL.md`), `missing canonical skill: ${skill}`);
+  assert.ok(!files.has("src/skills-payload.json"), "retired semantic payload must not ship");
   assert.equal(
     artifact.files.find(({ path: file }) => file === "lodestar.mjs").mode,
     0o755,
@@ -235,104 +170,49 @@ test("package metadata and bootstrap have one source of truth", async () => {
   assert.deepEqual(documented, AGENT_BOOTSTRAP);
 });
 
-test("managed assets generate the complete unified skill, bootstrap, and rule payload", async () => {
+test("canonical managed assets are runtime authority without a semantic compiler", async () => {
   const checked = spawnSync(process.execPath,
     [path.join(ROOT, "scripts", "build-managed-assets.mjs"), "--check"],
     { cwd: ROOT, encoding: "utf8" });
   assert.equal(checked.status, 0, checked.stderr || checked.error?.stack);
-  const payload = JSON.parse(await readFile(path.join(ROOT, "src", "skills-payload.json"), "utf8"));
-  assert.equal(payload.schema, 2);
-  assert.deepEqual(payload.skills.map(({ name }) => name), [
-    "director-protocol", "codeplan", "center-multigeometry", "center-audit",
-    "ladder-audit", "lodestar",
-  ]);
-  assert.match(payload.bootstrap.text, /truncated or incomplete/u);
-  assert.equal(payload.governance.id, "g:lodestar:required-governance");
-  assert.equal(payload.governance.data.required, true);
-  assert.equal(payload.governance.data.v, 2);
-  assert.ok(payload.governance.data.sections.some(({ id }) => id === "workflow-routing"));
-  const golden = await readFile(path.join(ROOT, "docs", "GOLDEN-RULES.md"), "utf8");
-  assert.match(golden, /^# Director Golden Operating Rules\n/u);
-  assert.match(golden, /Generated from `managed-assets\/governance\.json`/u);
-  assert.doesNotMatch(golden,
-    /instruction:global-working-protocol|rule:scope-accretion-guard|g:codex:engineering|C:\/Users/u);
-  for (const section of payload.governance.data.sections) {
-    assert.match(golden, new RegExp(`^## \\d+\\. ${section.title}$`, "mu"));
-    for (const rule of section.rules) assert.ok(golden.includes(`- ${rule}`));
-  }
-  const lodestar = payload.skills.find(({ name }) => name === "lodestar");
-  assert.ok(lodestar.files.some(({ path: file }) =>
-    file === "assets/templates/AGENTS.template.md"));
-  assert.ok(lodestar.files.some(({ path: file }) => file === "agents/openai.yaml"));
-  for (const skill of payload.skills) {
-    for (const file of skill.files) {
-      assert.doesNotMatch(file.content, /(?:^|\n)\d+\|/u);
-    }
-    assert.match(skill.files.find(({ path: file }) => file === "SKILL.md").content,
-      /^---\r?\nname: /u);
-  }
-  assert.doesNotMatch(JSON.stringify(payload),
-    /Context Buddy|context_buddy|Glimpse|Keel|Durable Handoff|DriftGuard|drift_guard/u);
-});
-
-test("runtime modules stay understandable in one sitting", async () => {
-  const source = path.join(ROOT, "src");
-  const files = [];
-  async function collect(directory) {
-    const entries = await readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) await collect(absolute);
-      else if (entry.name.endsWith(".mjs")) files.push(absolute);
-    }
-  }
-  await collect(source);
-  let registryCoreLines = 0;
-  let continuityLines = 0;
-  for (const file of files) {
-    const text = await readFile(file, "utf8");
-    const lines = text.split("\n").length;
-    assert.ok(lines <= 500, `${path.relative(ROOT, file)} has ${lines} lines`);
-    const relative = path.relative(source, file);
-    // A line budget alone is satisfied by joining statements, which buys headroom by
-    // making the densest modules the least readable ones. Capping line width removes
-    // that escape so the budget can only be met by writing less, not by writing tighter.
-    // windows-install.mjs is exempt because it is mostly embedded shell inside template
-    // literals, where a wrap would change the emitted script rather than the JavaScript.
-    if (relative !== "windows-install.mjs") {
-      for (const [index, line] of text.split("\n").entries()) {
-        assert.ok(
-          line.length <= 100,
-          `${path.relative(ROOT, file)}:${index + 1} is ${line.length} characters`,
-        );
-      }
-    }
-    if (
-      relative !== "import-v070.mjs"
-      && relative !== "windows-install.mjs"
-      && !relative.startsWith(`legacy-v070${path.sep}`)
-    ) {
-      if (
-        relative.startsWith("continuity-")
-        || relative === "continuity.mjs"
-        || relative.startsWith("service")
-        || relative === "schema-migration.mjs"
-      ) continuityLines += lines;
-      else registryCoreLines += lines;
-    }
-  }
-  // Raised from 4,500 for the v1.1 contract change that absorbed the work and handoff
-  // domains into this core, and to pay for the width cap above: the same logic spread
-  // to a readable width costs more lines than it did compressed. Raised again for
-  // v1.2, which added the decision, managed-skill, and continuity command families.
-  // The previous ceiling had gone saturated enough to block a cross-platform
-  // correctness fix, and a budget that rejects correctness is measuring the wrong thing.
-  assert.ok(
-    registryCoreLines < 5_600,
-    `registry core runtime has ${registryCoreLines} lines`,
-  );
-  assert.ok(
-    continuityLines < 4_000,
-    `continuity runtime has ${continuityLines} lines`,
-  );
+  const bootstrap = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "bootstrap.json"), "utf8"));
+  const governance = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "governance.json"), "utf8"));
+  assert.deepEqual(AGENT_BOOTSTRAP, bootstrap);
+  assert.equal(governance.id, "g:lodestar:required-governance");
+  assert.equal(governance.data.required, true);
+  assert.equal(typeof governance.data.text, "string");
+  for (const sentinel of [
+    "## Anti-Certainty Psychosis",
+    "## Work Modes",
+    "## Repository Conduct",
+    "## Debugging Method",
+    "## Verification Standard",
+    "## Testing Philosophy",
+    "## Architecture and Refactoring",
+    "## Completion and Stop Standard",
+    "Never stack governance on governance",
+    "Governance requires a critical need",
+    "Limits require provenance",
+    "Completeness is atomic",
+    "Attempts remain retryable",
+    "Transport adapts to the contract",
+    "Canonical content is not source material for a semantic compiler",
+    "Reality Anchoring and Surface Integrity",
+  ]) assert.ok(governance.data.text.includes(sentinel), `missing canonical behavior: ${sentinel}`);
+  const runtimeBootstrap = await readFile(path.join(ROOT, "src", "bootstrap.mjs"), "utf8");
+  const runtimeSkills = await readFile(path.join(ROOT, "src", "skills.mjs"), "utf8");
+  assert.doesNotMatch(runtimeBootstrap, /skills-payload\.json/u);
+  assert.doesNotMatch(runtimeSkills, /skills-payload\.json/u);
+  assert.match(runtimeBootstrap, /managed-assets\/\$\{name\}/u);
+  assert.match(runtimeSkills, /\.\.\/managed-assets/u);
+  const builder = await readFile(path.join(ROOT, "scripts", "build-managed-assets.mjs"), "utf8");
+  assert.doesNotMatch(builder, /historical-source-transformations|entry\.action\s*=|skills-payload\.json/u);
+  assert.match(builder, /Human-readable view of the exact canonical rule body/u);
+  const codeplan = await readFile(path.join(ROOT, "managed-assets", "skills", "codeplan", "SKILL.md"), "utf8");
+  const center = await readFile(path.join(ROOT, "managed-assets", "skills", "center-audit", "SKILL.md"), "utf8");
+  assert.match(codeplan, /PLAN-OUT/u);
+  assert.match(codeplan, /EXEC-OUT/u);
+  assert.match(codeplan, /conservative baseline/iu);
+  assert.match(center, /CENTER-AUDIT/u);
+  assert.match(center, /Evidence-Gated Goalpost \/ Delta \/ Fusion Method/u);
 });

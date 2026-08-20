@@ -1,11 +1,8 @@
-import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
-import { boundedDiagnosticValue } from "../diagnostics.mjs";
 import { canonicalStringify } from "../json.mjs";
 import {
   identifierIsValid,
-  LIMITS,
   validatePutInput,
 } from "../validate.mjs";
 import {
@@ -14,6 +11,7 @@ import {
   selectLocatorHealth,
 } from "./locator-health.mjs";
 import { locationText, mapCandidate } from "./mapping.mjs";
+
 
 const CONTROL = /[\u0000-\u001f\u007f]/gu;
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/gu;
@@ -37,13 +35,7 @@ function reportSection(state, name) {
     value(...values) {
       for (const value of values) {
         state[name].total += 1;
-        if (entries.length < LIMITS.migrationReportItemsPerSection) {
-          Array.prototype.push.call(entries, boundedDiagnosticValue(value, {
-            maximumBytes: LIMITS.migrationReportItemBytes,
-          }));
-        } else {
-          state[name].omitted += 1;
-        }
+        Array.prototype.push.call(entries, value);
       }
       return entries.length;
     },
@@ -53,9 +45,9 @@ function reportSection(state, name) {
 
 function conversionReport() {
   const state = {
-    skipped: { total: 0, omitted: 0 },
-    unsupported: { total: 0, omitted: 0 },
-    id_mappings: { total: 0, omitted: 0 },
+    skipped: { total: 0 },
+    unsupported: { total: 0 },
+    id_mappings: { total: 0 },
   };
   const report = {
     skipped: reportSection(state, "skipped"),
@@ -72,34 +64,16 @@ function conversionReport() {
 function finalizeReport(report) {
   const state = report[REPORT_STATE];
   report.reporting = {
-    items_per_section_maximum: LIMITS.migrationReportItemsPerSection,
-    item_bytes_maximum: LIMITS.migrationReportItemBytes,
-    truncated: Object.values(state).some(({ omitted }) => omitted > 0),
+    truncated: false,
     sections: Object.fromEntries(
       Object.entries(state).map(([name, values]) => [name, {
         entries_total: values.total,
         entries_reported: report[name].length,
-        entries_omitted: values.omitted,
+        entries_omitted: 0,
       }]),
     ),
   };
   return report;
-}
-
-function boundedLegacyItems(values, field, report, item) {
-  if (values.length <= LIMITS.legacyFieldItems) return values;
-  report.skipped.push({
-    kind: field,
-    identifier: item.bundle.id,
-    source: locationText(item.location),
-    reason: "field_processing_limit",
-    field,
-    items: values.length,
-    processed: LIMITS.legacyFieldItems,
-    omitted_items: values.length - LIMITS.legacyFieldItems,
-    disposition: "remaining_items_skipped",
-  });
-  return values.slice(0, LIMITS.legacyFieldItems);
 }
 
 function availableGeneratedId(source, candidate, used, reserved) {
@@ -144,10 +118,7 @@ function routeRelationship(route, report, owner) {
     .replace(CONTROL, " ")
     .replace(UNPAIRED_SURROGATE, "�")
     .trim();
-  const cleaned = normalized
-    && Buffer.byteLength(normalized, "utf8") <= LIMITS.relationshipBytes
-    ? normalized
-    : `route:${hash(raw).slice(0, 32)}`;
+  const cleaned = normalized || `route:${hash(raw).slice(0, 32)}`;
   if (cleaned !== raw) {
     report.unsupported.push({
       kind: "link",
@@ -265,12 +236,7 @@ export function convertV070(source) {
       });
     }
     const candidates = Array.isArray(item.payload.aliases)
-      ? boundedLegacyItems(
-        item.payload.aliases,
-        "alias",
-        report,
-        item,
-      )
+      ? item.payload.aliases
       : [];
     for (const alias of candidates) {
       if (!identifierIsValid(alias)) {
@@ -314,18 +280,8 @@ export function convertV070(source) {
         });
         continue;
       }
-      if (item.bundle.aliases.length < LIMITS.aliasesPerRecord) {
-        item.bundle.aliases.push(alias);
-        aliasOwners.set(alias, item.bundle.id);
-      } else {
-        report.skipped.push({
-          kind: "alias",
-          identifier: alias,
-          source: locationText(item.location),
-          reason: "alias_limit",
-          disposition: "skipped",
-        });
-      }
+      item.bundle.aliases.push(alias);
+      aliasOwners.set(alias, item.bundle.id);
     }
   }
 
@@ -359,18 +315,6 @@ export function convertV070(source) {
         return;
       }
       seen.add(key);
-      if (item.bundle.links.length >= LIMITS.linksPerRecord) {
-        report.skipped.push({
-          kind: "link",
-          identifier: item.bundle.id,
-          source: locationText(item.location),
-          reason: "link_limit",
-          target: originalTarget,
-          origin,
-          disposition: "skipped",
-        });
-        return;
-      }
       item.bundle.links.push({ relationship, to_id: target });
     };
 
@@ -384,12 +328,7 @@ export function convertV070(source) {
       });
     }
     for (const target of Array.isArray(item.payload.links)
-      ? boundedLegacyItems(
-        item.payload.links,
-        "link",
-        report,
-        item,
-      )
+      ? item.payload.links
       : []) {
       append("related", target, "links");
     }
@@ -411,12 +350,7 @@ export function convertV070(source) {
       });
     } else {
       const routes = Object.keys(item.payload.routes ?? {}).sort();
-      for (const route of boundedLegacyItems(
-        routes,
-        "route",
-        report,
-        item,
-      )) {
+      for (const route of routes) {
         append(
           routeRelationship(route, report, item.bundle.id),
           item.payload.routes[route],

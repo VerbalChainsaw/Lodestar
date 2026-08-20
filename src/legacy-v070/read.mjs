@@ -9,9 +9,7 @@ import path from "node:path";
 import { lodestarError, wrapError } from "../errors.mjs";
 import {
   canonicalStringify,
-  readHandleBounded,
 } from "../json.mjs";
-import { LIMITS } from "../validate.mjs";
 import { verifyV070Integrity } from "./integrity.mjs";
 import { parseJson, parseJsonLines } from "./parse.mjs";
 
@@ -23,8 +21,6 @@ const LOCATOR_HEALTH_STATES = new Set([
   "unreadable",
   "unchecked",
 ]);
-const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
-const MAX_SINGLE_FILE_BYTES = 64 * 1024 * 1024;
 
 function digest(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -92,7 +88,6 @@ async function assertComponents(base, relative, { optional = false } = {}) {
 
 function tracker() {
   return {
-    totalBytes: 0,
     files: new Map(),
   };
 }
@@ -103,7 +98,6 @@ async function readConfinedBuffer(
   state,
   {
     label = relative,
-    maximum = MAX_SINGLE_FILE_BYTES,
     optional = false,
   } = {},
 ) {
@@ -132,67 +126,9 @@ async function readConfinedBuffer(
           { identifiers: { path: relative } },
         );
       }
-      if (info.size > maximum) {
-        throw lodestarError(
-          "resource_limit",
-          "A v0.7 source file exceeds its byte limit.",
-          {
-            identifiers: {
-              path: relative,
-              bytes: info.size,
-              maximum,
-            },
-          },
-        );
-      }
-      const remaining = LIMITS.importBytes - state.totalBytes;
-      if (info.size > remaining) {
-        throw lodestarError(
-          "resource_limit",
-          "The v0.7 source exceeds the total import byte limit.",
-          {
-            identifiers: {
-              resource: "legacy_import",
-              bytes_at_least: state.totalBytes + info.size,
-              maximum: LIMITS.importBytes,
-            },
-          },
-        );
-      }
-      buffer = await readHandleBounded(handle, {
-        maximum: Math.min(maximum, remaining),
-        resource: "legacy_source_file",
-        identifiers: { path: relative },
-      });
+      buffer = await handle.readFile();
     } finally {
       await handle.close();
-    }
-    if (buffer.length > maximum) {
-      throw lodestarError(
-        "resource_limit",
-        "A v0.7 source file grew beyond its byte limit while being read.",
-        {
-          identifiers: {
-            path: relative,
-            bytes: buffer.length,
-            maximum,
-          },
-        },
-      );
-    }
-    state.totalBytes += buffer.length;
-    if (state.totalBytes > LIMITS.importBytes) {
-      throw lodestarError(
-        "resource_limit",
-        "The v0.7 source exceeds the total import byte limit.",
-        {
-          identifiers: {
-            resource: "legacy_import",
-            bytes: state.totalBytes,
-            maximum: LIMITS.importBytes,
-          },
-        },
-      );
     }
     state.files.set(label, {
       absolute: physical,
@@ -227,11 +163,7 @@ export async function verifyLegacySourceUnchanged(snapshot) {
       const info = await lstat(expected.absolute);
       if (info.isSymbolicLink() || !info.isFile()) throw new Error("file type changed");
       handle = await open(expected.absolute, "r");
-      const buffer = await readHandleBounded(handle, {
-        maximum: expected.bytes,
-        resource: "legacy_source_verification",
-        identifiers: { path: expected.label },
-      });
+      const buffer = await handle.readFile();
       if (
         buffer.length !== expected.bytes
         || digest(buffer) !== expected.sha256
@@ -308,11 +240,7 @@ export async function readV070Store(sourcePath) {
     generationRoot,
     "integrity.json",
     state,
-    {
-      label: `${generationRelative}/integrity.json`,
-      maximum: MAX_MANIFEST_BYTES,
-      optional: true,
-    },
+    { label: `${generationRelative}/integrity.json`, optional: true },
   );
   let integrity = "unsealed";
   if (manifestBuffer) {
@@ -378,18 +306,6 @@ export async function readV070Store(sourcePath) {
     );
   }
   const healthKeys = Object.keys(locatorHealth?.locators ?? {}).sort();
-  if (healthKeys.length > LIMITS.importRecords * 64) {
-    throw lodestarError(
-      "resource_limit",
-      "The v0.7 locator-health index exceeds its item limit.",
-      {
-        identifiers: {
-          items: healthKeys.length,
-          maximum: LIMITS.importRecords * 64,
-        },
-      },
-    );
-  }
   for (const key of healthKeys) {
     const health = locatorHealth.locators[key];
     if (
@@ -405,27 +321,12 @@ export async function readV070Store(sourcePath) {
       );
     }
   }
-  if (catalog.projects.length > LIMITS.importRecords) {
-    throw lodestarError(
-      "resource_limit",
-      "The v0.7 source exceeds the import record limit.",
-      {
-        identifiers: {
-          projects: catalog.projects.length,
-          maximum: LIMITS.importRecords,
-        },
-      },
-    );
-  }
-
-  const maximumRecords = LIMITS.importRecords - catalog.projects.length;
   const records = parseJsonLines(
     await readConfinedBuffer(generationRoot, "records/global.jsonl", state, {
       label: `${generationRelative}/records/global.jsonl`,
     }),
     "records/global.jsonl",
     "global",
-    maximumRecords,
   );
   const stems = new Map();
   for (const [projectIndex, project] of catalog.projects.entries()) {
@@ -452,20 +353,7 @@ export async function readV070Store(sourcePath) {
       }),
       relative,
       `project:${project.id}`,
-      maximumRecords - records.length,
     ));
-  }
-  if (records.length + catalog.projects.length > LIMITS.importRecords) {
-    throw lodestarError(
-      "resource_limit",
-      "The v0.7 source exceeds the import record limit.",
-      {
-        identifiers: {
-          records: records.length + catalog.projects.length,
-          maximum: LIMITS.importRecords,
-        },
-      },
-    );
   }
 
   const files = [...state.files.entries()]

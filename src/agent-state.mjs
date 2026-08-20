@@ -1,223 +1,176 @@
-import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { AGENT_BOOTSTRAP, REQUIRED_GOVERNANCE } from "./bootstrap.mjs";
 import { initializeDatabase, openDiagnosticDatabase, openOrInitializeWriteDatabase,
   openOrMigrateReadDatabase, openOrMigrateWriteDatabase, transaction } from "./database.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
-import { decisionDrop, decisionInjection, decisionProjection, decisionSet } from "./decision.mjs";
+import { decisionDrop, decisionInjection, decisionProjection, decisionSet,
+  decisionStatus } from "./decision.mjs";
 import { lodestarError } from "./errors.mjs";
 import {
   claimHandoffInside, handoffArm, handoffCheckpoint, handoffDisarm, handoffNow,
   handoffStartupView, handoffStatus, handoffTail,
 } from "./continuity.mjs";
-import { canonicalStringify, parseJsonText, readStreamBounded,
-  readTextFileBounded } from "./json.mjs";
+import { canonicalStringify, parseJsonText, readStreamComplete,
+  readTextFileComplete } from "./json.mjs";
 import { resolveInputPath } from "./paths.mjs";
 import { pendingAdd, pendingCount, pendingDrop, pendingList,
   pendingPromote } from "./pending.mjs";
-import { normalizedRows, resolveIdentity, resolveProject, scope } from "./project.mjs";
+import { hash, normalizedRows, recordInput, resolveIdentity, resolveProject,
+  scope } from "./project.mjs";
 import { exportRegistry, findRecords, linkedRecords } from "./queries.mjs";
 import { coercePutRecord, deleteRecord, getRecord, getRecordById, normalizeRecord,
-  putRecord } from "./records.mjs";
-import { currentRevision } from "./revisions.mjs";
-import { LIMITS, validatePutInput } from "./validate.mjs";
+  putRecord, writeRecordSnapshot } from "./records.mjs";
+import { allocateRevision, currentRevision } from "./revisions.mjs";
+import { validateLimit, validatePutInput } from "./validate.mjs";
 import { workDone, workExpire, workStart, workStatus } from "./work.mjs";
 export { normalizeMachinePath, resolveIdentity, resolveProject } from "./project.mjs";
-// The budget belongs to whoever reads the projection, not to Lodestar. 24 KiB is a
-// starting point — about 6K tokens, which is generous for a small local model and
-// negligible for a 200K-context host — so it is a default, not a wall. What keeps it a
-// forcing function is that a raise is deliberate and visible: `start` reports the budget
-// in force and where it came from, and `doctor` measures against the same number.
-export const STARTUP_BYTES = 24 * 1024;
-// A floor that always leaves room for the governance record plus a real projection, and
-// a ceiling at the per-record storage limit. Outside these a budget is a typo.
-const BUDGET_FLOOR = 8 * 1024;
-const BUDGET_CEILING = 256 * 1024;
-// How many in-scope records the projection will name but not carry. Stubs are cheap
-// enough that this is bounded by usefulness rather than by bytes.
-const STUB_LIMIT = 200;
-
-const readBudget = (raw) => {
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < BUDGET_FLOOR || value > BUDGET_CEILING) return null;
-  return value;
-};
-
-// Precedence runs from most immediate to most durable: an explicit flag, then the host's
-// environment, then a project's own configuration, then the machine's. A project setting
-// wins over a global one because the project is the narrower statement.
-export function resolveStartupBudget(db, project, options = {}) {
-  const flag = readBudget(options.startupBudget);
-  if (flag) return { bytes: flag, source: "option" };
-  const environment = readBudget(process.env.LODESTAR_STARTUP_BUDGET);
-  if (environment) return { bytes: environment, source: "environment" };
-  const rows = db.prepare("SELECT scope,json_extract(content_json,"
-    + "'$.value.startup_budget_bytes') AS bytes FROM records "
-    + "WHERE type='config' AND scope IN ('global',?)").all(project.scope);
-  for (const [wanted, source] of [[project.scope, "project"], ["global", "global"]]) {
-    const found = rows.find(({ scope: at, bytes }) => at === wanted && readBudget(bytes));
-    if (found) return { bytes: readBudget(found.bytes), source };
-  }
-  return { bytes: STARTUP_BYTES, source: "default" };
-}
 export const operationResult = (data, options = {}) => ({ data,
   revision: options.revision ?? 0, scope: options.scope ?? scope(),
   more: options.more ?? false, next: options.next ?? [] });
-// The budget is measured on encoded JSON so a UTF-8 character is never split.
-const startupBytes = (data, revision, project, identity, more, next) => Buffer.byteLength(
-  canonicalStringify({ v: 1, ok: true, operation: "start", revision,
-    scope: scope(project, identity), data, more, next }), "utf8") + 1;
 
-// What a newly required record costs the scope it lands in. Global records are charged
-// to every project, so the figure reported is the heaviest project the mark affects.
-export function requiredBudgetNotice(db, value) {
-  if (value?.content?.value?.required !== true) return {};
-  const global = value.scope === "global";
-  const rows = db.prepare("SELECT id,scope FROM records "
-    + (global ? "WHERE json_extract(content_json,'$.value.required')=1"
-      : "WHERE scope IN ('global',?) AND json_extract(content_json,'$.value.required')=1"))
-    .all(...(global ? [] : [value.scope]));
-  const totals = new Map();
-  for (const row of rows) {
-    let bytes = 0;
-    try { bytes = Buffer.byteLength(JSON.stringify(normalizeRecord(getRecordById(db, row.id))),
-      "utf8"); } catch { continue; }
-    const key = row.scope === "global" ? null : row.scope;
-    totals.set(key, (totals.get(key) ?? 0) + bytes);
+function startProjectionInside(db, project, identity, options = {}) {
+  const handoff = handoffStartupView(claimHandoffInside(db, project, identity, options));
+  const order = "ORDER BY json_extract(content_json,'$._lodestar.priority') DESC,"
+    + "json_extract(content_json,'$._lodestar.revision') DESC,id";
+  const storedRequired = normalizedRows(db,
+    "SELECT id FROM records WHERE scope IN ('global',?) "
+      + "AND json_extract(content_json,'$.value.required')=1 " + order, project.scope);
+  const required = [REQUIRED_GOVERNANCE,
+    ...storedRequired.filter(({ id }) => id !== REQUIRED_GOVERNANCE.id)];
+  const optionalWhere = "FROM records WHERE scope IN ('global',?) "
+    + "AND type NOT IN ('work','handoff','project','decision-event','config','startup-snapshot') "
+    + "AND type NOT LIKE 'handoff-%' "
+    + "AND COALESCE(json_extract(content_json,'$.value.required'),0)!=1 ";
+  const optional = db.prepare(`SELECT id ${optionalWhere}${order}`).all(project.scope)
+    .map(({ id }) => normalizeRecord(getRecordById(db, id)));
+  const stub = (record) => ({
+    id: record.id,
+    kind: record.kind,
+    scope: record.scope,
+    availability: record.availability,
+    priority: record.priority,
+    revision: record.revision,
+    updated_at: record.updated_at,
+    data: { name: record.data.name },
+  });
+  const target = options.startupBudget ?? null;
+  const budget = {
+    bytes: target,
+    source: target === null ? "unbounded" : "option",
+    applies_to: "optional",
+    target_met: true,
+  };
+  const data = {
+    project: { id: project.id, scope: project.scope, name: project.name,
+      root: project.root, cwd: project.cwd, identity_source: project.identity_source,
+      git_common_directory: project.git_common_directory ?? null },
+    required,
+    decisions: decisionProjection(db, project),
+    context: [],
+    available: optional.map(stub),
+    active_work: workStatus(db, project).records,
+    handoff,
+    pending: pendingCount(db, project),
+    budget,
+    ...(options.snapshot ? { startup_snapshot: options.snapshot } : {}),
+  };
+  if (target === null) {
+    data.context = optional;
+    data.available = [];
+  } else {
+    for (const record of optional) {
+      const candidate = data.context.concat(record);
+      const candidateData = { ...data, context: candidate,
+        available: data.available.slice(1) };
+      if (Buffer.byteLength(canonicalStringify(candidateData), "utf8") > target) break;
+      data.context = candidate;
+      data.available = candidateData.available;
+    }
+    budget.target_met = data.available.length === 0
+      && Buffer.byteLength(canonicalStringify(data), "utf8") <= target;
   }
-  const base = totals.get(null) ?? 0;
-  let worst = { scope: value.scope, bytes: base };
-  for (const [key, bytes] of totals) {
-    if (key !== null && base + bytes > worst.bytes) worst = { scope: key, bytes: base + bytes };
-  }
-  if (worst.bytes <= STARTUP_BYTES) return {};
-  return { more: true, next: [`lodestar doctor — required records in ${worst.scope} now total `
-    + `${worst.bytes} of the ${STARTUP_BYTES} startup budget, so start will demote some`] };
+  const next = [];
+  if (data.available.length > 0) next.push(`lodestar get "${data.available[0].id}"`);
+  return { data, revision: currentRevision(db), more: data.available.length > 0, next };
 }
 
 export function startProjection(db, project, identity, options = {}) {
+  return transaction(db, () => startProjectionInside(db, project, identity, options),
+    options.database);
+}
+
+const snapshotDigest = (projection) => {
+  const snapshot = projection?.data?.startup_snapshot;
+  const normalized = { ...projection, data: { ...projection?.data,
+    startup_snapshot: { ...snapshot, digest: "0".repeat(64) } } };
+  return createHash("sha256").update(canonicalStringify(normalized)).digest("hex");
+};
+const snapshotId = (project, identity) => `startup-snapshot:${hash(
+  canonicalStringify([project.scope, identity.session]), 64)}`;
+const snapshotFailure = (id, project, identity) => lodestarError(
+  "startup_snapshot_conflict",
+  "The persisted Lodestar startup snapshot conflicts with its canonical identity or digest.",
+  {
+    identifiers: { id, project: project.scope, session: identity.session },
+    action: "Do not apply this response. Retry lodestar start with the same session identity; "
+      + "if the conflict remains, run lodestar doctor and recover the stored snapshot "
+      + "before continuing.",
+  },
+);
+
+function replaySnapshot(db, id, project, identity) {
+  const row = db.prepare("SELECT type,scope,content_json FROM records WHERE id=?").get(id);
+  if (!row) return null;
+  try {
+    const stored = JSON.parse(row.content_json)?.value;
+    const projection = stored?.projection;
+    if (row.type !== "startup-snapshot" || row.scope !== project.scope
+        || stored?.v !== 1 || stored?.project?.id !== project.id
+        || stored?.project?.scope !== project.scope || stored?.session !== identity.session
+        || stored?.digest !== snapshotDigest(projection)
+        || projection?.data?.startup_snapshot?.id !== id
+        || projection?.data?.startup_snapshot?.digest !== stored?.digest
+        || projection?.data?.startup_snapshot?.persisted !== true
+        || !projection || typeof projection !== "object" || Array.isArray(projection)
+        || !Object.hasOwn(projection, "data") || !Number.isSafeInteger(projection.revision)
+        || typeof projection.more !== "boolean" || !Array.isArray(projection.next)
+        || projection.scope?.project !== project.scope
+        || projection.scope?.session !== identity.session) throw new Error("invalid snapshot");
+    return projection;
+  } catch {
+    throw snapshotFailure(id, project, identity);
+  }
+}
+
+export function startSnapshotProjection(db, project, identity, options = {}) {
+  if (!identity.session) {
+    const result = startProjection(db, project, identity, options);
+    return operationResult(result.data, { ...result, scope: scope(project, identity) });
+  }
+  const id = snapshotId(project, identity);
+  const snapshotShape = { id, digest: "0".repeat(64), persisted: true };
   return transaction(db, () => {
-    const handoff = handoffStartupView(claimHandoffInside(db, project, identity, options));
-    const order = "ORDER BY json_extract(content_json,'$._lodestar.priority') DESC,"
-      + "json_extract(content_json,'$._lodestar.revision') DESC,id";
-    const storedRequired = normalizedRows(db,
-      "SELECT id FROM records WHERE scope IN ('global',?) "
-        + "AND json_extract(content_json,'$.value.required')=1 " + order, project.scope);
-    const required = [REQUIRED_GOVERNANCE,
-      ...storedRequired.filter(({ id }) => id !== REQUIRED_GOVERNANCE.id)];
-    const budget = resolveStartupBudget(db, project, options);
-    const limit = options.optionalLimit ?? 12;
-    // `config` joins the types startup never projects as context: it describes how the
-    // projection is built, so carrying it would spend the budget describing the budget.
-    const optionalWhere = "FROM records WHERE scope IN ('global',?) "
-      + "AND type NOT IN ('work','handoff','project','decision-event','config') "
-      + "AND type NOT LIKE 'handoff-%' "
-      + "AND COALESCE(json_extract(content_json,'$.value.required'),0)!=1 ";
-    const optionalTotal = Number(db.prepare(`SELECT count(*) AS count ${optionalWhere}`)
-      .get(project.scope).count);
-    const optional = db.prepare(`SELECT id ${optionalWhere}${order} LIMIT ?`)
-      .all(project.scope, limit);
-    // Everything shed becomes a stub instead of vanishing. A stub costs about a
-    // twentieth of a record and keeps the id, so an agent that needs one fetches it with
-    // a single `lodestar get`. Dropping records outright and pointing at a broad `find`
-    // spent more reading than the shedding saved — the agent searched, re-read up to
-    // fifty records, and still might not surface the one that mattered. The budget
-    // exists to stop that, not to cause it.
-    const carried = new Set(optional.map(({ id }) => id));
-    const available = db.prepare(`SELECT id,name,type AS kind ${optionalWhere}${order} LIMIT ?`)
-      .all(project.scope, STUB_LIMIT)
-      .filter(({ id }) => !carried.has(id));
-    // A projected record carries no display name, so demoting one to a stub needs the
-    // name from the row it came from. One scoped query is cheaper than a lookup per
-    // demotion, and a stub without a name makes the agent fetch it just to find out.
-    const nameById = new Map(db
-      .prepare("SELECT id,name FROM records WHERE scope IN ('global',?)")
-      .all(project.scope).map(({ id, name }) => [id, name]));
-    const omitted = {};
-    if (optionalTotal > optional.length) omitted.context = optionalTotal - optional.length;
-    const data = {
-      project: { id: project.id, scope: project.scope, name: project.name,
-        root: project.root, cwd: project.cwd, identity_source: project.identity_source,
-        git_common_directory: project.git_common_directory ?? null },
-      required,
-      decisions: decisionProjection(db, project),
-      context: optional.map(({ id }) => normalizeRecord(getRecordById(db, id))),
-      active_work: workStatus(db, project).records,
-      handoff,
-      pending: pendingCount(db, project),
-      available,
-      // Stated so a reader can tell a shed projection from a small one, and can see that
-      // a non-default budget is in force rather than wondering why the numbers moved.
-      budget: { bytes: budget.bytes, source: budget.source },
-      omitted,
-    };
-    const next = [];
-    if (handoff?.packet?.summary) next.push(`lodestar handoff status --cwd "${project.cwd}"`);
-    const revision = currentRevision(db);
-    const fits = () => startupBytes(data, revision, project, identity,
-      Object.keys(omitted).length > 0, next) <= budget.bytes;
-    // Shedding demotes in one direction: optional context, then advisory work, then the
-    // least important required records. Each demotion leaves a stub behind, so the
-    // projection always names everything that exists in scope even when it cannot carry
-    // it. `start` is the first command of every session; refusing to run stops all work,
-    // so it is never the answer while there is anything left to demote.
-    // The recovery line is charged to the budget before the next measurement, never
-    // after. Adding it once the loops have finished grows the envelope past the limit
-    // the loops just satisfied, which is how a bounded projection ships over budget.
-    const recover = `lodestar find "${project.name}" --scope ${project.scope}`;
-    const chargeRecovery = () => {
-      if (!next.includes(recover)) next.unshift(recover);
-    };
-    const demote = (list, key) => {
-      const record = list.pop();
-      available.unshift({ id: record.id, name: nameById.get(record.id) ?? record.id,
-        kind: record.kind });
-      omitted[key] = (omitted[key] ?? 0) + 1;
-      chargeRecovery();
-    };
-    const drop = () => {
-      available.pop();
-      omitted.hidden = (omitted.hidden ?? 0) + 1;
-      chargeRecovery();
-    };
-    const compactHandoff = () => {
-      const packet = data.handoff.packet;
-      const omittedPacket = packet.summary ? packet.omitted : {
-        rules: packet.rules.length,
-        entries: packet.entries.length,
-        evidence: packet.evidence.length,
-        tail: packet.recentTail.items.length,
-      };
-      data.handoff = { recovery: data.handoff.recovery, packet: {
-        format: packet.format,
-        id: packet.id,
-        generation: packet.generation,
-        integrity: packet.integrity,
-        summary: true,
-        omitted: { ...omittedPacket, goal: 1, nextMove: 1 },
-      } };
-      omitted.handoff = (omitted.handoff ?? 0) + 1;
-      chargeRecovery();
-    };
-    if (omitted.context) chargeRecovery();
-    while (!fits() && data.context.length) demote(data.context, "context");
-    while (!fits() && data.active_work.length) demote(data.active_work, "work");
-    // A stub for an optional record is the cheapest thing here to lose — a pointer to
-    // something already judged not worth carrying — so every one of them goes before a
-    // required record's content does. Demoted records are unshifted to the front, which
-    // leaves the optional stubs at the tail exactly where popping removes them first.
-    while (!fits() && available.length) drop();
-    // The governance record states the operating contract, so it is demoted last and
-    // only if it is the one thing standing between here and the budget.
-    while (!fits() && data.required.length > 1) demote(data.required, "required");
-    while (!fits() && available.length) drop();
-    // A large handoff is already summarized before it reaches this projection, but the
-    // governance record can leave less room than that fixed summary target. Keep the
-    // atomic claim and stable packet identity, shed only inline packet detail, and point
-    // the claimant at `handoff status` for exact recovery instead of overrunning start.
-    if (!fits() && data.handoff) compactHandoff();
-    const more = Object.keys(omitted).length > 0;
-    return { data, revision, more, next };
+    const replay = replaySnapshot(db, id, project, identity);
+    if (replay) return replay;
+    const result = startProjectionInside(db, project, identity,
+      { ...options, snapshot: snapshotShape });
+    options.beforePersist?.();
+    const revision = allocateRevision(db);
+    const projection = operationResult({ ...result.data, startup_snapshot: snapshotShape },
+      { ...result, revision, scope: scope(project, identity) });
+    const digest = snapshotDigest(projection);
+    projection.data.startup_snapshot.digest = digest;
+    const timestamp = (options.now?.() ?? new Date()).toISOString();
+    writeRecordSnapshot(db, recordInput(id, "startup-snapshot", id, project.scope, 0, {
+      v: 1,
+      project: { id: project.id, scope: project.scope },
+      session: identity.session,
+      identity: { agent: identity.agent, harness: identity.harness, actor: identity.actor },
+      projection,
+      digest,
+    }), { createdAt: timestamp, updatedAt: timestamp, revision });
+    return projection;
   }, options.database);
 }
 
@@ -232,11 +185,10 @@ const identity = (options, write = false) => resolveIdentity({ session: options[
   agent: options["--agent"], harness: options["--harness"] }, process.env, write);
 
 async function input(options, io, resource) {
-  const bounds = { maximum: LIMITS.putInputBytes, resource };
   const text = options["--file"]
-    ? await readTextFileBounded(resolveInputPath(options["--file"]), bounds)
-    : await readStreamBounded(io.stdin, bounds);
-  return parseJsonText(text, { maximum: LIMITS.putInputBytes, resource });
+    ? await readTextFileComplete(resolveInputPath(options["--file"]), { resource })
+    : await readStreamComplete(io.stdin, { resource });
+  return parseJsonText(text, { resource });
 }
 
 const scoped = (db, project, actor, data, extra = {}) => operationResult(data, {
@@ -290,23 +242,25 @@ export async function dispatch(command, parsed, database, io) {
     return withDatabase(openOrInitializeWriteDatabase, database, (db) => {
       const actor = identity(options);
       const project = resolveProject(db, cwd(options));
-      const result = startProjection(db, project, actor,
-        { database, startupBudget: options["--startup-budget"] });
-      return scoped(db, project, actor, result.data, result);
+      const startupBudget = options["--startup-budget"] === undefined
+        ? null
+        : validateLimit(options["--startup-budget"], { field: "startup-budget" });
+      return startSnapshotProjection(db, project, actor, { database, startupBudget });
     });
   }
   if (command === "put") {
     const value = coercePutRecord(await input(options, io, "put_input"));
     validatePutInput(value);
     return withDatabase(openOrInitializeWriteDatabase, database, (db) => {
+      const owned = db.prepare("SELECT type FROM records WHERE id=?").get(value.id);
+      if (value.type === "startup-snapshot" || owned?.type === "startup-snapshot") {
+        throw lodestarError("reserved_record_type",
+          "Startup snapshots are owned by lodestar start and cannot be changed publicly.",
+          { identifiers: { id: value.id, type: "startup-snapshot" } });
+      }
       const record = putRecord(db, value, { database });
       return operationResult(normalizeRecord(record), {
-        revision: currentRevision(db), scope: unscoped(record),
-        // Marking a record required is where the budget is actually spent, and it used
-        // to say nothing. The cost then surfaced at some later `start`, in some other
-        // project, as records quietly demoted — far from the decision that caused it.
-        // Reported, never refused: a bulk import must not fail on its last record.
-        ...requiredBudgetNotice(db, value) });
+        revision: currentRevision(db), scope: unscoped(record) });
     });
   }
   if (["get", "find", "links", "export"].includes(command)) {
@@ -314,6 +268,12 @@ export async function dispatch(command, parsed, database, io) {
   }
   if (command === "delete") {
     return withDatabase(openOrMigrateWriteDatabase, database, (db) => {
+      const owned = db.prepare("SELECT type FROM records WHERE id=?").get(positionals[0]);
+      if (owned?.type === "startup-snapshot") {
+        throw lodestarError("reserved_record_type",
+          "Startup snapshots are owned by lodestar start and cannot be deleted publicly.",
+          { identifiers: { id: positionals[0], type: owned.type } });
+      }
       const result = deleteRecord(db, positionals[0], { database });
       return operationResult(result, { revision: result.revision });
     });
@@ -341,16 +301,19 @@ async function dispatchWork(options, positionals, database) {
   return withDatabase(open, database, (db) => {
     const project = resolveProject(db, cwd(options));
     const history = () => {
-      const limit = Number(options["--limit"] ?? 50);
-      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
-        throw lodestarError("invalid_input", "Work history limit must be from 1 to 200.");
+      const raw = options["--limit"];
+      const limit = raw === undefined ? null : Number(raw);
+      if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) {
+        throw lodestarError("invalid_input", "Work history limit must be a positive safe integer.");
       }
       return workStatus(db, project, true, limit);
     };
     const expire = () => {
-      const hours = Number(options["--older-than-hours"] ?? 168);
-      if (!Number.isFinite(hours) || hours < 1 || hours > 8_760) {
-        throw lodestarError("invalid_input", "Work expiration hours must be from 1 to 8760.");
+      const raw = options["--older-than-hours"];
+      const hours = Number(raw);
+      if (raw === undefined || !Number.isFinite(hours) || hours <= 0) {
+        throw lodestarError("invalid_input",
+          "Work expiration requires an explicit positive --older-than-hours value.");
       }
       return workExpire(db, project, hours, { database });
     };
@@ -417,16 +380,20 @@ async function dispatchPending(options, positionals, database) {
 
 async function dispatchDecision(options, positionals, database) {
   const [action, key, value] = positionals;
-  const write = ["set", "drop", "inject"].includes(action);
+  const write = ["set", "drop", "status", "inject"].includes(action);
   const actor = identity(options, write);
   const open = write ? openOrInitializeWriteDatabase : openOrMigrateReadDatabase;
   return withDatabase(open, database, (db) => {
     const project = resolveProject(db, cwd(options));
-    const change = { database, reason: options["--reason"] };
+    const change = { database, reason: options["--reason"],
+      authority: options["--authority"], successor: options["--successor"] };
     const operations = {
       show: () => positionals.length === 1 && decisionProjection(db, project),
       set: () => positionals.length === 3
-        && decisionSet(db, project, actor, key, value, change),
+        && decisionSet(db, project, actor, key, value,
+          { ...change, status: options["--status"] }),
+      status: () => positionals.length === 3 && ["accepted", "blocked"].includes(value)
+        && decisionStatus(db, project, actor, key, value, change),
       drop: () => positionals.length === 2 && decisionDrop(db, project, actor, key, change),
       inject: () => positionals.length === 2 && ["on", "off"].includes(key)
         && decisionInjection(db, project, actor, key === "on", change),
