@@ -9,7 +9,7 @@ engine, merge tool, or dual-write compatibility mode.
 Stop processes that can write the old store and keep an independent backup.
 Choose a destination outside the old store tree.
 
-Preview the bounded conversion:
+Preview the complete conversion:
 
 ```text
 lodestar import /path/to/v0.7-home \
@@ -18,8 +18,7 @@ lodestar import /path/to/v0.7-home \
 ```
 
 Dry-run builds and diagnoses an in-memory database. It does not create the
-destination or change the source. It applies the same conversion limits and
-reports exact detail-entry omissions as a real import.
+destination or change the source. It applies the same conversion and validation contract as a real import.
 
 The source must contain:
 
@@ -46,7 +45,7 @@ npm package version.
 
 ## Conversion
 
-| v0.7 item | Lodestar schema version 1 |
+| v0.7 item | Lodestar schema version 4 |
 | --- | --- |
 | Catalog project | `type: "project"` record with the project payload retained as content |
 | Global/project record | Record with its valid original ID, old kind as type, and old payload retained as content |
@@ -56,7 +55,7 @@ npm package version.
 | Old aliases | Exact aliases when globally unambiguous |
 | Old `links` | Directed `related` links |
 | Old `routes` | Directed `route:<name>` links |
-| Old `locators` | Source rows keyed by locator path, within the per-record source limit |
+| Old `locators` | Source rows keyed by locator path |
 | Locator-health index | Exact legacy `ok`, `missing`, `unreadable`, or `unchecked` observation in source metadata |
 | Verification fields | Source inspection metadata |
 | Invalid, missing, or duplicate ID | Deterministic `legacy:<hash>` from generation and source location, plus an `id_mappings` entry |
@@ -65,11 +64,10 @@ The importer preserves each accepted legacy payload under `content.value`.
 It does not infer freshness, inspection, completeness, or readiness absent
 direct evidence.
 
-Conflicting aliases, missing link targets, bounds violations, and unsupported
-semantics are reported under `skipped`, `unsupported`, or `id_mappings` with
-their source location and disposition. Oversized legacy collections use an
-aggregate entry with an exact omitted-item count rather than allocating one
-diagnostic object per hostile input item.
+Conflicting aliases, missing link targets, structurally invalid values, and
+unsupported semantics are reported under `skipped`, `unsupported`, or
+`id_mappings` with their source location and disposition. Every valid legacy
+field item and every migration disposition is processed and reported.
 
 ## Migration report
 
@@ -79,16 +77,15 @@ The JSON report includes:
   unchanged status;
 - destination path, schema version, and commit status;
 - counts for imported records, aliases, links, and sources;
-- bounded skipped, unsupported, and identifier-mapping detail arrays;
-- `reporting` totals containing emitted and omitted entry counts for each
-  detail array;
+- complete skipped, unsupported, and identifier-mapping detail arrays;
+- `reporting` totals confirming every detail entry was emitted;
 - SQLite integrity, foreign-key, and doctor results.
 
-Each detail section emits at most 2,000 entries, and each emitted entry is
-bounded to 4 KiB. Review both the arrays and `reporting.truncated` even when
-`doctor_ok` is true. Database validity does not mean every old semantic was
-representable. Do not discard the old store while any omitted report detail is
-unresolved.
+Migration detail is complete: Lodestar does not clip report entries or omit valid
+legacy items to satisfy an internal quota. Review the arrays even when `doctor_ok`
+is true because database validity does not mean every old semantic was
+representable. Do not discard the old store while any skipped or unsupported
+migration evidence remains unresolved.
 
 ## Commit and validation
 
@@ -98,8 +95,7 @@ After reviewing dry-run, run the same command without `--dry-run`:
 lodestar import /path/to/v0.7-home --db /path/to/new/lodestar.db
 ```
 
-The destination may be absent or an initialized, empty schema-version-1
-database. A missing destination is reserved without replacement; a concurrent
+The destination may be absent or an initialized, empty current-schema database. A missing destination is reserved without replacement; a concurrent
 creator is never overwritten or deleted by losing-process cleanup. A visible
 zero-byte reservation is safe to resume and remains after a definite creation
 failure. An existing destination with more than one hard link is rejected

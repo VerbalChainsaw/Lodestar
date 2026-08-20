@@ -17,7 +17,7 @@ export function parseJson(buffer, label) {
   }
 }
 
-export function parseJsonLines(buffer, label, defaultScope, maximum) {
+export function parseJsonLines(buffer, label, defaultScope) {
   const entries = [];
   const text = decodeUtf8(buffer, {
     resource: "legacy_jsonl",
@@ -43,19 +43,6 @@ export function parseJsonLines(buffer, label, defaultScope, maximum) {
           line: lineNumber,
         },
       });
-      if (entries.length > maximum) {
-        throw lodestarError(
-          "resource_limit",
-          "The v0.7 source exceeds the import record limit.",
-          {
-            identifiers: {
-              path: label,
-              records: entries.length,
-              maximum,
-            },
-          },
-        );
-      }
     } catch (error) {
       if (error?.name === "LodestarError") throw error;
       throw lodestarError(

@@ -5,6 +5,12 @@ const MAXIMUM_DEPTH = 6;
 const MAXIMUM_ITEMS = 32;
 const MAXIMUM_NODES = 256;
 
+// These ceilings apply only while copying untrusted values into error/doctor
+// envelopes. Accessors and proxies can expose arbitrarily large or deep graphs before
+// normal command validation runs, so bounded traversal prevents error reporting itself
+// from exhausting memory or the JavaScript stack. Product records and result sets do
+// not pass through this diagnostic-only boundary.
+
 function arrayKind(value) {
   try {
     return Array.isArray(value);

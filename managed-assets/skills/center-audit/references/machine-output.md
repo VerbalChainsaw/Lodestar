@@ -9,7 +9,7 @@ Emit one JSON object conforming to:
 ## Rules
 
 - Emit JSON only, with no Markdown fence, when strict machine output is requested.
-- Set `schema_version` to `2.0.0`.
+- Set `schema_version` to the version required by `assets/center-audit-output.schema.json`; do not hard-code a stale schema version.
 - Use stable evidence IDs and reference them from defects, trajectory links, contradictions, disproofs, and verification checks.
 - Keep hypotheses outside `confirmed_defects`.
 - Use empty arrays rather than omitting required collection fields.
