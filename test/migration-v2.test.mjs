@@ -56,7 +56,7 @@ test("a schema-v1 database backs up, migrates once, and preserves registry data"
   const first = initialized.migration;
   assert.equal(first.migrated, true);
   assert.equal(first.from_schema_version, 1);
-  assert.equal(first.schema_version, 3);
+  assert.equal(first.schema_version, 4);
   assert.match(first.database_instance_id, /^[0-9a-f]{64}$/u);
   await access(first.backup_path);
 
@@ -80,7 +80,7 @@ test("a schema-v1 database backs up, migrates once, and preserves registry data"
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = ?")
       .get("schema_version").value,
-    "3",
+    "4",
   );
   db.close();
 
@@ -90,6 +90,64 @@ test("a schema-v1 database backs up, migrates once, and preserves registry data"
   assert.equal(second.backup_path, null);
   assert.equal(second.database_instance_id, first.database_instance_id);
   assert.deepEqual((await readdir(directory)).sort(), before);
+});
+
+test("a stale schema-v4 label rebuilds the capped tables without losing data", async (t) => {
+  const { file } = await fixture(t);
+  const stale = new DatabaseSync(file, { enableForeignKeyConstraints: true });
+  stale.prepare("UPDATE metadata SET value='4' WHERE key='schema_version'").run();
+  stale.close();
+
+  const migration = await migrateDatabase(file, {
+    now: () => new Date("2026-08-19T15:00:00.000Z"),
+  });
+  assert.equal(migration.migrated, true);
+  assert.equal(migration.from_schema_version, 4);
+  await access(migration.backup_path);
+
+  const db = await openReadDatabase(file);
+  assert.equal(db.prepare("SELECT id FROM records").get().id, "record:preserved");
+  const metadataDefinition = db.prepare(
+    "SELECT sql FROM sqlite_schema WHERE type='table' AND name='metadata'",
+  ).get().sql;
+  assert.doesNotMatch(metadataDefinition, /BETWEEN 1 AND 64/u);
+  db.close();
+});
+
+test("a known partial schema-v4 metadata rebuild is recovered with a backup", async (t) => {
+  const { file } = await fixture(t);
+  const first = await migrateDatabase(file, {
+    now: () => new Date("2026-08-19T15:10:00.000Z"),
+  });
+  const partial = new DatabaseSync(file, { enableForeignKeyConstraints: true });
+  partial.exec(`
+    CREATE TABLE metadata_partial (
+      key TEXT PRIMARY KEY
+        CHECK(length(CAST(key AS BLOB)) BETWEEN 1 AND 64),
+      value TEXT NOT NULL
+        CHECK(length(CAST(value AS BLOB)) >= 1)
+    ) STRICT, WITHOUT ROWID;
+    INSERT INTO metadata_partial(key,value) SELECT key,value FROM metadata;
+    DROP TABLE metadata;
+    ALTER TABLE metadata_partial RENAME TO metadata;
+  `);
+  partial.close();
+
+  const migration = await migrateDatabase(file, {
+    now: () => new Date("2026-08-19T15:11:00.000Z"),
+  });
+  assert.equal(migration.migrated, true);
+  assert.equal(migration.from_schema_version, 4);
+  assert.equal(migration.database_instance_id, first.database_instance_id);
+  await access(migration.backup_path);
+
+  const db = await openReadDatabase(file);
+  assert.equal(db.prepare("SELECT id FROM records").get().id, "record:preserved");
+  const metadataDefinition = db.prepare(
+    "SELECT sql FROM sqlite_schema WHERE type='table' AND name='metadata'",
+  ).get().sql;
+  assert.doesNotMatch(metadataDefinition, /BETWEEN 1 AND 64/u);
+  db.close();
 });
 
 test("a backup failure blocks schema migration without changing schema v1", async (t) => {
@@ -135,7 +193,7 @@ test("an empty schema-v2 database retires its specialized continuity tables", as
     now: () => new Date("2026-08-13T12:00:00.000Z"),
   });
   assert.equal(migration.from_schema_version, 2);
-  assert.equal(migration.schema_version, 3);
+  assert.equal(migration.schema_version, 4);
   await access(migration.backup_path);
   const db = await openReadDatabase(file);
   assert.equal(db.prepare("SELECT value FROM metadata WHERE key='database_revision'").get().value, "17");

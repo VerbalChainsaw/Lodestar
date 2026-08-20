@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -12,9 +13,12 @@ import { Readable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.mjs";
+import { initializeDatabase, openWriteDatabase } from "../src/database.mjs";
 import { lodestarError } from "../src/errors.mjs";
+import { putRecord } from "../src/records.mjs";
 
 function capture(input = "") {
   let stdout = "";
@@ -197,6 +201,7 @@ test("every public command help path is JSON and side-effect free", async (t) =>
     "start",
     "work",
     "handoff",
+    "agents",
     "skills",
   ];
   for (const args of [["--help"], ["--version"]]) {
@@ -455,14 +460,75 @@ test("put rejects prototype-spoofed byte chunks without persisting them", async 
   assert.equal(missing.exitCode, 3);
 });
 
-test("CLI argument and error output remain bounded under hostile input", async () => {
-  const result = await invoke(["x".repeat(2 * 1024 * 1024)]);
-  assert.equal(result.exitCode, 2);
-  assert.equal(result.stdout, "");
-  assert.ok(Buffer.byteLength(result.stderr, "utf8") < 4096);
-  const error = JSON.parse(result.stderr).error;
-  assert.equal(error.code, "resource_limit");
-  assert.equal(error.identifiers.maximum, 16 * 1024);
+test("the CLI does not impose transport byte or argument-count ceilings", async () => {
+  const largeValue = "x".repeat(2 * 1024 * 1024);
+  const large = await invoke(["--help", "--db", largeValue]);
+  assert.equal(large.exitCode, 0, large.stderr);
+  assert.equal(JSON.parse(large.stdout).ok, true);
+
+  const many = await invoke(Array.from({ length: 1_000 }, () => "--version"));
+  assert.equal(many.exitCode, 0, many.stderr);
+  assert.equal(JSON.parse(many.stdout).operation, "version");
+
+  const wrongArity = await invoke(["get", "one", "two"]);
+  assert.equal(JSON.parse(wrongArity.stderr).error.code, "missing_argument");
+  const wrongType = await invoke(["--help", 1]);
+  assert.equal(JSON.parse(wrongType.stderr).error.code, "invalid_input");
+  const invalidUnicode = await invoke(["--help", "--db", "\ud800"]);
+  assert.equal(JSON.parse(invalidUnicode.stderr).error.code, "invalid_input");
+});
+
+test("the spawned CLI leaves its argument boundary to the host OS", () => {
+  const executable = fileURLToPath(new URL("../lodestar.mjs", import.meta.url));
+  let size = 20 * 1024;
+  let lastSuccess = 0;
+  let hostFailure = null;
+  while (size <= 8 * 1024 * 1024) {
+    const child = spawnSync(
+      process.execPath,
+      [executable, "--help", "--db", "x".repeat(size)],
+      { encoding: "utf8", maxBuffer: 1024 * 1024 },
+    );
+    if (child.error) {
+      hostFailure = child.error;
+      break;
+    }
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(JSON.parse(child.stdout).ok, true);
+    lastSuccess = size;
+    size *= 2;
+  }
+  assert.ok(lastSuccess > 16 * 1024, "the former per-argument ceiling was crossed");
+  assert.ok(hostFailure, "the host boundary should be reached by an 8 MiB argument");
+  assert.match(hostFailure.code, /^(E2BIG|EINVAL|ENAMETOOLONG)$/u);
+});
+
+test("the CLI emits valid JSON beyond the former output ceiling", {
+  timeout: 120_000,
+}, async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  await initializeDatabase(file);
+  const db = await openWriteDatabase(file);
+  const text = "x".repeat(261_000);
+  for (let index = 0; index < 322; index += 1) {
+    putRecord(db, {
+      ...inputRecord(),
+      id: `instruction:large:${index}`,
+      type: "instruction",
+      name: `Large required instruction ${index}`,
+      content: { state: "known", value: { required: true, text } },
+      aliases: [],
+    });
+  }
+  db.close();
+
+  const result = await invoke(["start", "--db", file, "--cwd", directory]);
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.ok(Buffer.byteLength(result.stdout, "utf8") > 80 * 1024 * 1024);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.ok, true);
+  assert.equal(output.data.required.length, 323);
 });
 
 test("the CLI does not trust or amplify forged Lodestar errors", async () => {

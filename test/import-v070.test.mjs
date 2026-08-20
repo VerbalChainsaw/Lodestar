@@ -190,11 +190,7 @@ test("dry-run and import preserve v0.7 data and never mutate its store", async (
   assert.equal(dryRun.id_mappings[0].reason, "missing_id");
   assert.ok(dryRun.skipped.some(({ reason }) => reason === "invalid_alias"));
   assert.ok(dryRun.skipped.some(({ reason }) => reason === "item_not_object"));
-  assert.ok(
-    dryRun.unsupported.some(
-      ({ reason }) => reason === "relationship_remapped",
-    ),
-  );
+  assert.equal(dryRun.unsupported.some(({ reason }) => reason === "relationship_remapped"), false);
   await assert.rejects(access(database), { code: "ENOENT" });
   assert.equal(await treeFingerprint(source), sourceBefore);
 
@@ -226,8 +222,8 @@ test("dry-run and import preserve v0.7 data and never mutate its store", async (
       ),
       [
         ["related", "g:rule"],
-        [`route:${sha256(`route:${"x".repeat(100)}`).slice(0, 32)}`, "g:rule"],
         ["route:owner", "p:demo"],
+        [`route:${"x".repeat(100)}`, "g:rule"],
       ],
     );
   } finally {

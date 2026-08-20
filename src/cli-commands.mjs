@@ -1,8 +1,7 @@
 export const COMMANDS = Object.freeze({
   start: {
-    usage: "lodestar start [--cwd <path>] [--session <id>] [--agent <name>] "
-      + "[--harness <name>] [--startup-budget <bytes>]",
-    summary: "Resolve one project and return its bounded startup projection.",
+    usage: "lodestar start [--cwd <path>] [--session <id>] [--agent <name>] [--harness <name>] [--startup-budget <n>]",
+    summary: "Resolve one project and return its complete startup snapshot.",
     values: ["--cwd", "--session", "--agent", "--harness", "--startup-budget"],
     booleans: [],
     positionals: 0,
@@ -31,7 +30,7 @@ export const COMMANDS = Object.freeze({
   find: {
     usage:
       "lodestar find <query> [--scope <scope>] [--kind <kind>] [--limit <n>]",
-    summary: "Search bounded structured context.",
+    summary: "Search structured context.",
     values: ["--scope", "--kind", "--type", "--limit"],
     booleans: [],
     positionals: 1,
@@ -88,9 +87,10 @@ export const COMMANDS = Object.freeze({
     positionals: 1,
   },
   decision: {
-    usage: "lodestar decision <set|drop|show|inject> [key] [value] [options]",
-    summary: "Record and project durable current and superseded project decisions.",
-    values: ["--cwd", "--session", "--agent", "--harness", "--reason"],
+    usage: "lodestar decision <set|drop|status|show|inject> [key] [value] [options]",
+    summary: "Record and project durable current, blocked, and superseded project decisions.",
+    values: ["--cwd", "--session", "--agent", "--harness", "--reason", "--status",
+      "--authority", "--successor"],
     booleans: [],
     positionals: { min: 1, max: 3 },
   },
@@ -102,18 +102,21 @@ export const COMMANDS = Object.freeze({
     booleans: [],
     positionals: { min: 0, max: 2 },
   },
+  agents: {
+    usage: "lodestar agents [status|verify|template] "
+      + "[--cwd <path>] [--mode <stub|full>]",
+    summary: "Inspect repository AGENTS.md state or print a template without writing.",
+    values: ["--cwd", "--mode"],
+    booleans: [],
+    positionals: { min: 0, max: 1 },
+  },
   skills: {
-    usage: "lodestar skills <install|sync|verify|remove> "
+    usage: "lodestar skills [verify] "
       + "[--target <codex|claude|hermes|opencode|all>] [--codex-root <codex|agents>] "
-      + "[--hermes-home <path>] [--opencode-root <path>] [--migrate] "
-      + "[--codex-bootstrap <path>] [--claude-bootstrap <path>] "
-      + "[--hermes-bootstrap <path>] [--opencode-bootstrap <path>] "
-      + "[--home <path>] [--dry-run]",
-    summary: "Install, sync, verify, or remove Lodestar-managed local agent skills.",
-    values: ["--target", "--codex-root", "--hermes-home", "--opencode-root", "--home",
-      "--codex-bootstrap", "--claude-bootstrap", "--hermes-bootstrap",
-      "--opencode-bootstrap"],
-    booleans: ["--dry-run", "--migrate"],
-    positionals: 1,
+      + "[--hermes-home <path>] [--opencode-root <path>] [--home <path>]",
+    summary: "Compare installed skill copies with package source without writing files.",
+    values: ["--target", "--codex-root", "--hermes-home", "--opencode-root", "--home"],
+    booleans: [],
+    positionals: { min: 0, max: 1 },
   },
 });

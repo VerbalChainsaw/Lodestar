@@ -3,7 +3,6 @@ import { transaction } from "./database.mjs";
 import { allocateRevision } from "./revisions.mjs";
 import {
   FRESHNESS_STATES,
-  LIMITS,
   validateContent,
   validateIdentifier,
   validatePutInput,
@@ -55,24 +54,6 @@ function parsedRecord(row) {
     updated_at: row.updated_at,
   };
 }
-function assertOwnedRowLimit(rows, maximum, resource, id) {
-  if (rows.length > maximum) {
-    throw lodestarError(
-      "database_integrity",
-      `A record exceeds its stored ${resource} limit.`,
-      {
-        identifiers: {
-          id,
-          resource,
-          count: rows.length,
-          maximum,
-        },
-        action: "Run lodestar doctor and repair the database from a backup.",
-      },
-    );
-  }
-  return rows;
-}
 export function resolveRecordId(db, identifier) {
   validateIdentifier(identifier, "identifier");
   const exact = db.prepare(
@@ -107,22 +88,17 @@ export function getRecordById(db, id) {
       },
     );
   }
-  const aliases = assertOwnedRowLimit(
-    db.prepare(
-      "SELECT alias FROM aliases WHERE record_id = ? ORDER BY alias LIMIT ?",
-    ).all(id, LIMITS.aliasesPerRecord + 1),
-    LIMITS.aliasesPerRecord,
-    "alias",
-    id,
-  ).map(({ alias }) => alias);
-  const links = assertOwnedRowLimit(db.prepare(
+  const aliases = db.prepare(
+    "SELECT alias FROM aliases WHERE record_id = ? ORDER BY alias",
+  ).all(id).map(({ alias }) => alias);
+  const links = db.prepare(
     "SELECT relationship, to_id, created_at FROM links "
-      + "WHERE from_id = ? ORDER BY relationship, to_id LIMIT ?",
-  ).all(id, LIMITS.linksPerRecord + 1), LIMITS.linksPerRecord, "link", id);
-  const sources = assertOwnedRowLimit(db.prepare(
+      + "WHERE from_id = ? ORDER BY relationship, to_id",
+  ).all(id);
+  const sources = db.prepare(
     "SELECT origin, freshness, metadata_json FROM sources "
-      + "WHERE record_id = ? ORDER BY origin LIMIT ?",
-  ).all(id, LIMITS.sourcesPerRecord + 1), LIMITS.sourcesPerRecord, "source", id)
+      + "WHERE record_id = ? ORDER BY origin",
+  ).all(id)
     .map(({ origin, freshness, metadata_json: metadataJson }) => ({
     origin,
     freshness,
@@ -235,32 +211,13 @@ function replaceRecord(
   {
     createdAt,
     updatedAt,
-    enforceRecordLimit,
   },
 ) {
   assertAliasAvailability(db, input.id, input.aliases);
   const current = db.prepare(
     "SELECT created_at FROM records WHERE id = ?",
   ).get(input.id);
-  if (!current && enforceRecordLimit) {
-    const count = Number(
-      db.prepare("SELECT count(*) AS count FROM records").get().count,
-    );
-    if (count >= LIMITS.recordsMaximum) {
-      throw lodestarError(
-        "resource_limit",
-        "The registry has reached its record limit.",
-        {
-          identifiers: {
-            resource: "records",
-            count,
-            maximum: LIMITS.recordsMaximum,
-          },
-          action: "Delete obsolete records before adding another record.",
-        },
-      );
-    }
-  }
+
   db.prepare(
     "INSERT INTO records(id, type, name, scope, content_json, created_at, updated_at) "
       + "VALUES (?, ?, ?, ?, ?, ?, ?) "
@@ -344,7 +301,7 @@ export function putRecord(db, value, {
 }
 
 export function writeRecordSnapshot(db, value, {
-  createdAt, updatedAt, revision, enforceRecordLimit = true,
+  createdAt, updatedAt, revision,
 }) {
   const priorityValue = value.priority ?? value.content?.value?.priority ?? 0;
   const priority = Number.isSafeInteger(priorityValue) ? priorityValue : 0;
@@ -357,7 +314,7 @@ export function writeRecordSnapshot(db, value, {
     ...validatedValue,
     content: { ...validatedValue.content, _lodestar: { priority, revision } },
   });
-  replaceRecord(db, input, { createdAt, updatedAt, enforceRecordLimit });
+  replaceRecord(db, input, { createdAt, updatedAt });
   return input.id;
 }
 

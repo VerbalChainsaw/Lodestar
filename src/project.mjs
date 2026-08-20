@@ -86,7 +86,7 @@ export function resolveProject(db, cwdValue = process.cwd()) {
   const git = spawnSync("git", [
     "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel",
   ], { encoding: "utf8", windowsHide: true });
-  const [commonLine, rootLine] = git.stdout.trim().split(/\r?\n/u);
+  const [commonLine, rootLine] = String(git.stdout ?? "").trim().split(/\r?\n/u);
   if (commonLine) {
     const common = physical(commonLine);
     const root = rootLine ? physical(rootLine) : cwd;
@@ -151,7 +151,7 @@ export const scope = (project, identity) => ({
 export const recordInput = (id, type, name, projectScope, priority, data) => ({
   id,
   type,
-  name: name.slice(0, 256),
+  name,
   scope: projectScope,
   priority,
   content: { state: "known", value: data },

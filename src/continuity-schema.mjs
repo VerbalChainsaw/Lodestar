@@ -74,16 +74,16 @@ export const CONTINUITY_COLUMNS = Object.freeze({
 export const CONTINUITY_SCHEMA_SQL = String.raw`
 CREATE TABLE continuity_lanes (
   lane_id TEXT PRIMARY KEY
-    CHECK(length(CAST(lane_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(lane_id AS BLOB)) >= 1),
   project_key TEXT NOT NULL
-    CHECK(length(CAST(project_key AS BLOB)) BETWEEN 1 AND 512),
+    CHECK(length(CAST(project_key AS BLOB)) >= 1),
   owner_session_id TEXT NOT NULL
-    CHECK(length(CAST(owner_session_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(owner_session_id AS BLOB)) >= 1),
   state TEXT NOT NULL CHECK(state IN ('armed', 'inert')),
   active_packet_id TEXT NULL
     CHECK(
       active_packet_id IS NULL
-      OR length(CAST(active_packet_id AS BLOB)) BETWEEN 1 AND 256
+      OR length(CAST(active_packet_id AS BLOB)) >= 1
     ),
   version INTEGER NOT NULL CHECK(version >= 1),
   created_at TEXT NOT NULL
@@ -109,22 +109,21 @@ CREATE TABLE continuity_lanes (
 
 CREATE TABLE continuity_packets (
   packet_id TEXT PRIMARY KEY
-    CHECK(length(CAST(packet_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(packet_id AS BLOB)) >= 1),
   lane_id TEXT NOT NULL
     REFERENCES continuity_lanes(lane_id) ON DELETE RESTRICT
-    CHECK(length(CAST(lane_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(lane_id AS BLOB)) >= 1),
   predecessor_packet_id TEXT NULL
     CHECK(
       predecessor_packet_id IS NULL
-      OR length(CAST(predecessor_packet_id AS BLOB)) BETWEEN 1 AND 256
+      OR length(CAST(predecessor_packet_id AS BLOB)) >= 1
     ),
   operation_id TEXT NOT NULL
     CHECK(length(CAST(operation_id AS BLOB)) = 64)
     CHECK(operation_id NOT GLOB '*[^0-9a-f]*'),
   packet_json TEXT NOT NULL
     CHECK(
-      length(CAST(packet_json AS BLOB)) <= 262144
-      AND CASE WHEN json_valid(packet_json) THEN
+      CASE WHEN json_valid(packet_json) THEN
         json_type(packet_json) = 'object'
       ELSE 0 END
     ),
@@ -132,9 +131,9 @@ CREATE TABLE continuity_packets (
     CHECK(length(CAST(integrity_digest AS BLOB)) = 64)
     CHECK(integrity_digest NOT GLOB '*[^0-9a-f]*'),
   created_by_session TEXT NOT NULL
-    CHECK(length(CAST(created_by_session AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(created_by_session AS BLOB)) >= 1),
   created_by_turn TEXT NOT NULL
-    CHECK(length(CAST(created_by_turn AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(created_by_turn AS BLOB)) >= 1),
   created_at TEXT NOT NULL
     CHECK(
       length(CAST(created_at AS BLOB)) = 24
@@ -150,7 +149,7 @@ CREATE TABLE continuity_packets (
 
 CREATE TABLE continuity_events (
   event_id TEXT PRIMARY KEY
-    CHECK(length(CAST(event_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(event_id AS BLOB)) >= 1),
   operation_id TEXT NULL
     CHECK(
       operation_id IS NULL
@@ -169,29 +168,27 @@ CREATE TABLE continuity_events (
     ),
   lane_id TEXT NOT NULL
     REFERENCES continuity_lanes(lane_id) ON DELETE RESTRICT
-    CHECK(length(CAST(lane_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(lane_id AS BLOB)) >= 1),
   session_id TEXT NOT NULL
-    CHECK(length(CAST(session_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(session_id AS BLOB)) >= 1),
   turn_id TEXT NOT NULL
-    CHECK(length(CAST(turn_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(turn_id AS BLOB)) >= 1),
   event_type TEXT NOT NULL
-    CHECK(length(CAST(event_type AS BLOB)) BETWEEN 1 AND 64),
+    CHECK(length(CAST(event_type AS BLOB)) >= 1),
   role TEXT NULL CHECK(role IS NULL OR role IN ('user', 'assistant', 'worker')),
   status TEXT NOT NULL
-    CHECK(length(CAST(status AS BLOB)) BETWEEN 1 AND 64),
-  redacted_text TEXT NOT NULL DEFAULT ''
-    CHECK(length(CAST(redacted_text AS BLOB)) <= 262144),
+    CHECK(length(CAST(status AS BLOB)) >= 1),
+  redacted_text TEXT NOT NULL DEFAULT '',
   payload_json TEXT NOT NULL DEFAULT '{}'
     CHECK(
-      length(CAST(payload_json AS BLOB)) <= 262144
-      AND CASE WHEN json_valid(payload_json) THEN
+      CASE WHEN json_valid(payload_json) THEN
         json_type(payload_json) = 'object'
       ELSE 0 END
     ),
   absorbed_packet_id TEXT NULL
     CHECK(
       absorbed_packet_id IS NULL
-      OR length(CAST(absorbed_packet_id AS BLOB)) BETWEEN 1 AND 256
+      OR length(CAST(absorbed_packet_id AS BLOB)) >= 1
     ),
   created_at TEXT NOT NULL
     CHECK(
@@ -209,19 +206,19 @@ CREATE TABLE continuity_events (
 
 CREATE TABLE continuity_transfers (
   transfer_id TEXT PRIMARY KEY
-    CHECK(length(CAST(transfer_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(transfer_id AS BLOB)) >= 1),
   operation_id TEXT NOT NULL
     CHECK(length(CAST(operation_id AS BLOB)) = 64)
     CHECK(operation_id NOT GLOB '*[^0-9a-f]*'),
   lane_id TEXT NOT NULL
     REFERENCES continuity_lanes(lane_id) ON DELETE RESTRICT
-    CHECK(length(CAST(lane_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(lane_id AS BLOB)) >= 1),
   source_session_id TEXT NOT NULL
-    CHECK(length(CAST(source_session_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(source_session_id AS BLOB)) >= 1),
   source_turn_id TEXT NOT NULL
-    CHECK(length(CAST(source_turn_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(source_turn_id AS BLOB)) >= 1),
   packet_id TEXT NOT NULL
-    CHECK(length(CAST(packet_id AS BLOB)) BETWEEN 1 AND 256),
+    CHECK(length(CAST(packet_id AS BLOB)) >= 1),
   phase TEXT NOT NULL CHECK(phase IN (
     'scheduled', 'claimed', 'creating', 'created', 'injecting',
     'injected', 'continuing', 'accepted', 'completed', 'failed'
@@ -229,24 +226,24 @@ CREATE TABLE continuity_transfers (
   worker_claim_id TEXT NULL
     CHECK(
       worker_claim_id IS NULL
-      OR length(CAST(worker_claim_id AS BLOB)) BETWEEN 1 AND 256
+      OR length(CAST(worker_claim_id AS BLOB)) >= 1
     ),
   target_session_id TEXT NULL
     CHECK(
       target_session_id IS NULL
-      OR length(CAST(target_session_id AS BLOB)) BETWEEN 1 AND 256
+      OR length(CAST(target_session_id AS BLOB)) >= 1
     ),
   target_turn_id TEXT NULL
     CHECK(
       target_turn_id IS NULL
-      OR length(CAST(target_turn_id AS BLOB)) BETWEEN 1 AND 256
+      OR length(CAST(target_turn_id AS BLOB)) >= 1
     ),
   target_turn_status TEXT NULL
     CHECK(
       target_turn_status IS NULL
       OR target_turn_status IN ('completed', 'interrupted', 'failed')
     ),
-  error TEXT NULL CHECK(error IS NULL OR length(CAST(error AS BLOB)) <= 65536),
+  error TEXT NULL,
   created_at TEXT NOT NULL
     CHECK(
       length(CAST(created_at AS BLOB)) = 24

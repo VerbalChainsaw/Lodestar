@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { lstat, mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -14,7 +13,6 @@ import {
 } from "./database.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
 import { lodestarError } from "./errors.mjs";
-import { canonicalStringify } from "./json.mjs";
 import { convertV070 } from "./legacy-v070/convert.mjs";
 import {
   readV070Store,
@@ -24,7 +22,7 @@ import { assertImportDestinationOutsideSource } from "./paths.mjs";
 import { writeRecordSnapshot } from "./records.mjs";
 import { allocateRevision } from "./revisions.mjs";
 import { createSchema, SCHEMA_VERSION } from "./schema.mjs";
-import { LIMITS, validateTimestamp } from "./validate.mjs";
+import { validateTimestamp } from "./validate.mjs";
 
 async function pathExists(file) {
   try {
@@ -56,18 +54,6 @@ function assertEmptyDestination(db, database) {
 }
 
 function writeConvertedRecords(db, records, timestamp) {
-  if (records.length > LIMITS.recordsMaximum) {
-    throw lodestarError(
-      "resource_limit",
-      "The converted registry exceeds its record limit.",
-      {
-        identifiers: {
-          records: records.length,
-          maximum: LIMITS.recordsMaximum,
-        },
-      },
-    );
-  }
   for (const record of records) {
     writeRecordSnapshot(db, { ...record, links: [] }, {
       createdAt: timestamp,
@@ -125,24 +111,6 @@ function migrationReport({
   };
 }
 
-function assertReportBound(report) {
-  const bytes = Buffer.byteLength(canonicalStringify(report), "utf8");
-  if (bytes > LIMITS.exportBytes) {
-    throw lodestarError(
-      "resource_limit",
-      "The migration report exceeds its byte limit.",
-      {
-        identifiers: {
-          resource: "migration_report",
-          bytes,
-          maximum: LIMITS.exportBytes,
-        },
-        action: "Reduce unsupported source data before importing.",
-      },
-    );
-  }
-}
-
 async function convertInsideTransaction({
   db,
   database,
@@ -181,7 +149,6 @@ async function convertInsideTransaction({
       committed: !dryRun,
       validation,
     });
-    assertReportBound(report);
     if (dryRun) rollback(db);
     else {
       try {

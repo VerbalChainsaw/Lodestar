@@ -15,7 +15,7 @@ A plain shell has no session id, so `lodestar work start` there requires an expl
 actor, so a guessed session would capture and then overwrite a concurrent peer's
 marker.
 
-- Review bounded deterministic history: `lodestar work history`.
+- Review deterministic history: `lodestar work history`; add `--limit` only for a caller-selected page.
 - Explicitly expire old open reports: `lodestar work expire --older-than-hours <n>`.
 
 Lodestar derives project/worktree identity canonically and actor identity from the
@@ -24,6 +24,5 @@ repeated start updates it instead of creating a duplicate. Repeated done is a
 safe no-op. Status and history use deterministic ordering.
 
 `STALE?` means only that a report is old. It is not evidence of abandonment and
-must not be used to take over files or discard work. Expiration is explicit,
-bounded, auditable, and changes only qualifying advisory reports. Use
+must not be used to take over files or discard work. Expiration is explicit, auditable, and changes only qualifying advisory reports. Use
 `lodestar doctor` for stored-state checks; do not edit work rows directly.

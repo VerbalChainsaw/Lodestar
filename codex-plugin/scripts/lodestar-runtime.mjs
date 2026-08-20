@@ -4,6 +4,8 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
+import { parseLegacyNotes, parseMarkers } from "../../src/markers.mjs";
+
 export const HANDOFF_COMMANDS = Object.freeze([
   "arm", "status", "checkpoint", "now", "disarm",
 ]);
@@ -16,12 +18,11 @@ export const WORK_COMMANDS = Object.freeze(["start", "done", "status"]);
 // turn and cwd; they simply do not require the user to have said the phrase first.
 const READ_ONLY_COMMANDS = new Set(["status"]);
 const AUTH_TTL_MS = 10 * 60_000;
-const OUTPUT_LIMIT = 1024 * 1024;
 const TIMEOUT_MS = 20_000;
-export const CODEX_SESSION_CONTEXT_LIMIT_BYTES = 16 * 1024;
-export const STARTUP_CONTEXT_PREFIX = "Lodestar startup context (v1):\n";
-const STARTUP_PROJECTION_LIMIT_BYTES = CODEX_SESSION_CONTEXT_LIMIT_BYTES
-  - Buffer.byteLength(STARTUP_CONTEXT_PREFIX, "utf8");
+export const STARTUP_CONTEXT_PREFIX =
+  "Lodestar startup context (v1; incomplete without the closing marker):\n";
+export const STARTUP_CONTEXT_SUFFIX =
+  "\nLodestar startup context complete. If this marker is missing, stop before mutation.";
 export const HANDOFF_ENTRY_KEY_PATTERN = "^[a-z0-9][a-z0-9.-]*$";
 export const HANDOFF_PACKET_SCHEMA = Object.freeze({
   type: "object",
@@ -288,14 +289,7 @@ async function runLodestar(args, input = "", options = {}) {
       clearTimeout(timer);
       if (error) reject(error); else resolve(value);
     };
-    const append = (prior, value) => {
-      const next = prior + value;
-      if (Buffer.byteLength(next, "utf8") > OUTPUT_LIMIT) {
-        child.kill();
-        finish(new Error("One-shot Lodestar output exceeded its limit."));
-      }
-      return next;
-    };
+    const append = (prior, value) => prior + value;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (value) => { stdout = append(stdout, value); });
@@ -388,50 +382,90 @@ export async function recordTail(input, role, text, options = {}) {
   }
 }
 
-// Capture is opt-in per fact rather than inferred from the turn. A marker line is
-// deterministic: it never fires on an ordinary message, needs no extra model call, and
-// cannot fill the queue with near-misses. Candidates land in quarantine, so nothing here
-// can reach the startup budget without a person promoting it.
-const NOTE = /^[ \t]*LODESTAR NOTE:[ \t]*(\S.*?)[ \t]*$/gmu;
-const MAX_NOTES = 3;
-
+// Capture is opt-in per marker rather than inferred from the turn. A marker is
+// deterministic: it never fires on an ordinary message, needs no extra model call,
+// and cannot fill the queue with near-misses. One capture mechanism serves every
+// kind from the one grammar (src/markers.mjs): NOTE markers quarantine as pending
+// candidates; value-bearing DECISION markers create or replace a fact; bare status
+// markers update an existing fact (and quarantine as candidates when the key is
+// unknown); DEAD and SUPERSEDED markers drop it. Every operation is idempotent, so
+// a repeated or replayed turn cannot duplicate ledger events, and a hook must
+// never fail a session over an optional capture.
 export function extractNotes(text) {
   if (typeof text !== "string") return [];
   const seen = new Set();
-  for (const [, body] of String(text).matchAll(NOTE)) {
-    const note = body.replace(/\s+/gu, " ").trim();
-    if (note && note.length <= 4_096) seen.add(note);
-    if (seen.size >= MAX_NOTES) break;
+  for (const marker of [...parseMarkers(text), ...parseLegacyNotes(text)]) {
+    const note = String(marker.text ?? "").replace(/\s+/gu, " ").trim();
+    if (note) seen.add(note);
   }
   return [...seen];
 }
 
-export async function captureNotes(input, text, options = {}) {
-  const notes = extractNotes(text);
-  if (!notes.length) return 0;
-  let captured = 0;
-  for (const note of notes) {
+export async function captureMarkers(input, text, options = {}) {
+  const markers = [...parseMarkers(text), ...parseLegacyNotes(text)];
+  if (!markers.length) return { captured: 0, markers: 0, notes: 0 };
+  for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
+  const identity = ["--cwd", input.cwd, "--session", input.session_id,
+    "--agent", "codex", "--harness", "codex"];
+  // Captured markers are agent-issued: their kills reopen by evidence, so a
+  // Director-issued kill can never be weakened by a hook capture.
+  const agent = ["--authority", "agent"];
+  let captured = 0, notes = 0;
+  for (const marker of markers) {
     try {
-      for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
-      await runLodestar(["pending", "add", redact(note).value, "--cwd", input.cwd,
-        "--session", input.session_id, "--agent", "codex", "--harness", "codex",
-        "--source", "hook"], "", options);
+      const redacted = redact({ key: marker.key, value: marker.value, by: marker.by,
+        reason: marker.reason, text: marker.text }).value;
+      const reason = [redacted.by ? `superseded by ${redacted.by}` : null,
+        redacted.reason].filter(Boolean).join("; ");
+      if (marker.kind === "NOTE") {
+        const note = String(redacted.text ?? "").replace(/\s+/gu, " ").trim();
+        if (!note) continue;
+        await runLodestar(["pending", "add", note, "--source", "hook",
+          ...identity], "", options);
+        notes += 1;
+      } else if (marker.kind === "DECISION") {
+        if (redacted.value !== undefined && redacted.value !== null
+            && redacted.value !== "") {
+          await runLodestar(["decision", "set", redacted.key, redacted.value,
+            ...agent,
+            ...(marker.status === "blocked" ? ["--status", "blocked"] : []),
+            ...(reason ? ["--reason", reason] : []), ...identity], "", options);
+        } else {
+          const prior = await runLodestar(["decision", "status", redacted.key,
+            marker.status === "blocked" ? "blocked" : "accepted",
+            ...(reason ? ["--reason", reason] : []), ...identity], "", options);
+          if (prior?.data?.current === null) {
+            await runLodestar(["pending", "add",
+              `[DECISION key=${redacted.key} status=${marker.status ?? "accepted"}`
+                + `${redacted.reason ? ` reason="${redacted.reason}"` : ""}]`,
+              "--source", "hook", ...identity], "", options);
+          }
+        }
+      } else {
+        // A SUPERSEDED kill names its successor key so the ledger can render the
+        // by= edge instead of degrading to a plain DEAD.
+        const successor = marker.kind === "SUPERSEDED" && redacted.by
+          ? ["--successor", redacted.by] : [];
+        await runLodestar(["decision", "drop", redacted.key,
+          ...agent, ...successor,
+          ...(reason ? ["--reason", reason] : []), ...identity], "", options);
+      }
       captured += 1;
     } catch {
       // A hook must never fail a session over an optional capture.
     }
   }
-  return captured;
+  return { captured, markers: markers.length, notes };
 }
 
+export function extractDecisionMarkers(text) {
+  return parseMarkers(text).filter((marker) =>
+    marker.kind === "DECISION" || marker.kind === "DEAD" || marker.kind === "SUPERSEDED");
+}
 export async function startupContext(input, options = {}) {
   for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
   const envelope = await runLodestar(["start", "--cwd", input.cwd,
-    "--session", input.session_id, "--agent", "codex", "--harness", "codex",
-    "--startup-budget", String(STARTUP_PROJECTION_LIMIT_BYTES)], "", options);
-  const context = `${STARTUP_CONTEXT_PREFIX}${canonical(envelope.data)}`;
-  if (Buffer.byteLength(context, "utf8") > CODEX_SESSION_CONTEXT_LIMIT_BYTES) {
-    throw new Error("Lodestar startup context exceeds the Codex SessionStart limit");
-  }
-  return context;
+    "--session", input.session_id, "--agent", "codex", "--harness", "codex"],
+  "", options);
+  return `${STARTUP_CONTEXT_PREFIX}${canonical(envelope.data)}${STARTUP_CONTEXT_SUFFIX}`;
 }
