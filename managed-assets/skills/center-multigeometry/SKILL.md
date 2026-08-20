@@ -4,13 +4,10 @@ description: "Use for structural risk maps / multi-geometry code scans."
 license: MIT
 metadata:
   version: 1.1.0
-  author: Hermes Agent
-  compatibility: "Hermes-compatible coding agents with access to this repo's built center-geo CLI or an equivalent built installation."
-  hermes:
-    tags: [software-development, graph-analysis, static-analysis, structural-risk, center-geo]
-    related_skills: [center-audit, regression-scout, requesting-code-review]
+  compatibility: "Agent Skills-compatible coding agents with repository read access and access to a built center-geo CLI or equivalent installation."
+  tags: [software-development, graph-analysis, static-analysis, structural-risk, center-geo]
+  related_skills: [center-audit]
 ---
-
 # CENTER-MULTIGEOMETRY
 
 `center-multigeometry` is the skill layer for `center-geo`, the deterministic multi-geometry structural-risk scanner. It runs against any target repository supplied to the scanner; the scanner's own repository or installation is not the audit target.
@@ -252,7 +249,7 @@ Map it from the live report like this:
 
 ```bash
 npm run build
-node dist/cli/main.js scan . --format json --output-dir .hermes/center-geo-report > .hermes/center-geo-report/stdout.json
+node dist/cli/main.js scan . --format json --output-dir .center-geo-report > .center-geo-report/stdout.json
 ```
 
 ### Parse the JSON with a real parser
@@ -261,7 +258,7 @@ node dist/cli/main.js scan . --format json --output-dir .hermes/center-geo-repor
 python - <<'PY'
 import json
 from pathlib import Path
-obj = json.loads(Path('.hermes/center-geo-report/stdout.json').read_text(encoding='utf-8'))
+obj = json.loads(Path('.center-geo-report/stdout.json').read_text(encoding='utf-8'))
 print(obj['scan_frame']['graph_id'])
 print(obj['coverage']['files_indexed'])
 print(obj['hypotheses'][0]['title'] if obj['hypotheses'] else 'no hypotheses')

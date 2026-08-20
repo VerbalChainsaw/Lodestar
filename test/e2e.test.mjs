@@ -280,12 +280,23 @@ test("the packed package completes every public operation without touching live 
   const opencodeRoot = path.join(clientHome, "opencode-skills");
   const clientArgs = ["--target", "all", "--home", clientHome,
     "--hermes-home", hermesHome, "--opencode-root", opencodeRoot];
-  const installed = ok(entry, ["skills", "install", ...clientArgs]);
-  assert.equal(installed.data.results.length, installed.data.skills.length * 4);
-  assert.equal(ok(entry, ["skills", "verify", ...clientArgs]).data.verified, true);
-  assert.ok(ok(entry, ["skills", "sync", ...clientArgs]).data.results
-    .every(({ action }) => action === "unchanged"));
-  ok(entry, ["skills", "remove", ...clientArgs]);
-  assert.equal(ok(entry, ["skills", "verify", ...clientArgs], { status: 4 }).data.verified,
-    false);
+  const verification = ok(entry, ["skills", "verify", ...clientArgs], { status: 4 });
+  assert.equal(verification.data.readOnly, true);
+  assert.equal(verification.data.verified, false);
+  assert.equal(await access(clientHome).then(() => true, () => false), false);
+  for (const operation of ["install", "sync", "remove"]) {
+    assert.equal(fails(entry, ["skills", operation, ...clientArgs]).error.code,
+      "skills_read_only");
+    assert.equal(await access(clientHome).then(() => true, () => false), false);
+  }
+
+  const repositoryAgents = path.join(project, "AGENTS.md");
+  const agentsStatus = ok(entry, ["agents", "status", "--cwd", project]);
+  assert.equal(agentsStatus.data.readOnly, true);
+  assert.equal(await access(repositoryAgents).then(() => true, () => false), false);
+  for (const operation of ["apply", "remove"]) {
+    assert.equal(fails(entry, ["agents", operation, "--cwd", project]).error.code,
+      "repository_agents_read_only");
+    assert.equal(await access(repositoryAgents).then(() => true, () => false), false);
+  }
 });

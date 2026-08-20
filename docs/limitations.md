@@ -12,8 +12,9 @@ understanding platform.
   completeness claim.
 - Freshness and inspection fields are assertions Lodestar stores; it does not
   independently verify them.
-- Search is bounded substring matching over stored fields. It is not semantic
-  search and does not use the filesystem.
+- Search is deterministic substring matching over stored fields. It is not
+  semantic search and does not use the filesystem. Callers may request a
+  positive page size; without one, Lodestar returns every match.
 - Search case folding uses SQLite's built-in `lower()` behavior, which is
   ASCII-oriented in the bundled build. Exact IDs and aliases remain
   case-sensitive.
@@ -33,7 +34,7 @@ understanding platform.
 - The database is not encrypted, signed, or authenticated by Lodestar.
 - A process that deliberately bypasses SQLite checks or rewrites pages can
   create invalid state. Reads fail closed on invalid stored envelopes and
-  `doctor` reports bounded structural and semantic findings, but neither proves
+  `doctor` reports every structural and semantic finding it can establish, but neither proves
   the truth or provenance of externally edited values.
 
 ## Security boundary
@@ -58,18 +59,18 @@ understanding platform.
   another process's lock.
 - Rollback-journal mode favors a simple write-light CLI. It is not tuned as a
   high-throughput database service.
-- Managed-skill install, sync, and removal preflight and stage the complete
-  selected-client batch, then compensate completed renames in reverse order if
-  a handled failure occurs. They are filesystem operations, not a durable ACID
-  transaction: a process or machine loss between renames can still require
-  restoring the reported timestamped backups manually. Lodestar deliberately
-  has no persistent recovery journal or background repair service.
+- Lodestar does not install, synchronize, replace, migrate, back up, or remove
+  external skill directories or agent instruction files. `lodestar skills verify`
+  and `lodestar agents status|verify|template` are read-only comparisons and
+  template output; skill and agent-file management belongs to the user's native
+  tooling.
 - Read-only knowledge commands never initialize a missing database. `start`, a
   structurally valid `put`, and state mutations initialize it through the same
   exclusive reservation path; `init` remains optional.
-- Reads of schema versions 1 and 2 intentionally create the documented exclusive
-  backup and migrate to schema version 3 before returning. Current-schema reads
-  use a read-only SQLite probe and leave database bytes unchanged.
+- Reads of schema versions 1, 2, and 3 intentionally create the documented
+  exclusive backup and migrate to schema version 4 before returning. A stale
+  schema-v4 label with old capped DDL is also rebuilt. Current-schema reads use
+  a read-only SQLite probe and leave database bytes unchanged.
 - A definite failure while creating a new database can leave its published
   zero-byte reservation in place. A later `put`, `init`, or import can resume
   that reservation; Lodestar does not unlink it because another process may
@@ -77,7 +78,7 @@ understanding platform.
 
 ## Compatibility boundary
 
-- Schema versions 1 and 2 migrate to version 3 only through the documented,
+- Schema versions 1, 2, and 3 migrate to version 4 only through documented,
   backed-up paths; unknown versions fail closed.
 - Version-2 migration removes retired continuity tables only when all four are
   empty. Nonempty state halts migration without changing the database.
@@ -88,9 +89,9 @@ understanding platform.
 - Import rejects an existing destination with more than one hard link. This
   avoids path-based confinement being bypassed by a destination that aliases a
   legacy source file.
-- Migration detail arrays are bounded. The report includes total, emitted, and
-  omitted entry counts; users must treat `reporting.truncated: true` as
-  unresolved migration evidence.
+- Migration processes and reports every valid source item and disposition.
+  Large imports remain limited by actual filesystem, memory, and SQLite
+  capacity rather than a Lodestar-owned data quota.
 - If SQLite cannot confirm an import commit, Lodestar preserves the destination
   and reports an unknown commit outcome for read-only diagnosis instead of
   deleting possibly committed data.

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -16,12 +17,13 @@ const { handleHook } = await import(pathToFileURL(
   path.join(PLUGIN_ROOT, "scripts", "lodestar-hook.mjs"),
 ));
 const {
-  CODEX_SESSION_CONTEXT_LIMIT_BYTES,
   executeHandoff,
+  extractDecisionMarkers,
   HANDOFF_ENTRY_KEY_PATTERN: PLUGIN_ENTRY_KEY_PATTERN,
   parseEnvelope,
   parseHandoffCommand,
   STARTUP_CONTEXT_PREFIX,
+  STARTUP_CONTEXT_SUFFIX,
 } = await import(pathToFileURL(path.join(PLUGIN_ROOT, "scripts", "lodestar-runtime.mjs")));
 
 // The installed plugin is a separate artifact from the npm package, stamped by hand as
@@ -52,14 +54,13 @@ test("the core validator and Codex packet contract use the same entry-key patter
   assert.equal(PLUGIN_ENTRY_KEY_PATTERN, CORE_ENTRY_KEY_PATTERN);
 });
 
-test("the SessionStart runtime limit matches the declared Codex hook boundary", async () => {
+test("the plugin declares no client-specific context caps", async () => {
   const manifest = JSON.parse(await readFile(
     path.join(PLUGIN_ROOT, "hooks", "hooks.json"), "utf8",
   ));
-  assert.equal(
-    manifest.hooks.SessionStart[0].hooks[0].additionalContextLimit,
-    CODEX_SESSION_CONTEXT_LIMIT_BYTES,
-  );
+  for (const event of ["UserPromptSubmit", "SessionStart"]) {
+    assert.equal("additionalContextLimit" in manifest.hooks[event][0].hooks[0], false);
+  }
 });
 
 test("the plugin recovers the envelope even when a runtime prepends notices", () => {
@@ -82,6 +83,43 @@ test("the plugin recovers the envelope even when a runtime prepends notices", ()
   assert.equal(parseEnvelope("   "), null);
   assert.equal(parseEnvelope("LODESTAR ERROR: runtime not found"), null);
   assert.equal(parseEnvelope("notice\n{not json}"), null);
+});
+
+test("the hook executable accepts BOM-prefixed JSON for prompt and stop events", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-hook-stdin-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const hook = path.join(PLUGIN_ROOT, "scripts", "lodestar-hook.mjs");
+
+  const invoke = async (input) => {
+    const child = spawn(process.execPath, [hook], {
+      cwd: directory,
+      env: { ...process.env, PLUGIN_DATA: directory,
+        LODESTAR_DB: path.join(directory, "missing", "lodestar.db"),
+        LODESTAR_NODE: process.execPath, LODESTAR_ENTRY: TEST_ENTRY },
+      stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+    });
+    let stdout = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (text) => { stdout += text; });
+    child.stderr.setEncoding("utf8").on("data", (text) => { stderr += text; });
+    const completed = new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (status) => resolve(status));
+    });
+    child.stdin.end(`\uFEFF${JSON.stringify(input)}`, "utf8");
+    return { status: await completed, stdout, stderr };
+  };
+
+  for (const input of [
+    { hook_event_name: "UserPromptSubmit", session_id: "bom", turn_id: "prompt",
+      cwd: directory, prompt: "ordinary prompt" },
+    { hook_event_name: "Stop", session_id: "bom", turn_id: "stop", cwd: directory,
+      stop_hook_active: false, last_assistant_message: "ordinary response" },
+  ]) {
+    const result = await invoke(input);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(result.stdout), { continue: true });
+  }
 });
 
 const packet = {
@@ -132,14 +170,10 @@ test("the Lodestar plugin runs all five commands, redacts, and restores one reco
     LODESTAR_DB: process.env.LODESTAR_DB,
     LODESTAR_NODE: process.env.LODESTAR_NODE,
     LODESTAR_ENTRY: process.env.LODESTAR_ENTRY,
-    LODESTAR_STARTUP_BUDGET: process.env.LODESTAR_STARTUP_BUDGET,
   };
   process.env.LODESTAR_DB = path.join(directory, "lodestar.db");
   process.env.LODESTAR_NODE = process.execPath;
   process.env.LODESTAR_ENTRY = TEST_ENTRY;
-  // The Codex adapter owns the receiving hook's smaller boundary. A machine-wide CLI
-  // preference must never make a fresh Codex session emit more than the hook accepts.
-  process.env.LODESTAR_STARTUP_BUDGET = "65536";
   t.after(() => {
     for (const [key, value] of Object.entries(prior)) {
       if (value === undefined) delete process.env[key];
@@ -151,15 +185,19 @@ test("the Lodestar plugin runs all five commands, redacts, and restores one reco
     hook_event_name: "SessionStart", session_id: "source", cwd: directory,
   }, directory);
   const startup = sourceStart.hookSpecificOutput.additionalContext;
-  assert.ok(Buffer.byteLength(startup, "utf8") <= CODEX_SESSION_CONTEXT_LIMIT_BYTES);
   assert.ok(startup.startsWith(STARTUP_CONTEXT_PREFIX));
-  const projection = JSON.parse(startup.slice(STARTUP_CONTEXT_PREFIX.length));
-  assert.equal(projection.budget.source, "option");
+  assert.ok(startup.endsWith(STARTUP_CONTEXT_SUFFIX));
+  const projection = JSON.parse(startup.slice(
+    STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length,
+  ));
+  assert.deepEqual(projection.budget,
+    { bytes: null, source: "unbounded", applies_to: "optional", target_met: true });
   const governance = projection.required.find(({ id }) =>
     id === "g:lodestar:required-governance");
-  assert.equal(governance.data.v, 2);
-  assert.equal(governance.data.sections.length, 11);
-  assert.ok(governance.data.sections.find(({ id }) => id === "workflow-routing"));
+  assert.equal(governance.data.v, 3);
+  assert.match(governance.data.text, /## Core Governance Integrity/u);
+  assert.match(governance.data.text, /## Reality Anchoring and Surface Integrity/u);
+  assert.match(governance.data.text, /## Anti-Certainty Psychosis/u);
 
   let turn = 0;
   const execute = async (command, input = {}) => {
@@ -267,4 +305,88 @@ test("the plugin MCP stdio transport initializes, lists, and executes the author
   );
   assert.equal(replies[2].result.isError, false);
   assert.equal(replies[2].result.structuredContent.result.recovery.data.state, "pending");
+});
+test("decision markers parse into their golden-rule families", () => {
+  const text = [
+    "[DECISION key=db:engine status=ACCEPTED value=\"PostgreSQL\" date=2026-08-19 reason=\"centralized writes\"]",
+    "[DECISION key=campaign-governor status=BLOCKED value=hold date=2026-08-19 reason=\"waiting on operator\"]",
+    "[DEAD key=old-db value=sqlite date=2026-08-19 reason=removed]",
+    "[SUPERSEDED key=db:engine by=db:engine value=SQLite date=2026-08-19 reason=local-first]",
+  ].join("\n");
+  const markers = extractDecisionMarkers(text);
+  assert.equal(markers.length, 4);
+  assert.deepEqual(markers.map((marker) => marker.kind),
+    ["DECISION", "DECISION", "DEAD", "SUPERSEDED"]);
+  assert.equal(markers[0].value, "PostgreSQL");
+  assert.equal(markers[0].status, "accepted");
+  assert.equal(markers[1].status, "blocked");
+  assert.equal(markers[2].key, "old-db");
+  assert.equal(markers[3].by, "db:engine");
+  assert.equal(extractDecisionMarkers("no markers in this prose").length, 0);
+  assert.equal(extractDecisionMarkers("[DECISION reason=\"just prose\"]").length, 0);
+});
+
+test("the Stop hook captures decision markers into the ledger idempotently", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-markers-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const prior = {
+    LODESTAR_DB: process.env.LODESTAR_DB,
+    LODESTAR_NODE: process.env.LODESTAR_NODE,
+    LODESTAR_ENTRY: process.env.LODESTAR_ENTRY,
+  };
+  process.env.LODESTAR_DB = path.join(directory, "lodestar.db");
+  process.env.LODESTAR_NODE = process.execPath;
+  process.env.LODESTAR_ENTRY = TEST_ENTRY;
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const stop = (turnId, message) => handleHook({ hook_event_name: "Stop",
+    session_id: "marker", turn_id: turnId, cwd: directory,
+    last_assistant_message: message }, directory);
+
+  // First turn: value-bearing facts and one blocked decision land in the ledger.
+  await stop("m1", [
+    "[DECISION key=db:engine status=ACCEPTED value=postgres reason=\"centralized writes\"]",
+    "[DECISION key=gate status=BLOCKED value=closed reason=\"waiting on vendor\"]",
+    "[DECISION key=old-path status=ACCEPTED value=sqlite reason=baseline]",
+  ].join("\n"));
+  // Replaying the same facts is a no-op.
+  await stop("m2", "[DECISION key=db:engine status=ACCEPTED value=postgres reason=\"centralized writes\"]");
+
+  const read = () => {
+    const db = new DatabaseSync(path.join(directory, "lodestar.db"), { readOnly: true });
+    const events = db.prepare("SELECT json_extract(content_json,'$.value.event') AS event, "
+      + "json_extract(content_json,'$.value.key') AS key, "
+      + "json_extract(content_json,'$.value.value') AS value, "
+      + "json_extract(content_json,'$.value.status') AS status, "
+      + "json_extract(content_json,'$.value.reason') AS reason, "
+      + "json_extract(content_json,'$.value.successor') AS successor "
+      + "FROM records WHERE type='decision-event' ORDER BY "
+      + "json_extract(content_json,'$._lodestar.revision')").all();
+    db.close();
+    return events;
+  };
+
+  let events = read();
+  assert.equal(events.length, 3, JSON.stringify(events));
+  const byKey = new Map(events.map((event) => [`${event.event}:${event.key}`, event]));
+  assert.equal(byKey.get("set:db-engine").value, "postgres");
+  assert.equal(byKey.get("set:gate").status, "blocked");
+  assert.equal(byKey.get("set:old-path").value, "sqlite");
+
+  // A later turn kills old-path; the kill lands once and replays as a no-op.
+  const kill = "[SUPERSEDED key=old-path by=db:engine value=sqlite reason=\"replaced by the registry\"]";
+  await stop("m3", kill);
+  await stop("m4", kill);
+  events = read();
+  assert.equal(events.length, 4, JSON.stringify(events));
+  assert.equal(events.filter((event) => event.event === "drop" && event.key === "old-path").length, 1);
+  assert.match(events.at(-1).reason, /superseded by db:engine/u);
+  // The SUPERSEDED marker's by= survives as the successor edge, not just prose
+  // (successor keys normalize like decision keys: db:engine -> db-engine).
+  assert.equal(events.at(-1).successor, "db-engine");
 });

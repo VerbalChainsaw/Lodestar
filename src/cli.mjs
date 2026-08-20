@@ -1,5 +1,5 @@
-import { Buffer } from "node:buffer";
 import { COMMANDS } from "./cli-commands.mjs";
+import { manageAgents } from "./agents.mjs";
 import {
   errorResult,
   internalErrorResult,
@@ -9,7 +9,6 @@ import { canonicalStringify } from "./json.mjs";
 import { dispatch, operationResult } from "./agent-state.mjs";
 import { resolveDatabasePath } from "./paths.mjs";
 import { manageSkills } from "./skills.mjs";
-import { LIMITS } from "./validate.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
 export { LODESTAR_VERSION } from "./version.mjs";
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
@@ -191,25 +190,9 @@ function writeSuccess(io, operation, result, human) {
   const text = human
     ? JSON.stringify(envelope, null, 2)
     : canonicalStringify(envelope);
-  const bytes = Buffer.byteLength(text, "utf8") + 1;
-  if (bytes > LIMITS.commandOutputBytes) {
-    throw lodestarError(
-      "resource_limit",
-      "The command output exceeds its byte limit.",
-      {
-        identifiers: {
-          resource: "command_output",
-          bytes,
-          maximum: LIMITS.commandOutputBytes,
-        },
-        action: "Narrow the request or reduce the stored registry.",
-      },
-    );
-  }
   io.stdout.write(`${text}\n`);
 }
 function validateArguments(args) {
-  let total = 0;
   for (const [index, argument] of args.entries()) {
     if (typeof argument !== "string") {
       throw lodestarError(
@@ -225,35 +208,6 @@ function validateArguments(args) {
         { identifiers: { index } },
       );
     }
-    const bytes = Buffer.byteLength(argument, "utf8");
-    if (bytes > LIMITS.cliArgumentBytes) {
-      throw lodestarError(
-        "resource_limit",
-        "A CLI argument exceeds its byte limit.",
-        {
-          identifiers: {
-            index,
-            bytes,
-            maximum: LIMITS.cliArgumentBytes,
-          },
-          action: "Use a shorter argument and retry.",
-        },
-      );
-    }
-    total += bytes;
-  }
-  if (total > LIMITS.cliArgumentsBytes) {
-    throw lodestarError(
-      "resource_limit",
-      "The CLI arguments exceed their total byte limit.",
-      {
-        identifiers: {
-          bytes: total,
-          maximum: LIMITS.cliArgumentsBytes,
-        },
-        action: "Use fewer or shorter arguments and retry.",
-      },
-    );
   }
 }
 export async function runCli(
@@ -271,13 +225,6 @@ export async function runCli(
         "invalid_input",
         "CLI arguments must be an array.",
         { identifiers: { field: "args" } },
-      );
-    }
-    if (args.length > 64) {
-      throw lodestarError(
-        "resource_limit",
-        "The CLI argument count exceeds its limit.",
-        { identifiers: { count: args.length, maximum: 64 } },
       );
     }
     validateArguments(args);
@@ -308,19 +255,24 @@ export async function runCli(
       );
     }
     const parsed = parseCommand(command, rest.slice(1));
-    if (["work", "handoff", "decision", "skills"].includes(command)) {
+    if (["work", "handoff", "decision", "skills", "agents"].includes(command)) {
       attemptedOperation = `${command}.${parsed.positionals[0] ?? "status"}`;
     }
+    if (command === "agents") {
+      const result = operationResult(await manageAgents(parsed.positionals[0] ?? "status", {
+        cwd: parsed.options["--cwd"],
+        mode: parsed.options["--mode"] ?? "stub",
+      }));
+      writeSuccess(io, attemptedOperation, result, global.human);
+      return result.data.verified === false && parsed.positionals[0] === "verify" ? 4 : 0;
+    }
     if (command === "skills") {
-      const result = operationResult(await manageSkills(parsed.positionals[0], {
+      const result = operationResult(await manageSkills(parsed.positionals[0] ?? "verify", {
         target: parsed.options["--target"],
         home: parsed.options["--home"],
-        dryRun: parsed.options["--dry-run"] === true,
         codexRoot: parsed.options["--codex-root"],
         hermesHome: parsed.options["--hermes-home"],
         opencodeRoot: parsed.options["--opencode-root"],
-        migrate: parsed.options["--migrate"] === true,
-        bootstrapFiles: parsed.options,
       }));
       writeSuccess(io, attemptedOperation, result, global.human);
       return result.data.verified === false ? 4 : 0;

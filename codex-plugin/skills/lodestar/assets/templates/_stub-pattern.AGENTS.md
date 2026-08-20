@@ -1,13 +1,13 @@
 # Lodestar Bootstrap
 
-At session startup, run exactly once:
+If the current canonical project/session already has one complete, validated host-injected Lodestar startup snapshot, apply it directly.
+
+Otherwise invoke:
 
 `lodestar start --cwd "<current working directory>"`
 
-Apply all returned required rules. Use the returned project, governance, decision facts and dead values, relevant knowledge, advisory active work, and eligible continuity recovery as current operating context. Use `lodestar get`, `lodestar find`, and `lodestar links` for exact additional knowledge.
+Use the host's reliable session identity when available. If an attempt fails, output is missing or clipped, or the response is malformed or cannot be completely validated, retry with the same canonical project and session identity until Lodestar returns one complete validated snapshot. Raw attempts may repeat. Accept and apply one snapshot only; never combine partial responses. Same-session retries must replay the same persisted snapshot. If successful retry responses conflict, fail closed and diagnose the stored snapshot.
 
-Use `lodestar work`, `lodestar handoff`, `lodestar decision`, `lodestar skills`, and `lodestar doctor` for their namespaced capabilities.
+Apply the returned complete required governance and state. Never mutate or continue from truncated, clipped, partially parsed, partially delivered, or otherwise incomplete required instructions, authority, persisted state, mutation inputs, or required verification.
 
-If a governing instruction, continuity packet, rule payload, or task is truncated or incomplete, stop. Never infer missing authority or mutate from partial input.
-
-If Lodestar is unavailable or its startup response is incomplete, report the context failure and inspect only what is safely available. Do not invent missing state.
+Use `lodestar get`, `lodestar find`, and `lodestar links` for exact additional knowledge. Use `lodestar work`, `lodestar handoff`, `lodestar decision`, `lodestar skills`, and `lodestar doctor` for their namespaced capabilities.

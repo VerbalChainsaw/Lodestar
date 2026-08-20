@@ -129,5 +129,5 @@ CENTER PIVOT P#:
   New claim:     [specific, falsifiable claim]
   New center:    [stable anchor]
   Why selected: [highest-risk supported alternate]
-  Pivot count:   [1 or 2]
+  Pivot history: [prior centers and disproofs, as needed]
 ```

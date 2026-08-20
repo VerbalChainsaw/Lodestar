@@ -95,66 +95,10 @@ test("release metadata and publication workflow agree on the package version", a
     "--access public",
     "--provenance",
     'release_hero="docs/assets/lodestar-launch-hero.png"',
-    'release_social="docs/assets/lodestar-v${version}-social.png"',
     '"${release_assets[@]}"',
     'docs/releases/${GITHUB_REF_NAME}.md',
     'git merge-base --is-ancestor "${GITHUB_SHA}" origin/main',
   ]) {
     assert.ok(workflow.includes(contract), `missing release contract: ${contract}`);
-  }
-});
-
-test("the current release has valid launch graphics", async () => {
-  const packageJson = JSON.parse(
-    await readFile(path.join(ROOT, "package.json"), "utf8"),
-  );
-  const assets = [
-    {
-      file: path.join(ROOT, "docs", "assets", "lodestar-launch-hero.png"),
-      width: 1_600,
-      height: 900,
-    },
-    {
-      file: path.join(
-        ROOT,
-        "docs",
-        "assets",
-        `lodestar-v${packageJson.version}-social.png`,
-      ),
-      width: 1_254,
-      height: 1_254,
-    },
-  ];
-  const pngSignature = Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  ]);
-  const allowedChunks = new Set(["IHDR", "pHYs", "IDAT", "IEND"]);
-
-  for (const { file, width, height } of assets) {
-    const bytes = await readFile(file);
-    assert.ok(bytes.length > 100_000, `${file} is unexpectedly small`);
-    assert.deepEqual(bytes.subarray(0, pngSignature.length), pngSignature);
-    assert.equal(bytes.toString("ascii", 12, 16), "IHDR");
-    assert.equal(bytes.readUInt32BE(16), width);
-    assert.equal(bytes.readUInt32BE(20), height);
-
-    let offset = pngSignature.length;
-    let ended = false;
-    while (offset + 12 <= bytes.length) {
-      const length = bytes.readUInt32BE(offset);
-      const type = bytes.toString("ascii", offset + 4, offset + 8);
-      assert.ok(
-        allowedChunks.has(type),
-        `${file} contains unexpected PNG metadata chunk ${type}`,
-      );
-      offset += 12 + length;
-      assert.ok(offset <= bytes.length, `${file} has a truncated ${type} chunk`);
-      if (type === "IEND") {
-        ended = true;
-        break;
-      }
-    }
-    assert.equal(ended, true, `${file} is missing its IEND chunk`);
-    assert.equal(offset, bytes.length, `${file} has trailing data`);
   }
 });

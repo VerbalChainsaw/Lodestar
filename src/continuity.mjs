@@ -21,15 +21,10 @@ const SECRET_TEXT = [
     "giu",
   ),
 ];
-const PACKET_BYTES = 64 * 1024;
-const TAIL_ITEMS = 12;
-const TAIL_TEXT_BYTES = 4 * 1024;
-
 const sha = (value) => createHash("sha256").update(String(value)).digest("hex");
 
-function safe(value, label, maximum = 16_384) {
+function safe(value, label) {
   if (typeof value !== "string" || !value.trim()
-      || Buffer.byteLength(value, "utf8") > maximum
       || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
     throw lodestarError("invalid_input", `Invalid ${label}.`);
   }
@@ -75,18 +70,17 @@ function semantic(input) {
   if (!input || Object.getPrototypeOf(input) !== Object.prototype) {
     throw lodestarError("invalid_input", "A handoff packet object is required.");
   }
-  safe(input.goal, "packet.goal", 4_096);
-  safe(input.nextMove, "packet.nextMove", 16_384);
-  if (!Array.isArray(input.rules) || input.rules.length > 10) {
-    throw lodestarError("invalid_input", "packet.rules must contain at most ten rules.");
+  safe(input.goal, "packet.goal");
+  safe(input.nextMove, "packet.nextMove");
+  if (!Array.isArray(input.rules)) {
+    throw lodestarError("invalid_input", "packet.rules must be an array.");
   }
-  for (const rule of input.rules) safe(rule, "packet.rules", 4_096);
-  if (!Array.isArray(input.entries) || input.entries.length > 35) {
-    throw lodestarError("invalid_input", "packet.entries must contain at most 35 entries.");
+  for (const rule of input.rules) safe(rule, "packet.rules");
+  if (!Array.isArray(input.entries)) {
+    throw lodestarError("invalid_input", "packet.entries must be an array.");
   }
   if (!input.work || Object.getPrototypeOf(input.work) !== Object.prototype
-      || !finite(input.work) || !Array.isArray(input.evidence)
-      || input.evidence.length > 50 || !finite(input.evidence)) {
+      || !finite(input.work) || !Array.isArray(input.evidence) || !finite(input.evidence)) {
     throw lodestarError("invalid_input", "packet.work or packet.evidence is invalid.");
   }
   const keys = new Set();
@@ -102,15 +96,15 @@ function semantic(input) {
       throw entryError(index, "key", `duplicates key ${entry.key}`, { key: entry.key });
     }
     if (!STATES.has(entry.state) || !Number.isInteger(entry.generation)
-        || entry.generation < 0 || !Array.isArray(entry.scope) || entry.scope.length > 10
+        || entry.generation < 0 || !Array.isArray(entry.scope)
         || !entry.provenance || Object.getPrototypeOf(entry.provenance) !== Object.prototype
         || !PROVENANCE.has(entry.provenance.kind)) {
       throw entryError(index, null, "is invalid");
     }
     keys.add(entry.key);
-    safe(entry.text, `entry ${entry.key}`, 8_192);
-    safe(entry.provenance.sourceRef, `entry ${entry.key} provenance`, 4_096);
-    safe(entry.provenance.observedAt, `entry ${entry.key} timestamp`, 100);
+    safe(entry.text, `entry ${entry.key}`);
+    safe(entry.provenance.sourceRef, `entry ${entry.key} provenance`);
+    safe(entry.provenance.observedAt, `entry ${entry.key} timestamp`);
     if (entry.state === "dead") {
       const evidence = input.evidence.find((item) => item
         && Object.getPrototypeOf(item) === Object.prototype
@@ -121,12 +115,7 @@ function semantic(input) {
         `Dead entry ${entry.key} requires matching auditable evidence.`);
     }
   }
-  const copy = structuredClone(input);
-  const bytes = Buffer.byteLength(canonicalStringify(copy), "utf8");
-  if (bytes > PACKET_BYTES) throw lodestarError("resource_limit",
-    "The semantic handoff packet exceeds its byte limit.",
-    { identifiers: { bytes, maximum: PACKET_BYTES } });
-  return copy;
+  return structuredClone(input);
 }
 
 export function validateHandoffTransition(previous, next) {
@@ -179,10 +168,9 @@ function tailSince(db, project, identity, revision) {
     + "AND json_extract(content_json,'$._lodestar.revision')>? "
     + "ORDER BY json_extract(content_json,'$._lodestar.revision'),id")
     .all(project.scope, identity.session, revision).map(({ id }) => optionalRecord(db, id));
-  const selected = all.slice(-TAIL_ITEMS);
-  return { items: selected.map((record) => ({ role: record.data.role,
+  return { items: all.map((record) => ({ role: record.data.role,
     text: record.data.text, observed_at: record.data.observed_at,
-    event_id: record.id })), omitted: all.length - selected.length,
+    event_id: record.id })), omitted: 0,
   cursor: all.at(-1)?.revision ?? revision };
 }
 
@@ -284,12 +272,11 @@ export function handoffTail(db, project, identity, role, turn, text, options = {
   if (!["user", "assistant"].includes(role)) {
     throw lodestarError("invalid_input", "Handoff tail role must be user or assistant.");
   }
-  safe(turn, "turn", 256);
+  safe(turn, "turn");
   const owned = lane(db, project, identity);
   if (owned?.data.state !== "armed") return { captured: false };
-  const clipped = Array.from(safe(text, "tail text", 64 * 1024))
-    .slice(-TAIL_TEXT_BYTES).join("");
-  const redacted = redactHandoff(clipped), id = tailId(project, identity.session, turn, role);
+  const redacted = redactHandoff(safe(text, "tail text"));
+  const id = tailId(project, identity.session, turn, role);
   const now = (options.now ?? (() => new Date()))().toISOString();
   let result;
   transaction(db, () => {
@@ -454,20 +441,7 @@ export function claimHandoffInside(db, project, identity, options = {}) {
 }
 
 export function handoffStartupView(claim) {
-  if (!claim) return null;
-  const packet = claim.packet, full = { recovery: claim.recovery, packet };
-  if (Buffer.byteLength(canonicalStringify(full), "utf8") <= 6 * 1024) return full;
-  const bounded = (text, maximum) => {
-    const points = Array.from(text);
-    while (Buffer.byteLength(points.join(""), "utf8") > maximum) points.pop();
-    return { text: points.join(""), truncated: points.length < Array.from(text).length };
-  };
-  return { recovery: claim.recovery, packet: { format: packet.format, id: packet.id,
-    generation: packet.generation, goal: bounded(packet.goal, 1_024),
-    nextMove: bounded(packet.nextMove, 2_048),
-    integrity: packet.integrity, summary: true,
-    omitted: { rules: packet.rules.length, entries: packet.entries.length,
-      evidence: packet.evidence.length, tail: packet.recentTail.items.length } } };
+  return claim ? { recovery: claim.recovery, packet: claim.packet } : null;
 }
 
 export function diagnoseHandoff(db) {

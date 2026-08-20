@@ -80,7 +80,7 @@ test("initializes the universal-record schema and is read-only when repeated", a
       .map(({ key, value }) => [key, value]),
   );
   assert.equal(metadata.created_at, "2026-07-30T10:00:00.000Z");
-  assert.equal(metadata.schema_version, "3");
+  assert.equal(metadata.schema_version, "4");
   assert.equal(metadata.database_revision, "0");
   assert.match(metadata.database_instance_id, /^[0-9a-f]{64}$/u);
   db.close();
@@ -207,7 +207,7 @@ test("commit ambiguity is explicit and preserves a possibly committed init", asy
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "3",
+    "4",
   );
   db.close();
 });
@@ -241,7 +241,7 @@ test("definite init commit failure preserves a resumable reservation", async (t)
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "3",
+    "4",
   );
   db.close();
 });
@@ -304,7 +304,7 @@ test("initialization resumes an interrupted zero-byte reservation", async (t) =>
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "3",
+    "4",
   );
   db.close();
 });
@@ -335,7 +335,7 @@ test("writer validation does not alter an unrelated SQLite database", async (t) 
   check.close();
 });
 
-test("schema constraints enforce byte bounds and exact timestamps", async (t) => {
+test("schema constraints allow complete content and enforce exact timestamps", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
@@ -343,7 +343,7 @@ test("schema constraints enforce byte bounds and exact timestamps", async (t) =>
   const insert = db.prepare(
     "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
-  assert.throws(() => insert.run(
+  assert.doesNotThrow(() => insert.run(
     "😀".repeat(256),
     "note",
     "Too many bytes",
@@ -382,7 +382,7 @@ test("concurrent initialization never overwrites another creator", async (t) => 
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "3",
+    "4",
   );
   db.close();
   if (process.platform !== "win32") {

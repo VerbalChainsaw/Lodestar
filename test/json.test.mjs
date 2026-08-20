@@ -4,10 +4,9 @@ import test from "node:test";
 
 import {
   canonicalStringify,
-  JSON_LIMITS,
-  readHandleBounded,
-  readStreamBounded,
+  readStreamComplete,
 } from "../src/json.mjs";
+import { resolveInputPath } from "../src/paths.mjs";
 
 test("canonical JSON preserves prototype-shaped keys without pollution", () => {
   const value = JSON.parse(
@@ -23,37 +22,17 @@ test("canonical JSON preserves prototype-shaped keys without pollution", () => {
   assert.equal({}.safe, undefined);
 });
 
-test("canonical JSON rejects adversarial depth and sparse arrays", () => {
+test("canonical JSON accepts deep and wide valid values but still rejects sparse arrays", () => {
   let value = { state: "known" };
-  for (let index = 0; index < 130; index += 1) value = { nested: value };
-  assert.throws(
-    () => canonicalStringify(value),
-    ({ code }) => code === "resource_limit",
-  );
+  for (let index = 0; index < 1_000; index += 1) value = { nested: value };
+  assert.match(canonicalStringify(value), /"state":"known"/u);
+  assert.equal(JSON.parse(canonicalStringify(Array.from({ length: 100_001 }, (_, index) => index)))
+    .length, 100_001);
   const sparse = [];
   sparse.length = 2;
   assert.throws(
     () => canonicalStringify(sparse),
     ({ code }) => code === "invalid_json",
-  );
-});
-
-test("bounded handle reads stop when a file grows past its limit", async () => {
-  const values = [Buffer.from("1234"), Buffer.from("5")];
-  const handle = {
-    async read(buffer, offset, length) {
-      const value = values.shift() ?? Buffer.alloc(0);
-      const selected = value.subarray(0, length);
-      selected.copy(buffer, offset);
-      return { bytesRead: selected.length, buffer };
-    },
-  };
-  await assert.rejects(
-    readHandleBounded(handle, {
-      maximum: 4,
-      resource: "growing_file",
-    }),
-    ({ code }) => code === "resource_limit",
   );
 });
 
@@ -64,8 +43,7 @@ test("streamed string input rejects unpaired Unicode surrogates", async () => {
     },
   };
   await assert.rejects(
-    readStreamBounded(chunks, {
-      maximum: 16,
+    readStreamComplete(chunks, {
       resource: "test_stream",
     }),
     ({ code }) => code === "invalid_utf8",
@@ -80,47 +58,10 @@ test("streamed string input preserves a surrogate pair split across chunks", asy
     },
   };
   assert.equal(
-    await readStreamBounded(chunks, {
-      maximum: 16,
+    await readStreamComplete(chunks, {
       resource: "test_stream",
     }),
     "\u{1F600}",
-  );
-});
-
-test("stream limits count empty chunks before conversion", async () => {
-  const atLimit = {
-    async *[Symbol.asyncIterator]() {
-      for (let index = 1; index < JSON_LIMITS.streamChunks; index += 1) {
-        yield "";
-      }
-      yield "{}";
-    },
-  };
-  assert.equal(
-    await readStreamBounded(atLimit, {
-      maximum: 16,
-      resource: "test_stream",
-    }),
-    "{}",
-  );
-
-  const overLimit = {
-    async *[Symbol.asyncIterator]() {
-      for (let index = 0; index < JSON_LIMITS.streamChunks; index += 1) {
-        yield Buffer.alloc(0);
-      }
-      yield "{}";
-    },
-  };
-  await assert.rejects(
-    readStreamBounded(overLimit, {
-      maximum: 16,
-      resource: "test_stream",
-    }),
-    ({ code, identifiers }) =>
-      code === "resource_limit"
-      && identifiers.chunks === JSON_LIMITS.streamChunks + 1,
   );
 });
 
@@ -131,50 +72,18 @@ test("stream input accepts only byte-exact chunk representations", async () => {
     new DataView(Uint8Array.from([0x7B, 0x7D]).buffer),
   ]) {
     await assert.rejects(
-      readStreamBounded([chunk], {
-        maximum: 16,
+      readStreamComplete([chunk], {
         resource: "test_stream",
       }),
       ({ code }) => code === "invalid_input",
     );
   }
   assert.equal(
-    await readStreamBounded([Uint8Array.from([0x7B, 0x7D])], {
-      maximum: 16,
+    await readStreamComplete([Uint8Array.from([0x7B, 0x7D])], {
       resource: "test_stream",
     }),
     "{}",
   );
-});
-
-test("stream bounds use intrinsic byte length before copying typed arrays", async (t) => {
-  class UnderreportingBytes extends Uint8Array {
-    get byteLength() {
-      return 0;
-    }
-  }
-  const chunk = new UnderreportingBytes(1024);
-  const originalFrom = Buffer.from;
-  let copiedAttackerChunk = false;
-  Buffer.from = function instrumentedFrom(value, ...rest) {
-    if (value === chunk) copiedAttackerChunk = true;
-    return originalFrom.call(this, value, ...rest);
-  };
-  t.after(() => {
-    Buffer.from = originalFrom;
-  });
-
-  await assert.rejects(
-    readStreamBounded([chunk], {
-      maximum: 4,
-      resource: "test_stream",
-    }),
-    ({ code, identifiers }) =>
-      code === "resource_limit"
-      && identifiers.bytes === 1024
-      && identifiers.maximum === 4,
-  );
-  assert.equal(copiedAttackerChunk, false);
 });
 
 test("stream input rejects prototype-spoofed Uint8Array objects", async () => {
@@ -189,10 +98,15 @@ test("stream input rejects prototype-spoofed Uint8Array objects", async () => {
   }
 
   await assert.rejects(
-    readStreamBounded([spoofed], {
-      maximum: 16,
+    readStreamComplete([spoofed], {
       resource: "test_stream",
     }),
     ({ code }) => code === "invalid_input",
   );
+});
+
+test("path validation leaves representable length to the selected platform", () => {
+  const longPath = `root/${"x".repeat(17 * 1024)}`;
+  const pathApi = { resolve: (_cwd, selected) => selected };
+  assert.equal(resolveInputPath(longPath, { cwd: "/", platform: "linux", pathApi }), longPath);
 });

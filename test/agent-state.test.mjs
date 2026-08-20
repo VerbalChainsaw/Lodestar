@@ -6,7 +6,8 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  normalizeMachinePath, resolveIdentity, resolveProject, STARTUP_BYTES,
+  normalizeMachinePath, resolveIdentity, resolveProject,
+  startSnapshotProjection,
 } from "../src/agent-state.mjs";
 import { runCli } from "../src/cli.mjs";
 import { initializeDatabase, openWriteDatabase } from "../src/database.mjs";
@@ -52,7 +53,7 @@ const handoffPacket = (overrides = {}) => ({
   evidence: [], ...overrides,
 });
 
-test("Windows and WSL paths share one project identity and startup stays bounded", async (t) => {
+test("Windows and WSL paths share one project identity and startup replays", async (t) => {
   const { database, directory } = await fixture(t);
   const windows = "C:/Users/demo/Project With Spaces", wsl = "/mnt/c/Users/demo/Project With Spaces";
   assert.equal(normalizeMachinePath(wsl), windows);
@@ -72,16 +73,24 @@ test("Windows and WSL paths share one project identity and startup stays bounded
   db.close();
 
   const args = ["start", "--db", database, "--cwd", directory, "--session", "reader"];
-  const first = await invoke(args), second = await invoke(args);
+  const first = await invoke(args);
+  const changed = await openWriteDatabase(database);
+  putRecord(changed, projectRecord("context:after-start", "newer registry state"));
+  changed.close();
+  const second = await invoke(args);
   assert.equal(first.text, second.text);
-  assert.ok(Buffer.byteLength(first.text, "utf8") <= STARTUP_BYTES);
+  assert.equal(first.value.data.startup_snapshot.id, second.value.data.startup_snapshot.id);
+  assert.equal(first.value.data.startup_snapshot.digest, second.value.data.startup_snapshot.digest);
+  assert.equal(first.value.data.context.some(({ id }) => id === "context:after-start"), false);
+  assert.deepEqual(first.value.data.budget,
+    { bytes: null, source: "unbounded", applies_to: "optional", target_met: true });
   assert.equal(first.value.data.required[0].id, "g:lodestar:required-governance");
   assert.equal(first.value.data.required[1].id, "instruction:required");
-  assert.ok(first.value.data.required[0].data.sections
-    .some(({ id }) => id === "workflow-routing"));
-  assert.equal(first.value.data.omitted.required, undefined);
-  assert.equal(first.value.more, true);
-  assert.match(first.value.next[0], /^lodestar find /u);
+  assert.equal(first.value.data.required[0].data.required, true);
+  assert.match(first.value.data.required[0].data.text, /trusted technical partner/u);
+  assert.deepEqual(first.value.data.available, []);
+  assert.equal(first.value.more, false);
+  assert.deepEqual(first.value.next, []);
   const windowsDialect = await invoke([
     "start", "--db", database, "--cwd", windows, "--session", "reader",
   ]);
@@ -91,7 +100,7 @@ test("Windows and WSL paths share one project identity and startup stays bounded
   assert.equal(crossDialect.value.scope.cwd, windowsDialect.value.scope.cwd);
 });
 
-test("startup survives required context larger than the whole budget", async (t) => {
+test("an explicit startup target never demotes oversized required context", async (t) => {
   const { database, directory } = await fixture(t);
   const db = await openWriteDatabase(database);
   putRecord(db, projectRecord("instruction:oversized", "x".repeat(20_000), true));
@@ -103,18 +112,13 @@ test("startup survives required context larger than the whole budget", async (t)
   // the project — over one record someone marked required. It used to throw
   // resource_limit here and the project was dead until a human edited the registry.
   const started = await invoke(["start", "--db", database, "--cwd", directory,
-    "--session", "claimant"]);
+    "--session", "claimant", "--startup-budget", "1024"]);
   assert.equal(started.value.ok, true);
-  assert.ok(Buffer.byteLength(started.text, "utf8") <= STARTUP_BYTES, "still bounded");
-
-  // Nothing is lost: what cannot be carried is named, so one `lodestar get` recovers it
-  // instead of a blind search through everything in scope.
-  const stub = started.value.data.available.find(({ id }) => id === "instruction:oversized");
-  assert.ok(stub, "an oversized required record is still named");
-  assert.equal(started.value.data.omitted.required, 1);
-  assert.equal(started.value.more, true);
-  const recovered = await invoke(["get", "instruction:oversized", "--db", database]);
-  assert.equal(recovered.value.data.id, "instruction:oversized");
+  assert.ok(Buffer.byteLength(started.text, "utf8") > 1024, "required content exceeds target");
+  assert.ok(started.value.data.required.some(({ id }) => id === "instruction:oversized"));
+  assert.ok(Array.isArray(started.value.data.available));
+  assert.deepEqual(started.value.data.budget,
+    { bytes: 1024, source: "option", applies_to: "optional", target_met: false });
 
   // And because startup ran, the waiting baton was claimed as it would be on any
   // ordinary session. The old refusal rolled that back and stranded the handoff.
@@ -122,9 +126,32 @@ test("startup survives required context larger than the whole budget", async (t)
     "--session", "claimant"]);
   assert.equal(status.value.data.recovery.data.state, "claimed");
   assert.equal(status.value.data.recovery.data.claimed_by, "claimant");
+
+  const roomy = await invoke(["start", "--db", database, "--cwd", directory,
+    "--session", "roomy", "--startup-budget", "300000"]);
+  assert.equal(roomy.value.data.budget.bytes, 300000);
+  assert.equal(roomy.value.data.budget.source, "option");
+  assert.equal(roomy.value.data.budget.target_met, true);
 });
 
-test("startup caps an oversized handoff head and reports exact omitted counts", async (t) => {
+test("unbounded startup queries every optional record by default", async (t) => {
+  const { database, directory } = await fixture(t);
+  const db = await openWriteDatabase(database);
+  for (let index = 0; index < 225; index += 1) {
+    putRecord(db, projectRecord(`context:uncapped:${index}`, `${index}`));
+  }
+  db.close();
+
+  const started = await invoke(["start", "--db", database, "--cwd", directory,
+    "--session", "uncapped"]);
+  assert.equal(started.value.data.context.length, 225);
+  assert.equal(started.value.data.available.length, 0);
+  assert.deepEqual(started.value.data.available, []);
+  assert.equal(started.value.data.budget.source, "unbounded");
+  assert.equal(started.value.more, false);
+});
+
+test("startup keeps an oversized handoff packet complete and atomic", async (t) => {
   const { database, directory } = await fixture(t);
   const db = await openWriteDatabase(database);
   for (let index = 0; index < 30; index += 1) {
@@ -137,12 +164,11 @@ test("startup caps an oversized handoff head and reports exact omitted counts", 
   })));
   const started = await invoke(["start", "--db", database, "--cwd", directory,
     "--session", "claimant"]);
-  assert.ok(Buffer.byteLength(started.text, "utf8") <= STARTUP_BYTES);
-  assert.ok(Buffer.byteLength(JSON.stringify(started.value.data.handoff.packet), "utf8") <= 6_144);
-  assert.equal(started.value.data.handoff.packet.summary, true);
-  assert.equal(started.value.data.context.length + started.value.data.omitted.context, 30);
-  assert.match(started.value.next.join("\n"), /lodestar handoff status/u);
-  assert.match(started.value.next.join("\n"), /lodestar find/u);
+  assert.equal(started.value.data.handoff.packet.goal, "g".repeat(4_096));
+  assert.equal(started.value.data.handoff.packet.nextMove, "n".repeat(4_096));
+  assert.equal(started.value.data.context.length, 30);
+  assert.deepEqual(started.value.data.available, []);
+  assert.deepEqual(started.value.next, []);
 });
 
 test("start initializes an absent registry without a separate setup command", async (t) => {
@@ -153,7 +179,8 @@ test("start initializes an absent registry without a separate setup command", as
     "start", "--db", database, "--cwd", directory, "--session", "first",
   ]);
   assert.equal(started.value.operation, "start");
-  assert.equal(started.value.revision, 0);
+  assert.equal(started.value.revision, 1);
+  assert.equal(started.value.data.startup_snapshot.persisted, true);
   assert.equal(started.value.data.handoff, null);
   const status = await invoke(["work", "status", "--db", database, "--cwd", directory]);
   assert.deepEqual(status.value.data.records, []);
@@ -242,4 +269,92 @@ test("handoff now initializes an absent registry and remains readable", async (t
   const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory,
     "--session", "source"]);
   assert.equal(status.value.data.recovery.id, saved.value.data.recovery.id);
+});
+
+test("concurrent same-session starts serialize to one snapshot and one claim", async (t) => {
+  const { database, directory } = await fixture(t);
+  const common = ["--db", database, "--cwd", directory, "--agent", "codex"];
+  await invoke(["handoff", "now", ...common, "--session", "source"],
+    JSON.stringify(handoffPacket()));
+  const args = ["start", ...common, "--session", "claimant"];
+  const [first, second] = await Promise.all([invoke(args), invoke(args)]);
+  assert.equal(first.text, second.text);
+  assert.equal(first.value.data.handoff.recovery.data.claimed_by, "claimant");
+  const db = await openWriteDatabase(database);
+  assert.equal(db.prepare("SELECT count(*) AS count FROM records WHERE type='startup-snapshot'")
+    .get().count, 1);
+  assert.equal(db.prepare("SELECT count(*) AS count FROM records WHERE type='handoff-recovery' "
+    + "AND json_extract(content_json,'$.value.state')='claimed'").get().count, 1);
+  db.close();
+});
+
+test("corrupt startup snapshots fail closed and generic record writes cannot replace them", async (t) => {
+  const { database, directory } = await fixture(t);
+  const args = ["start", "--db", database, "--cwd", directory, "--session", "reader"];
+  const started = await invoke(args);
+  const reserved = { id: started.value.data.startup_snapshot.id, type: "note", name: "replace",
+    scope: "project:lodestar", content: { state: "known", value: { text: "bad" } },
+    aliases: [], links: [], sources: [] };
+  const put = await invokeRaw(["put", "--db", database], JSON.stringify(reserved));
+  assert.equal(JSON.parse(put.stderr).error.code, "reserved_record_type");
+  const deleted = await invokeRaw(["delete", started.value.data.startup_snapshot.id, "--db", database]);
+  assert.equal(JSON.parse(deleted.stderr).error.code, "reserved_record_type");
+  const db = await openWriteDatabase(database);
+  const row = db.prepare("SELECT content_json FROM records WHERE id=?")
+    .get(started.value.data.startup_snapshot.id);
+  const content = JSON.parse(row.content_json);
+  content.value.digest = "0".repeat(64);
+  db.prepare("UPDATE records SET content_json=? WHERE id=?")
+    .run(JSON.stringify(content), started.value.data.startup_snapshot.id);
+  db.close();
+  const failed = await invokeRaw(args);
+  assert.equal(failed.exitCode, 3);
+  const error = JSON.parse(failed.stderr).error;
+  assert.equal(error.code, "startup_snapshot_conflict");
+  assert.match(error.action, /same session identity/u);
+});
+
+test("a failed first snapshot transaction rolls back its handoff claim and record", async (t) => {
+  const { database, directory } = await fixture(t);
+  const common = ["--db", database, "--cwd", directory, "--agent", "codex"];
+  await invoke(["handoff", "now", ...common, "--session", "source"],
+    JSON.stringify(handoffPacket()));
+  const db = await openWriteDatabase(database);
+  const project = resolveProject(db, directory);
+  const actor = resolveIdentity({ session: "claimant", agent: "codex" }, {});
+  assert.throws(() => startSnapshotProjection(db, project, actor, {
+    database,
+    beforePersist: () => { throw new Error("forced snapshot failure"); },
+  }), { code: "database_error" });
+  assert.equal(db.prepare("SELECT count(*) AS count FROM records WHERE type='startup-snapshot'")
+    .get().count, 0);
+  const recovery = db.prepare("SELECT json_extract(content_json,'$.value.state') AS state, "
+    + "json_extract(content_json,'$.value.claimed_by') AS claimed_by FROM records "
+    + "WHERE type='handoff-recovery'").get();
+  assert.equal(recovery.state, "pending");
+  assert.equal(recovery.claimed_by, null);
+  db.close();
+});
+
+test("start without a session remains stateless and reflects newer registry state", async (t) => {
+  const environment = ["CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "OPENCODE_SESSION_ID"];
+  const prior = Object.fromEntries(environment.map((key) => [key, process.env[key]]));
+  for (const key of environment) delete process.env[key];
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const { database, directory } = await fixture(t);
+  const args = ["start", "--db", database, "--cwd", directory];
+  const first = await invoke(args);
+  assert.equal(first.value.data.startup_snapshot, undefined);
+  const db = await openWriteDatabase(database);
+  putRecord(db, projectRecord("context:no-session-new", "new state"));
+  db.close();
+  const second = await invoke(args);
+  assert.equal(second.value.data.startup_snapshot, undefined);
+  assert.equal(second.value.data.context.some(({ id }) => id === "context:no-session-new"), true);
+  assert.notEqual(second.text, first.text);
 });

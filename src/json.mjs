@@ -4,13 +4,6 @@ import { TextDecoder } from "node:util";
 
 import { lodestarError, wrapError } from "./errors.mjs";
 
-export const JSON_LIMITS = Object.freeze({
-  depth: 128,
-  nodes: 100_000,
-  streamChunks: 16_384,
-});
-
-const READ_CHUNK_BYTES = 64 * 1024;
 const ARRAY_BUFFER_IS_VIEW = ArrayBuffer.isView;
 const UINT8_ARRAY = Uint8Array;
 const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype);
@@ -98,105 +91,33 @@ function validStringChunk(value, pendingHigh, resource) {
   };
 }
 
-function streamByteLimit(resource, bytes, maximum) {
-  return lodestarError(
-    "resource_limit",
-    `${resource} exceeds its byte limit.`,
-    {
-      identifiers: { resource, bytes, maximum },
-      action: "Send a smaller JSON document.",
-    },
-  );
-}
-
-function normalizedJson(value, stack, state, depth) {
-  state.nodes += 1;
-  if (state.nodes > JSON_LIMITS.nodes) {
-    throw lodestarError(
-      "resource_limit",
-      "The JSON value exceeds its structural node limit.",
-      {
-        identifiers: {
-          resource: "json_nodes",
-          nodes: state.nodes,
-          maximum: JSON_LIMITS.nodes,
-        },
-        action: "Reduce the JSON structure and retry.",
-      },
-    );
-  }
-  if (depth > JSON_LIMITS.depth) {
-    throw lodestarError(
-      "resource_limit",
-      "The JSON value exceeds its nesting-depth limit.",
-      {
-        identifiers: {
-          resource: "json_depth",
-          depth,
-          maximum: JSON_LIMITS.depth,
-        },
-        action: "Flatten the JSON structure and retry.",
-      },
-    );
-  }
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      throw lodestarError(
-        "invalid_json",
-        "JSON numbers must be finite.",
-      );
+function normalizedJson(value) {
+  const holder = Object.create(null);
+  const ancestors = new Set();
+  const tasks = [{ kind: "value", value, target: holder, key: "value" }];
+  while (tasks.length > 0) {
+    const task = tasks.pop();
+    if (task.kind === "leave") {
+      ancestors.delete(task.value);
+      continue;
     }
-    return Object.is(value, -0) ? 0 : value;
-  }
-  if (typeof value !== "object") {
-    throw lodestarError(
-      "invalid_json",
-      "The value contains a type JSON cannot represent.",
-    );
-  }
-  if (stack.has(value)) {
-    throw lodestarError(
-      "invalid_json",
-      "The value contains a circular reference.",
-    );
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (
-    !Array.isArray(value)
-    && prototype !== Object.prototype
-    && prototype !== null
-  ) {
-    throw lodestarError(
-      "invalid_json",
-      "JSON objects must use an ordinary object prototype.",
-    );
-  }
-  stack.add(value);
-  let result;
-  if (Array.isArray(value)) {
-    result = [];
-    for (let index = 0; index < value.length; index += 1) {
-      if (!Object.hasOwn(value, index)) {
+    if (task.kind === "array") {
+      if (task.index >= task.source.length) continue;
+      if (!Object.hasOwn(task.source, task.index)) {
         throw lodestarError(
           "invalid_json",
           "JSON arrays cannot contain empty slots.",
-          { identifiers: { index } },
+          { identifiers: { index: task.index } },
         );
       }
-      result.push(normalizedJson(
-        value[index],
-        stack,
-        state,
-        depth + 1,
-      ));
+      tasks.push({ ...task, index: task.index + 1 });
+      tasks.push({ kind: "value", value: task.source[task.index],
+        target: task.target, key: task.index });
+      continue;
     }
-  } else {
-    result = Object.create(null);
-    for (const key of Object.keys(value).sort()) {
-      const entry = value[key];
+    if (task.kind === "object") {
+      if (task.index >= task.keys.length) continue;
+      const key = task.keys[task.index], entry = task.source[key];
       if (entry === undefined) {
         throw lodestarError(
           "invalid_json",
@@ -204,24 +125,52 @@ function normalizedJson(value, stack, state, depth) {
           { identifiers: { key } },
         );
       }
-      result[key] = normalizedJson(entry, stack, state, depth + 1);
+      tasks.push({ ...task, index: task.index + 1 });
+      tasks.push({ kind: "value", value: entry, target: task.target, key });
+      continue;
     }
+    const current = task.value;
+    if (current === null || typeof current === "string" || typeof current === "boolean") {
+      task.target[task.key] = current;
+      continue;
+    }
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) {
+        throw lodestarError("invalid_json", "JSON numbers must be finite.");
+      }
+      task.target[task.key] = Object.is(current, -0) ? 0 : current;
+      continue;
+    }
+    if (typeof current !== "object") {
+      throw lodestarError(
+        "invalid_json",
+        "The value contains a type JSON cannot represent.",
+      );
+    }
+    if (ancestors.has(current)) {
+      throw lodestarError("invalid_json", "The value contains a circular reference.");
+    }
+    const isArray = Array.isArray(current), prototype = Object.getPrototypeOf(current);
+    if (!isArray && prototype !== Object.prototype && prototype !== null) {
+      throw lodestarError(
+        "invalid_json",
+        "JSON objects must use an ordinary object prototype.",
+      );
+    }
+    const result = isArray ? [] : Object.create(null);
+    task.target[task.key] = result;
+    ancestors.add(current);
+    tasks.push({ kind: "leave", value: current });
+    tasks.push(isArray
+      ? { kind: "array", source: current, target: result, index: 0 }
+      : { kind: "object", source: current, target: result,
+        keys: Object.keys(current).sort(), index: 0 });
   }
-  stack.delete(value);
-  return result;
+  return holder.value;
 }
 
 export function canonicalStringify(value) {
-  return JSON.stringify(normalizedJson(
-    value,
-    new Set(),
-    { nodes: 0 },
-    0,
-  ));
-}
-
-export function jsonBytes(value) {
-  return Buffer.byteLength(canonicalStringify(value), "utf8");
+  return JSON.stringify(normalizedJson(value));
 }
 
 export function decodeUtf8(
@@ -289,177 +238,59 @@ export function parseJsonText(
   }
 }
 
-export async function readTextFileBounded(
+
+export async function readTextFileComplete(
   file,
-  {
-    maximum,
-    resource = "file_input",
-  },
+  { resource = "file_input" } = {},
 ) {
   let handle;
   try {
     handle = await open(file, "r");
     const info = await handle.stat();
     if (!info.isFile()) {
-      throw lodestarError(
-        "invalid_path",
-        "The input path is not a regular file.",
-        { identifiers: { path: file } },
-      );
+      throw lodestarError("invalid_path", "The input path is not a regular file.",
+        { identifiers: { path: file } });
     }
-    if (info.size > maximum) {
-      throw lodestarError(
-        "resource_limit",
-        `${resource} exceeds its byte limit.`,
-        {
-          identifiers: {
-            path: file,
-            resource,
-            bytes: info.size,
-            maximum,
-          },
-          action: "Use a smaller input file.",
-        },
-      );
-    }
-    const buffer = await readHandleBounded(handle, {
-      maximum,
-      resource,
-      identifiers: { path: file },
-    });
-    const text = decodeUtf8(buffer, {
-      resource,
-      identifiers: { path: file },
-    });
-    assertTextBytes(text, maximum, resource, { path: file });
-    return text;
+    return decodeUtf8(await handle.readFile(), { resource, identifiers: { path: file } });
   } catch (error) {
-    throw wrapError(
-      error,
-      "input_unreadable",
-      "Lodestar could not read the input file.",
-      {
-        identifiers: { path: file },
-        action: "Check that the path names a readable regular file.",
-      },
-    );
+    throw wrapError(error, "input_unreadable", "Lodestar could not read the input file.", {
+      identifiers: { path: file },
+      action: "Check that the path names a readable regular file.",
+    });
   } finally {
     await handle?.close().catch(() => {});
   }
 }
 
-export async function readHandleBounded(
-  handle,
-  {
-    maximum,
-    resource = "file_input",
-    identifiers = {},
-  },
-) {
-  const chunks = [];
-  let bytes = 0;
-  while (true) {
-    const remaining = maximum - bytes;
-    const size = Math.min(READ_CHUNK_BYTES, remaining + 1);
-    const buffer = Buffer.allocUnsafe(size);
-    const { bytesRead } = await handle.read(buffer, 0, size, null);
-    if (bytesRead === 0) break;
-    bytes += bytesRead;
-    if (bytes > maximum) {
-      throw lodestarError(
-        "resource_limit",
-        `${resource} exceeds its byte limit.`,
-        {
-          identifiers: {
-            ...identifiers,
-            resource,
-            bytes,
-            maximum,
-          },
-          action: "Reduce the input size and retry.",
-        },
-      );
-    }
-    chunks.push(buffer.subarray(0, bytesRead));
-  }
-  return Buffer.concat(chunks, bytes);
-}
-
-export async function readStreamBounded(
+export async function readStreamComplete(
   stream,
-  {
-    maximum,
-    resource = "stdin_input",
-  },
+  { resource = "stdin_input" } = {},
 ) {
   const chunks = [];
-  let bytes = 0;
-  let chunkCount = 0;
   let pendingHigh = "";
   for await (const chunk of stream) {
-    chunkCount += 1;
-    if (chunkCount > JSON_LIMITS.streamChunks) {
-      throw lodestarError(
-        "resource_limit",
-        `${resource} exceeds its chunk-count limit.`,
-        {
-          identifiers: {
-            resource,
-            chunks: chunkCount,
-            maximum: JSON_LIMITS.streamChunks,
-          },
-          action: "Send the JSON document through a normal bounded stream.",
-        },
-      );
-    }
     let buffer;
     if (typeof chunk === "string") {
-      const prospectiveBytes = Buffer.byteLength(chunk);
-      if (prospectiveBytes > maximum - bytes) {
-        throw streamByteLimit(
-          resource,
-          bytes + prospectiveBytes,
-          maximum,
-        );
-      }
       const validated = validStringChunk(chunk, pendingHigh, resource);
       pendingHigh = validated.pendingHigh;
-      const encodedBytes = Buffer.byteLength(validated.text);
-      if (encodedBytes > maximum - bytes) {
-        throw streamByteLimit(resource, bytes + encodedBytes, maximum);
-      }
       buffer = Buffer.from(validated.text);
     } else {
       const view = byteView(chunk);
       if (view !== null) {
-        if (view.byteLength > maximum - bytes) {
-          throw streamByteLimit(
-            resource,
-            bytes + view.byteLength,
-            maximum,
-          );
-        }
         if (pendingHigh) throw invalidUtf8(resource);
         buffer = copyByteView(view);
       }
       if (buffer === null || buffer === undefined) {
-        throw lodestarError(
-          "invalid_input",
-          `${resource} yielded a chunk that is not text or bytes.`,
-          {
+        throw lodestarError("invalid_input",
+          `${resource} yielded a chunk that is not text or bytes.`, {
             identifiers: { resource, received_type: typeof chunk },
             action: "Send JSON through string, Buffer, or Uint8Array chunks.",
-          },
-        );
+          });
       }
     }
-    if (buffer.length === 0) continue;
-    bytes += buffer.length;
-    if (bytes > maximum) {
-      throw streamByteLimit(resource, bytes, maximum);
-    }
-    chunks.push(buffer);
+    if (buffer.length) chunks.push(buffer);
   }
   if (pendingHigh) throw invalidUtf8(resource);
   return decodeUtf8(Buffer.concat(chunks), { resource });
 }
+

@@ -9,7 +9,6 @@ import {
   initializeDatabase,
   openDiagnosticDatabase,
 } from "../src/database.mjs";
-import { STARTUP_BYTES } from "../src/agent-state.mjs";
 import { diagnoseDatabase } from "../src/doctor.mjs";
 
 async function fixture(t) {
@@ -28,8 +27,7 @@ test("doctor reports a healthy schema without writing", async (t) => {
   const report = diagnoseDatabase(db, { database: file });
   db.close();
   assert.equal(report.healthy, true);
-  const { startup_budget: budget, ...checks } = report.checks;
-  assert.deepEqual(checks, {
+  assert.deepEqual(report.checks, {
     integrity: "ok",
     foreign_key_violations: 0,
     expected_tables: true,
@@ -38,17 +36,30 @@ test("doctor reports a healthy schema without writing", async (t) => {
     decisions: { events: 0, invalid: [], healthy: true },
     handoff: { records: 0, invalid: [], healthy: true },
   });
-  // An empty registry still carries the injected governance record, so the standing
-  // startup cost is never zero and the remaining headroom is the budget minus it.
-  assert.equal(budget.budget_bytes, STARTUP_BYTES);
-  assert.equal(budget.global_required_records, 1);
-  assert.ok(budget.global_required_bytes > 0);
-  assert.equal(
-    budget.project_headroom_bytes,
-    budget.budget_bytes - budget.global_required_bytes,
-  );
-  assert.equal(budget.healthy, true);
 });
+
+test("doctor reports complete required records without startup-budget policy",
+  async (t) => {
+    const file = await fixture(t);
+    const raw = new DatabaseSync(file);
+    raw.prepare(
+      "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "g:required:large",
+      "rule",
+      "Large required record",
+      "global",
+      JSON.stringify({ state: "known", value: { required: true, text: "x".repeat(5000) } }),
+      "2026-07-30T10:00:00.000Z",
+      "2026-07-30T10:00:00.000Z",
+    );
+    raw.close();
+
+    const db = await openDiagnosticDatabase(file);
+    const report = diagnoseDatabase(db, { database: file });
+    db.close();
+    assert.equal(report.healthy, true);
+  });
 
 test("doctor validates the stable database instance identity", async (t) => {
   const file = await fixture(t);
@@ -85,6 +96,32 @@ test("doctor detects foreign-key and schema-shape problems", async (t) => {
   assert.equal(report.checks.foreign_key_violations, 1);
   assert.ok(report.issues.some(({ code }) => code === "schema_tables_invalid"));
   assert.ok(report.issues.some(({ code }) => code === "foreign_key_violation"));
+});
+
+test("doctor reports every issue and preserves complete identifiers", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file, { enableForeignKeyConstraints: false });
+  const insertAlias = raw.prepare(
+    "INSERT INTO aliases(alias, record_id) VALUES (?, ?)",
+  );
+  for (let index = 0; index < 125; index += 1) {
+    insertAlias.run(`orphan:${String(index).padStart(3, "0")}`, `record:missing:${index}`);
+  }
+  const trigger = `trigger_${"x".repeat(5000)}`;
+  raw.exec(`CREATE TRIGGER "${trigger}" AFTER UPDATE ON records BEGIN SELECT 1; END`);
+  raw.close();
+
+  const db = await openDiagnosticDatabase(file);
+  const report = diagnoseDatabase(db, { database: file });
+  db.close();
+  assert.equal(
+    report.issues.filter(({ code }) => code === "foreign_key_violation").length,
+    125,
+  );
+  const definition = report.issues.find(({ code }) => code === "schema_definitions_invalid");
+  assert.ok(definition.identifiers.unexpected.includes(trigger));
+  assert.equal(Object.hasOwn(report, "issues_truncated"), false);
+  assert.equal(Object.hasOwn(report, "omitted_issues"), false);
 });
 
 test("doctor detects altered DDL even when object names still match", async (t) => {
@@ -249,7 +286,6 @@ test("doctor applies the complete stored semantic contract", async (t) => {
   assert.equal(report.healthy, false);
   for (const code of [
     "record_fields_invalid",
-    "record_content_invalid",
     "alias_invalid",
     "link_invalid",
     "source_metadata_invalid",
@@ -276,7 +312,7 @@ test("doctor reports incompatible columns without querying through them", async 
   );
 });
 
-test("doctor serializes invalid metadata and detects ownership limits", async (t) => {
+test("doctor serializes invalid metadata without retired ownership limits", async (t) => {
   const file = await fixture(t);
   const raw = new DatabaseSync(file);
   raw.prepare(
@@ -308,7 +344,5 @@ test("doctor serializes invalid metadata and detects ownership limits", async (t
   assert.equal(report.schema_version, "future");
   assert.doesNotThrow(() => JSON.stringify(report));
   assert.ok(report.issues.some(({ code }) => code === "unsupported_schema"));
-  assert.ok(
-    report.issues.some(({ code }) => code === "owned_row_limit_exceeded"),
-  );
+  assert.equal(report.issues.some(({ code }) => code === "owned_row_limit_exceeded"), false);
 });

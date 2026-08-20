@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "1.4.1",
+  "version": "1.4.3",
   "description": "One local state suite for agent startup, knowledge, work presence, continuity, and decisions",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "files": [
     "lodestar.mjs",
     "src/",
+    "managed-assets/",
     "codex-plugin/",
     "docs/agent-bootstrap.json",
     "docs/GOLDEN-RULES.md",

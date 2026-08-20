@@ -12,14 +12,14 @@ commands are:
 In hosts with the Lodestar plugin, only a complete trimmed prompt exactly equal
 to one of those command phrases authorizes the matching one-shot tool. The host
 binds authorization to session, turn, working directory, tool, arguments, and a
-short expiry. Authorizations are single use. Hooks redact and capture a bounded
-mechanical user/assistant tail only while a lane is armed.
+short expiry. Authorizations are single use. Hooks redact and capture the complete mechanical user/assistant tail only while
+a lane is armed.
 
 ## Semantic packet
 
 A packet contains the goal; positive rules; typed entries `fact`, `trap`, `ask`,
 `unsure`, and `dead`; completed/current work; next move; evidence and provenance;
-generation, lineage, and integrity metadata; and the bounded redacted tail when
+generation, lineage, and integrity metadata; and the complete redacted tail when
 armed. A `dead` entry requires matching auditable user or durable-decision
 evidence. It cannot silently become live again. Changed entries advance their
 generation and provenance timestamp.
@@ -42,8 +42,7 @@ Repeated startup by that claimant returns the same packet, while other sessions
 receive none. A claimant may later advance the lineage with another `now`.
 
 Startup fails without consuming a claim if required content cannot be returned
-completely. Oversized packet details may be replaced only by an explicit bounded
-summary with a follow-up `lodestar handoff status`; they are never partly claimed
-or silently corrupted. Fail closed on invalid packets, replay, expiry, ownership
+completely. Handoff packet details remain whole; they are never summarized merely
+to satisfy a Lodestar-owned size target, partly claimed, or silently corrupted. Fail closed on invalid packets, replay, expiry, ownership
 mismatch, integrity failure, or incomplete host attestation. Lodestar does not
 create successor sessions or call a host application server.

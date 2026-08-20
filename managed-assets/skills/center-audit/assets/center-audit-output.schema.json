@@ -67,7 +67,6 @@
         "falsifier": { "type": "string", "minLength": 1 },
         "pivots": {
           "type": "array",
-          "maxItems": 2,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -156,7 +155,7 @@
         "required": ["kind", "stop", "question_or_unknown", "resolution_or_default", "confidence_effect"],
         "properties": {
           "kind": { "enum": ["HUMAN_PAUSE", "DECISION_FORK"] },
-          "stop": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "stop": { "type": "integer", "minimum": 0 },
           "question_or_unknown": { "type": "string" },
           "resolution_or_default": { "type": "string" },
           "confidence_effect": { "type": "string" }
@@ -289,7 +288,7 @@
         "additionalProperties": false,
         "required": ["stop", "symbol_or_module", "center_segment", "swept", "skipped"],
         "properties": {
-          "stop": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "stop": { "type": "integer", "minimum": 0 },
           "symbol_or_module": { "type": "string" },
           "center_segment": { "type": "string" },
           "swept": { "type": "array", "items": { "type": "string" } },

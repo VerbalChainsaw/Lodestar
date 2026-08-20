@@ -1,10 +1,8 @@
-import { Buffer } from "node:buffer";
 import os from "node:os";
 import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { lodestarError } from "./errors.mjs";
-import { LIMITS } from "./validate.mjs";
 
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
 
@@ -21,21 +19,9 @@ function assertPath(value, name) {
       { identifiers: { field: name } },
     );
   }
-  const bytes = Buffer.byteLength(value, "utf8");
-  if (bytes > LIMITS.pathBytes) {
-    throw lodestarError(
-      "resource_limit",
-      `${name} exceeds its path byte limit.`,
-      {
-        identifiers: {
-          field: name,
-          bytes,
-          maximum: LIMITS.pathBytes,
-        },
-        action: "Choose a shorter path and retry.",
-      },
-    );
-  }
+  // Path limits differ by filesystem, namespace, and Windows long-path policy.
+  // The filesystem operation is the owning compatibility boundary; a global byte
+  // ceiling here would reject paths that the selected platform can represent.
   return value;
 }
 

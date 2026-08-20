@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import {
   EXPECTED_COLUMNS,
   inspectSchemaDefinitions,
@@ -6,16 +5,10 @@ import {
   SCHEMA_TABLES,
   SCHEMA_VERSION,
 } from "./schema.mjs";
-import { REQUIRED_GOVERNANCE } from "./bootstrap.mjs";
-import { STARTUP_BYTES } from "./agent-state.mjs";
-import { boundedDiagnosticValue } from "./diagnostics.mjs";
 import { diagnoseDecisions } from "./decision.mjs";
 import { diagnoseHandoff } from "./continuity.mjs";
-import { getRecordById, normalizeRecord } from "./records.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
-import { LIMITS, validateTimestamp } from "./validate.mjs";
-
-const MAX_ISSUES = 100;
+import { validateTimestamp } from "./validate.mjs";
 
 function orderedNames(db, type) {
   return db.prepare(
@@ -30,107 +23,20 @@ function same(left, right) {
     && left.every((value, index) => value === right[index]);
 }
 
-// Required records are charged to every session, and global ones are charged to every
-// project on the machine. `start` demotes once the total exceeds the budget, so a
-// projection silently thins rather than announcing itself. Reporting the standing cost
-// here turns a future degradation into a number that can be watched.
-const STARTUP_BUDGET_LOW_BYTES = 4096;
-
-// Read the same way `start` reads it, or the check measures against a number nobody is
-// using. A per-project budget is the narrower statement and wins, exactly as at startup.
-function configuredBudget(db, recordsUsable) {
-  if (!recordsUsable) return STARTUP_BYTES;
-  try {
-    const rows = db.prepare("SELECT scope,json_extract(content_json,"
-      + "'$.value.startup_budget_bytes') AS bytes FROM records WHERE type='config'").all();
-    const environment = Number(process.env.LODESTAR_STARTUP_BUDGET);
-    if (Number.isInteger(environment) && environment > 0) return environment;
-    const global = rows.find(({ scope, bytes }) => scope === "global" && Number(bytes) > 0);
-    // Doctor is machine-wide, so it reports against the strictest budget any project in
-    // the registry would run under — the first place a shed will actually be felt.
-    const strictest = rows.map(({ bytes }) => Number(bytes)).filter((value) => value > 0);
-    if (strictest.length) return Math.min(...strictest);
-    return global ? Number(global.bytes) : STARTUP_BYTES;
-  } catch { return STARTUP_BYTES; }
-}
-
-function startupBudget(db, recordsUsable) {
-  if (!recordsUsable) return null;
-  const STARTUP_BUDGET_BYTES = configuredBudget(db, recordsUsable);
-  const rows = db.prepare("SELECT id FROM records WHERE scope='global' "
-    + "AND json_extract(content_json,'$.value.required')=1")
-    .all().filter(({ id }) => id !== REQUIRED_GOVERNANCE.id);
-  // The governance record is injected by every startup rather than read from the table,
-  // so it is counted here or the reported headroom is wrong by its size.
-  let bytes = Buffer.byteLength(JSON.stringify(REQUIRED_GOVERNANCE), "utf8");
-  // Measured on the normalized record, which is what `start` actually serializes.
-  // Stored content_json is smaller and would overstate the remaining headroom.
-  for (const { id } of rows) {
-    try {
-      bytes += Buffer.byteLength(JSON.stringify(normalizeRecord(getRecordById(db, id))), "utf8");
-    } catch { return null; }
-  }
-  const headroom = Math.max(0, STARTUP_BUDGET_BYTES - bytes);
-  // The global cost alone never predicts an outage: `start` sheds on the global total
-  // *plus* the project's own required records. Reporting only the global figure called a
-  // registry healthy while its heaviest project sat a few hundred bytes from refusing to
-  // start, which is precisely the failure this check exists to see coming.
-  const perProject = new Map();
-  let unreadable = false;
-  for (const { id, scope } of db.prepare("SELECT id,scope FROM records "
-    + "WHERE scope LIKE 'project:%' "
-    + "AND json_extract(content_json,'$.value.required')=1").all()) {
-    try {
-      const own = Buffer.byteLength(JSON.stringify(normalizeRecord(getRecordById(db, id))), "utf8");
-      perProject.set(scope, (perProject.get(scope) ?? 0) + own);
-    } catch { unreadable = true; }
-  }
-  let worst = null;
-  for (const [scope, own] of perProject) {
-    if (!worst || own > worst.required_bytes) worst = { scope, required_bytes: own };
-  }
-  const worstTotal = worst ? worst.required_bytes + bytes : bytes;
-  return {
-    global_required_records: rows.length + 1,
-    global_required_bytes: bytes,
-    budget_bytes: STARTUP_BUDGET_BYTES,
-    // What a project may still spend on its own required records before `start` sheds.
-    project_headroom_bytes: headroom,
-    projects_with_required: perProject.size,
-    // The project closest to refusing to start, which is the number that actually matters.
-    worst_project: worst ? { ...worst, startup_bytes: worstTotal,
-      remaining_bytes: Math.max(0, STARTUP_BUDGET_BYTES - worstTotal) } : null,
-    unreadable_required_records: unreadable,
-    // One threshold, so this flag and the reported issue always agree. They used to
-    // disagree: `healthy` compared against half the budget while the issue fired below
-    // 4 KiB of headroom, so an ordinary registry reported `"healthy": false` nested
-    // inside `"healthy": true` with an empty issue list and nothing to act on.
-    healthy: !unreadable && STARTUP_BUDGET_BYTES - worstTotal >= STARTUP_BUDGET_LOW_BYTES,
-  };
-}
-
 export function diagnoseDatabase(db, { database = null } = {}) {
   const issues = [];
-  let omittedIssues = 0;
   const add = (code, message, identifiers = {}, action = undefined) => {
-    if (issues.length >= MAX_ISSUES) {
-      omittedIssues += 1;
-      return false;
-    }
     issues.push({
       code,
       message,
-      identifiers: boundedDiagnosticValue(identifiers, {
-        maximumBytes: 4096,
-      }),
+      identifiers,
       ...(action ? { action } : {}),
     });
-    return true;
   };
 
   let integrity = [];
   try {
-    integrity = db.prepare("PRAGMA integrity_check(100)").all()
+    integrity = db.prepare("PRAGMA integrity_check").all()
       .map((row) => Object.values(row)[0]);
     for (const result of integrity) {
       if (result !== "ok") {
@@ -169,8 +75,6 @@ export function diagnoseDatabase(db, { database = null } = {}) {
         expected_definitions: false,
       },
       issues,
-      issues_truncated: omittedIssues > 0,
-      omitted_issues: omittedIssues,
     };
   }
 
@@ -223,8 +127,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   let databaseInstanceId = null;
   if (validColumns.metadata) {
     const metadataRows = db.prepare(
-      "SELECT key, substr(value, 1, 4097) AS value, "
-        + "length(CAST(value AS BLOB)) AS bytes FROM metadata "
+      "SELECT key, value FROM metadata "
       + "WHERE key IN ("
       + "'schema_version', 'created_at', 'database_instance_id'"
       + ") ORDER BY key",
@@ -233,35 +136,16 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       metadataRows.map(({ key, value }) => [key, value]),
     );
     const schemaValue = metadata.schema_version ?? null;
-    schemaVersion = schemaValue === String(SCHEMA_VERSION)
-      ? SCHEMA_VERSION
-      : boundedDiagnosticValue(schemaValue, { maximumBytes: 1024 });
-    databaseCreatedAt = boundedDiagnosticValue(
-      metadata.created_at ?? null,
-      { maximumBytes: 1024 },
-    );
-    databaseInstanceId = boundedDiagnosticValue(
-      metadata.database_instance_id ?? null,
-      { maximumBytes: 1024 },
-    );
-    for (const row of metadataRows) {
-      if (Number(row.bytes) > 4096) {
-        add(
-          "metadata_value_invalid",
-          "A required metadata value exceeds its byte limit.",
-          { key: row.key, bytes: Number(row.bytes), maximum: 4096 },
-        );
-      }
-    }
+    schemaVersion = schemaValue === String(SCHEMA_VERSION) ? SCHEMA_VERSION : schemaValue;
+    databaseCreatedAt = metadata.created_at ?? null;
+    databaseInstanceId = metadata.database_instance_id ?? null;
     if (schemaValue !== String(SCHEMA_VERSION)) {
       add(
         "unsupported_schema",
         "The database schema version is not supported.",
         {
           expected: SCHEMA_VERSION,
-          actual: boundedDiagnosticValue(schemaValue, {
-            maximumBytes: 1024,
-          }),
+          actual: schemaValue,
         },
       );
     }
@@ -286,16 +170,16 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   let foreignKeyRows = [];
   try {
     foreignKeyRows = db.prepare(
-      "SELECT * FROM pragma_foreign_key_check LIMIT 101",
+      "SELECT * FROM pragma_foreign_key_check",
     ).all();
-    for (const row of foreignKeyRows.slice(0, 100)) {
+    for (const row of foreignKeyRows) {
       add(
         "foreign_key_violation",
         "A row references a missing parent record.",
         { table: row.table, rowid: row.rowid, parent: row.parent },
       );
     }
-    if (foreignKeyRows.length > 100) omittedIssues += 1;
+
   } catch (error) {
     add("foreign_key_check_failed", "Foreign-key checking failed.", {
       reason: error.code ?? error.message,
@@ -317,75 +201,23 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       db.prepare(`SELECT count(*) AS count FROM ${table}`).get().count,
     );
   }
-  if (counts.records !== null && counts.records > LIMITS.recordsMaximum) {
-    add(
-      "record_limit_exceeded",
-      "The registry exceeds its supported record limit.",
-      {
-        count: counts.records,
-        maximum: LIMITS.recordsMaximum,
-      },
-    );
-  }
-  const ownershipLimits = [
-    ["aliases", "record_id", LIMITS.aliasesPerRecord, "alias"],
-    ["links", "from_id", LIMITS.linksPerRecord, "outgoing link"],
-    ["sources", "record_id", LIMITS.sourcesPerRecord, "source"],
-  ];
-  for (const [table, ownerColumn, maximum, resource] of ownershipLimits) {
-    if (!validColumns[table]) continue;
-    const groups = db.prepare(
-      `SELECT ${ownerColumn} AS owner, count(*) AS count FROM ${table} `
-        + `GROUP BY ${ownerColumn} HAVING count(*) > ? `
-        + `ORDER BY ${ownerColumn} LIMIT 101`,
-    ).all(maximum);
-    for (const row of groups.slice(0, 100)) {
-      add(
-        "owned_row_limit_exceeded",
-        `A record exceeds its ${resource} limit.`,
-        {
-          resource,
-          record_id: row.owner,
-          count: Number(row.count),
-          maximum,
-        },
-      );
-    }
-    if (groups.length > 100) omittedIssues += 1;
-  }
 
   for (const issue of storedSemanticIssues(db, validColumns)) {
-    if (!add(issue.code, issue.message, issue.identifiers)) break;
+    add(issue.code, issue.message, issue.identifiers);
   }
 
-  const budget = startupBudget(db, validColumns.records);
-  if (budget && !budget.healthy) {
-    const worst = budget.worst_project;
-    add("startup_budget_low", worst
-      ? "A project is close to exceeding its startup budget."
-      : "Global required records leave little startup budget for projects.",
-    { global_required_bytes: budget.global_required_bytes,
-      project_headroom_bytes: budget.project_headroom_bytes,
-      worst_project: worst?.scope ?? null,
-      worst_project_startup_bytes: worst?.startup_bytes ?? null,
-      worst_project_remaining_bytes: worst?.remaining_bytes ?? null },
-    worst
-      ? `Unmark a required record in ${worst.scope}, or reduce a global one. `
-        + "Once the total exceeds the budget, start refuses to run in that project."
-      : "Reduce or unmark a global required record before adding project ones.");
-  }
   const decisions = validColumns.records ? diagnoseDecisions(db)
     : { events: null, invalid: [], healthy: false };
   if (validColumns.records) {
     for (const id of decisions.invalid) {
-      if (!add("decision_event_invalid", "A decision event is invalid.", { id })) break;
+      add("decision_event_invalid", "A decision event is invalid.", { id });
     }
   }
   const handoff = validColumns.records ? diagnoseHandoff(db)
     : { records: null, invalid: [], healthy: false };
   if (validColumns.records) {
     for (const id of handoff.invalid) {
-      if (!add("handoff_record_invalid", "A continuity record is invalid.", { id })) break;
+      add("handoff_record_invalid", "A continuity record is invalid.", { id });
     }
   }
 
@@ -393,20 +225,19 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     const collisions = db.prepare(
       "SELECT a.alias, a.record_id, r.id AS conflicting_id "
         + "FROM aliases a JOIN records r ON r.id = a.alias "
-        + "ORDER BY a.alias LIMIT 101",
+        + "ORDER BY a.alias",
     ).all();
-    for (const row of collisions.slice(0, 100)) {
+    for (const row of collisions) {
       add(
         "identifier_alias_ambiguity",
         "An alias is identical to a record ID.",
         row,
       );
     }
-    if (collisions.length > 100) omittedIssues += 1;
   }
 
   return {
-    healthy: issues.length === 0 && omittedIssues === 0,
+    healthy: issues.length === 0,
     database,
     schema_version: schemaVersion,
     database_created_at: databaseCreatedAt,
@@ -422,10 +253,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       expected_definitions: definitions.matches,
       decisions,
       handoff,
-      startup_budget: budget,
     },
     issues,
-    issues_truncated: omittedIssues > 0,
-    omitted_issues: omittedIssues,
   };
 }

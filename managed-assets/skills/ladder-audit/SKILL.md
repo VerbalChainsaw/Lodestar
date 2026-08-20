@@ -35,7 +35,7 @@ This file is sufficient for ordinary use.
 
 - Use **Center Audit** when one falsifiable defect claim already owns the failure.
 - Use **Ladder Audit** when a broad outcome still has two or more plausible failure owners.
-- Use **Regression Scout** after a repair to check adjacent surfaces touched by the change.
+- After a repair, use focused regression checks only when the changed contract exposes adjacent risk that can materially affect the requested outcome.
 
 A failed rung should usually become a bounded Center Audit case. Implementation is a separate phase.
 
@@ -57,7 +57,7 @@ or reject a source-level contradiction earlier than the broad run?
 
 If not, remove or merge it.
 
-Default to **3-7 detailed rungs in the next diagnostic tranche**. If the full capability graph needs more, group later work into provisional tracks and recommend only the next tranche. Do not manufacture a twenty-rung master ceremony before evidence reaches it.
+Detail only the **smallest evidence-useful next diagnostic tranche**. Add a rung only while it materially reduces current uncertainty or avoids more expensive discovery at graduation. Stop extending the tranche when another rung adds no material diagnostic value or when the tranche's cost approaches unchanged graduation. Keep later capability paths provisional until evidence reaches them.
 
 ## Core doctrine
 
@@ -70,7 +70,7 @@ Default to **3-7 detailed rungs in the next diagnostic tranche**. If the full ca
 7. **Clean ordinary rungs.** Restore relevant durable and environmental state unless the rung explicitly tests recovery.
 8. **Evidence-gated pre-fixes.** Pre-fix only proven shared contradictions at existing ownership seams.
 9. **Stop at first material failure.** Localize and repair before advancing outward.
-10. **Bounded transfer.** Use one or two meaningful variations to detect test-shaped production logic.
+10. **Bounded transfer.** Use the smallest set of meaningful variations needed to detect test-shaped production logic.
 11. **Final authority remains broad.** Component success never replaces unchanged end-to-end acceptance.
 12. **Recovery is explicit.** Add Stop, retry, restart, timeout, or duplicate-request rungs only when the real outcome claims them.
 
@@ -184,7 +184,7 @@ RUNG <ID>
   Qualified oracle:         <external postconditions and identity checks>
   Failure route:            <owner and next method>
   Reset rule:               <fresh, restore, or intentional persistence>
-  Transfer probe:           <one bounded variation or N/A>
+  Transfer probe:           <evidence-useful bounded variation(s) or N/A>
   Passing freezes:          <the accepted reusable boundary>
 ```
 
@@ -241,7 +241,7 @@ Do not compensate with longer timeouts, extra retries, or scripted shortcuts unl
 
 ### 10. Transfer and graduate
 
-Use one or two materially different probes after a meaningful tranche, such as another valid input family, orientation, target, dependency implementation, batch size, or a closer decoy that must not satisfy exact identity.
+After a meaningful tranche, use only the materially different probes needed to show that the accepted behavior transfers rather than memorizes the scaffold. Useful variations include another valid input family, orientation, target, dependency implementation, batch size, or a closer decoy that must not satisfy exact identity. Stop adding probes when they no longer reduce uncertainty about shared behavior.
 
 Graduation requires:
 
@@ -250,7 +250,7 @@ Graduation requires:
 - independent final-state verification
 - no hidden rung provisioning
 - no scenario-specific production branch
-- one controlled recovery replay when recovery is claimed
+- controlled recovery replay when recovery is claimed
 
 A ladder without graduation proves components, not the product.
 
@@ -281,7 +281,7 @@ Stop and report rather than expanding when:
 - the environment cannot be reset or isolated truthfully
 - the next rung does not reduce uncertainty
 - the next rung costs roughly as much as graduation
-- more than seven detailed rungs are needed before any implementation; group them into tracks and recommend one tranche
+- detailing further provisional tracks would no longer improve the smallest evidence-useful next tranche
 
 ## Do not encode
 
@@ -305,6 +305,6 @@ Keep the answer proportional. Use [the formal output template](references/output
 
 ## Completion standard
 
-The audit is complete when it gives an applicability verdict, one unchanged outcome, a bounded capability map, explicit scaffolds, a valuable orthogonal next tranche, qualified oracles and reset rules, evidence-gated pre-fixes, bounded transfer probes, defect routing, and exactly one recommended first rung.
+The audit is complete when it gives an applicability verdict, one unchanged outcome, a bounded capability map, explicit scaffolds, the smallest valuable orthogonal next tranche, qualified oracles and reset rules, evidence-gated pre-fixes, bounded transfer probes, defect routing, and a recommended starting rung.
 
 The audit does not claim the system works. It creates a path where the next failure teaches us something useful.

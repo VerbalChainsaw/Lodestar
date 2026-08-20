@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { importV070 } from "../src/import-v070.mjs";
 import { convertV070 } from "../src/legacy-v070/convert.mjs";
 import { readV070Store } from "../src/legacy-v070/read.mjs";
 
@@ -198,7 +199,7 @@ test("every unique locator-health observation is imported or reported", () => {
     },
   ];
 
-  for (const item of cases) {
+  for (const [index, item] of cases.entries()) {
     const converted = convertV070(sourceWith([item.record], {
       v: 1,
       generation: GENERATION,
@@ -208,13 +209,17 @@ test("every unique locator-health observation is imported or reported", () => {
       ({ kind, identifier }) =>
         kind === "locator_health" && identifier === item.key,
     );
-    assert.deepEqual(entries.map((entry) => ({ ...entry })), [{
-      kind: "locator_health",
-      identifier: item.key,
-      source: "indexes/locator-health.json",
-      reason: "unimported_locator_health",
-      disposition: "not_imported",
-    }], item.key);
+    const expectedUnimported = [1, 2].includes(index);
+    assert.equal(entries.length, expectedUnimported ? 1 : 0, item.key);
+    if (expectedUnimported) {
+      assert.deepEqual(entries[0], {
+        kind: "locator_health",
+        identifier: item.key,
+        source: "indexes/locator-health.json",
+        reason: "unimported_locator_health",
+        disposition: "not_imported",
+      });
+    }
   }
 });
 
@@ -234,19 +239,65 @@ test("the v0.7 reader rejects a different current-pointer version", async (t) =>
   );
 });
 
-test("migration reporting is bounded and preserves omission counts", () => {
+test("migration processes every legacy field item and reports full details", () => {
+  const oversizedAlias = "x".repeat(5_000);
   const converted = convertV070(sourceWith([
     legacyRecord({
-      id: "record:report-bound",
-      aliases: Array.from({ length: 2_505 }, (_, index) => index),
+      id: "record:unbounded-report",
+      aliases: [
+        ...Array.from({ length: 10_001 }, (_, index) => index),
+        oversizedAlias,
+      ],
     }),
   ]));
   assert.equal(converted.records.length, 1);
-  assert.equal(converted.report.skipped.length, 2_000);
-  assert.equal(converted.report.reporting.truncated, true);
+  assert.equal(converted.report.skipped.length, 10_001);
+  assert.ok(converted.records[0].aliases.includes(oversizedAlias));
+  assert.equal(
+    converted.report.skipped.some(({ reason }) => reason === "field_processing_limit"),
+    false,
+  );
+  assert.equal(converted.report.reporting.truncated, false);
   assert.deepEqual(converted.report.reporting.sections.skipped, {
-    entries_total: 2_505,
-    entries_reported: 2_000,
-    entries_omitted: 505,
+    entries_total: 10_001,
+    entries_reported: 10_001,
+    entries_omitted: 0,
   });
+});
+
+test("dry-run imports more than the former legacy record ceiling", {
+  timeout: 300_000,
+}, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-record-volume-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = path.join(directory, "legacy");
+  const generationRoot = path.join(source, "generations", GENERATION);
+  await mkdir(path.join(generationRoot, "records", "projects"), { recursive: true });
+  await mkdir(path.join(generationRoot, "schema"), { recursive: true });
+  await writeFile(path.join(source, "current.json"), `${JSON.stringify({
+    v: 1,
+    generation: GENERATION,
+  })}\n`);
+  await writeFile(path.join(generationRoot, "catalog.json"), `${JSON.stringify({
+    v: 1,
+    projects: [],
+  })}\n`);
+  await writeFile(path.join(generationRoot, "schema", "store.json"), "{\"v\":1}\n");
+  const records = Array.from({ length: 100_001 }, (_, index) => JSON.stringify(
+    legacyRecord({ id: `record:${index}` }),
+  )).join("\n");
+  await writeFile(
+    path.join(generationRoot, "records", "global.jsonl"),
+    `${records}\n`,
+  );
+
+  const report = await importV070({
+    sourcePath: source,
+    database: path.join(directory, "destination.db"),
+    dryRun: true,
+    now: () => new Date("2026-07-30T12:00:00.000Z"),
+  });
+  assert.equal(report.imported.records, 100_001);
+  assert.equal(report.skipped.length, 0);
+  assert.equal(report.validation.doctor_ok, true);
 });
