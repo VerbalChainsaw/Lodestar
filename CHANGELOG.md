@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased
+
+- Remove Lodestar's ownership of external skill directories and AGENTS.md files.
+  `lodestar skills` is now read-only verification, and `lodestar agents` is now
+  read-only status, verification, and template output.
+- Retire skill install, sync, migration, replacement, removal, client bootstrap-file
+  writes, and AGENTS.md apply/remove paths from the core CLI and implementation.
+- Remove Lodestar's own startup-budget policy. `start` returns all optional context by
+  default; the `LODESTAR_STARTUP_BUDGET` environment and `config`-record budget sources
+  are gone, and only an explicit per-call `--startup-budget` can target optional
+  projection size. Required governance, decisions, and handoff state stay complete.
+- Drop the dead bounded-input reader family and other unreferenced helpers from
+  `src/json.mjs` and `src/validate.mjs`; stream safety tests now run against the live
+  `readStreamComplete` path used by `put` and handoff input.
+- Add the golden-rule marker vocabulary to decisions. Current decisions carry an
+  `accepted` status by default or an explicit `blocked` status
+  (`decision set --status blocked`, `decision status <key> accepted|blocked`);
+  projections render `[DECISION ... status=ACCEPTED|BLOCKED]`,
+  `[SUPERSEDED key=... by=...]`, and `[DEAD key=...]` markers. Every dead item
+  also renders the negation sentence — `<old> is DEAD; do not propose, use, or
+  restore it. Use <current>. Reason: ...` — so a kill is unmissable and cannot
+  silently resurface. The Stop hook captures the same bracketed markers from an
+  agent's final message into the ledger with host identity, redaction, and
+  idempotent dedup; unknown bare keys quarantine as pending candidates.
+- Enforce kill authority: direct CLI writes are Director-issued (default
+  `--authority director`) and stay closed to revival — a different session's
+  `decision set` of a killed value is rejected with `dead_decision_revival`
+  (replacement values always allowed; the killing session can revive).
+  Hook-captured markers are agent-issued (`--authority agent`) and reopen by
+  evidence. Closed kills render `reopen=director`; pre-authority kills replay
+  as open.
+- Unify the marker technology in one grammar (`src/markers.mjs`): the same
+  definition formats projections and parses capture, with canonical kinds
+  (`DECISION`, `DEAD`, `SUPERSEDED`, `NOTE`), attribute order
+  (`key`, `status`, `by`, `value`, `date`, `reason`, `reopen`, `text`),
+  one bare-or-quoted value rule, case-insensitive `status` parsing, and
+  documented placement (ledger markers in the startup projection; candidates in
+  `pending`). Notes now use the canonical `[NOTE text="..."]` marker; the
+  historical `LODESTAR NOTE:` line is tolerated by capture.
+
+## 1.4.3 - 2026-08-19
+
+- Accept UTF-8 BOM-prefixed hook input at the executable boundary so Windows hosts can
+  deliver `UserPromptSubmit` and `Stop` events without failing before JSON dispatch.
+- Exercise both affected events through the spawned hook process rather than only calling
+  the in-process handler, closing the gap that hid executable-boundary failures.
+
+## 1.4.2 - 2026-08-19
+
+- Remove client-invented context limits from the Codex adapter. Session startup now
+  inherits Lodestar's core budget resolver exactly like every other client.
+- Add a universal governance rule requiring evidence and an authoritative owning
+  boundary before any cap, truncation, omission, client policy, or behavioral
+  restriction is introduced.
+- Required information may never be silently truncated or treated as complete. Optional
+  context may be omitted only when the omission is explicit, exact, addressable, and
+  recoverable; startup context now carries a closing completeness marker.
+
 ## 1.4.1 - 2026-08-15
 
 - Establish `g:lodestar:required-governance` as the sole required global operating

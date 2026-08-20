@@ -36,6 +36,7 @@ lodestar work ...
 lodestar handoff ...
 lodestar decision ...
 lodestar skills ...
+lodestar agents ...
 lodestar doctor
 ```
 
@@ -51,21 +52,23 @@ deterministic order:
 1. project identity;
 2. required global and project governance;
 3. current decision facts and superseded dead values;
-4. the smallest relevant knowledge records;
+4. every optional knowledge record unless the caller explicitly targets optional projection size;
 5. advisory active-work reports; and
 6. an eligible continuity recovery, if one exists.
 
-The envelope is bounded. Optional knowledge is shed before required governance
-or decision negations. Claiming a pending recovery and returning startup state
-are one transaction. If required content cannot be returned completely, startup
-fails and leaves the recovery unclaimed.
+Without a caller target, the envelope contains all optional knowledge. With an
+explicit positive `--startup-budget`, whole optional records are included in
+deterministic order and omitted records remain addressable by stable-ID stubs.
+Required governance, decisions, and handoff state are never shed or truncated.
+Claiming a pending recovery and returning startup state are one transaction; any
+failed transaction leaves the recovery unclaimed.
 
 ## Knowledge
 
-Exact ID or alias lookup precedes bounded search. IDs, aliases, explicit links,
+Exact ID or alias lookup precedes deterministic search. IDs, aliases, explicit links,
 scope, and provenance are stable and deterministic. A missing record means only
 that Lodestar lacks the knowledge; callers may then inspect the repository.
-`find` returns bounded summaries and `links` returns one hop.
+`find` returns matching records, optionally using a caller-selected positive page size; `links` returns one explicit hop.
 
 ## Advisory work presence
 
@@ -74,7 +77,7 @@ It is never an assignment, ownership claim, lock, authority, or proof an area is
 free. Project/worktree and actor/session identities are canonical. An actor has
 at most one open report; repeated start updates it and repeated done is a safe
 no-op. Status and history ordering are deterministic. `STALE?` is not evidence
-that work was abandoned, and expiration is explicit and bounded.
+that work was abandoned, and expiration is explicit, auditable, and limited to qualifying advisory records.
 
 ## Session continuity
 
@@ -90,7 +93,7 @@ lodestar handoff disarm
 
 Semantic packets contain a goal, positive rules, typed `fact`, `trap`, `ask`,
 `unsure`, and `dead` entries, completed/current work, a next move, evidence and
-provenance, generation/lineage/integrity metadata, and a bounded redacted tail
+provenance, generation/lineage/integrity metadata, and the complete redacted tail
 when armed. Dead entries require matching auditable evidence and cannot silently
 resurrect.
 
@@ -134,13 +137,20 @@ Lodestar manages exactly these skills:
 The Lodestar umbrella skill routes knowledge, work, continuity, decisions,
 bootstrap behavior, failure rules, templates, and governance guidance through
 owned references. Specialized skill names describe capabilities, not products.
-The managed-asset transformation manifest and parity test account for every
-allowlisted source file, exact copy, intentional rewrite, or exclusion.
+`managed-assets/manifest.json`, canonical governance/bootstrap JSON, and the six
+managed skill directories are runtime and packaging authority. The asset check
+verifies the exact directory set, canonical documentation views, and Codex mirror
+without a semantic policy compiler.
 
-Codex, Claude, Hermes, and OpenCode receive the same compact redirect: run
-`lodestar start --cwd <cwd>` once and apply all required returned rules.
-Installation supports dry-run, install, sync, verify, backup, and compensating
-rollback while preserving unrelated user-owned skills and instructions.
+Every integration receives the same compact redirect: obtain and apply one complete
+validated startup snapshot. Failed or clipped raw attempts remain retryable with the
+same session identity and replay the same persisted snapshot.
+
+External skill directories and AGENTS.md files are outside Lodestar's ownership.
+`lodestar skills verify` compares existing skill copies with package source, while
+`lodestar agents status|verify|template` inspects or prints source. These commands are
+read-only and cannot install, synchronize, apply, replace, migrate, back up, or remove
+external files.
 
 ## Migration
 
@@ -164,9 +174,9 @@ archival or deletion.
 
 ## AgentLink boundary
 
-AgentLink may validate a request, invoke the configured `lodestar` executable
-once, parse the versioned envelope, bound output and time, redact failure text,
-and return the result. It must not implement Lodestar semantics or access the
+AgentLink may validate a request, invoke the configured `lodestar` executable,
+parse the complete versioned envelope, apply an explicitly configured real host
+boundary when one exists, redact failure text, and return the result. It must not implement Lodestar semantics or access the
 Lodestar database. Its unrelated task-supervision database remains outside this
 boundary.
 
@@ -180,6 +190,6 @@ npm run pack:check
 
 The tests cover the one-database invariant, Windows/WSL identity, advisory work,
 decision history and resurrection suppression, exact-command continuity,
-session/project isolation, atomic startup claiming, bounded startup ordering,
+session/project isolation, atomic startup claiming, complete startup replay,
 managed-asset parity, installation rollback, migration idempotency, packaging,
 and real one-shot adapter behavior.

@@ -1,7 +1,7 @@
-# Lodestar schema version 3
+# Lodestar schema version 4
 
 One Windows-owned SQLite database is the source of truth for every Lodestar
-capability. Schema version 3 uses one universal record model:
+capability. Schema version 4 uses one universal record model:
 
 ```text
 metadata(key, value)
@@ -97,40 +97,45 @@ is independently `current`, `stale`, or `unknown`; source inspection is
   dead values are derived from those events.
 - `handoff-lane`, `handoff-packet`, `handoff-tail`, `handoff-recovery`, and
   `handoff-state` records store session-isolated continuity, validated packet
-  lineage, bounded redacted tails, and atomic startup claims.
+  lineage, complete redacted tails, and atomic startup claims.
 - `migration-source` records bind imported source identity and checksum to the
   records created by the one idempotent migration path.
 
 Kind-specific fields remain inside record `data`. Work, decision, and continuity operations
 use the same revision allocator and record transaction core as `put`.
 
-## Bounds
+## Size and projection semantics
 
-| Resource | Limit |
-| --- | ---: |
-| Startup envelope | 24 KiB by default |
-| Handoff head within startup | 4 KiB |
-| Put JSON input | 1 MiB |
-| One CLI argument / all arguments | 16 KiB / 64 KiB |
-| JSON nesting / structural nodes | 128 levels / 100,000 nodes |
-| Canonical record content | 256 KiB |
-| Source metadata | 64 KiB per source |
-| Aliases / outgoing links / sources | 64 / 256 / 32 per record |
-| Records | 100,000 per registry |
-| Find results | 20 default, 100 maximum |
-| Link results | 100 default, 500 maximum |
-| Export | 64 MiB |
+Current schema v4 imposes structural validity, referential integrity, canonical
+JSON envelopes, and exact UTC timestamp checks. It does not impose product-policy
+byte or collection ceilings on valid records, source metadata, aliases, links, or
+sources.
 
-SQLite constraints independently enforce stored byte limits, JSON envelopes,
-and UTC timestamps. Application validation adds normalization, collection,
-and semantic checks.
+- `start` returns all optional context by default. A caller may provide a positive
+  `--startup-budget` as a target for whole optional records. Required governance,
+  decision state, and eligible handoff content remain complete even when they exceed
+  that target.
+- `put`, import, CLI arguments, and command output are not clipped by Lodestar.
+  Actual filesystem, memory, shell, and host transport limits remain external
+  boundaries and surface as their own errors.
+- `find`, `links`, work history, and pending lists return all matching rows unless
+  the caller explicitly supplies a positive `--limit`; Lodestar defines no maximum.
+- Error normalization deliberately bounds traversal of hostile thrown objects so
+  error reporting itself cannot exhaust memory or recurse forever. That diagnostic
+  safety boundary does not truncate valid product records or successful results.
+- Historical schema definitions retain their old byte checks only so backed-up
+  migrations can identify and rebuild prior database shapes. They are not the
+  current schema contract.
 
 ## Migration
 
-- Schema v1 migrates directly to v3 after an exclusive backup.
-- Schema v2 migrates to v3 only when all retired continuity tables are empty.
+- Schema v1 migrates directly to v4 after an exclusive backup.
+- Schema v2 migrates to v4 only when all retired continuity tables are empty.
   Any nonempty table produces `migration_state_conflict` and leaves the
   database unchanged.
+- Schema v3 migrates to v4 by rebuilding the universal tables without the
+  retired byte ceilings while preserving all rows and metadata. A database
+  mislabeled v4 but still carrying the capped v3 DDL is detected and rebuilt.
 - Unknown schema versions fail closed.
 - The v0.7 generation-store importer remains one-way and never mutates its
   source.

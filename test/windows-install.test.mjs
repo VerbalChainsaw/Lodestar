@@ -48,7 +48,10 @@ test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
   assert.match(shim, /node-\*\/node\.exe/u);
   assert.match(shim, /arguments\+=\(--home/u);
   assert.match(shim, /arguments\+=\(--hermes-home/u);
-  assert.match(shim, /--codex-bootstrap\|--claude-bootstrap/u);
+  assert.doesNotMatch(shim, /--codex-bootstrap|--claude-bootstrap|--hermes-bootstrap|--opencode-bootstrap/u);
+  assert.ok(shim.includes('if [ "${1:-}" = "skills" ] || [ "${1:-}" = "agents" ]; then'));
+  assert.match(shim, /--cwd\|--home\|--hermes-home\|--opencode-root/u);
+  assert.match(shim, /if \[ "\$command_name" = "skills" \]; then/u);
   assert.match(shim,
     /exec \/init "\$NODE_BIN" -- "\$LODESTAR_ENTRY_WIN" "\$\{arguments\[@\]\}"/u);
   assert.doesNotMatch(shim, /exec "\$NODE_BIN"/u);

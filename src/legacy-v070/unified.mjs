@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, createReadStream } from "node:fs";
 import { copyFile, lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
@@ -42,11 +42,13 @@ async function fingerprint(source) {
   const digest = createHash("sha256");
   let bytes = 0;
   for (const relative of inventory) {
-    const content = await readFile(relative ? path.join(resolved, relative) : resolved);
-    bytes += content.byteLength;
-    if (bytes > 64 * 1024 * 1024) throw lodestarError("resource_limit",
-      "A migration source exceeds the 64 MiB inspection limit.");
-    digest.update(relative).update("\0").update(content).update("\0");
+    const file = relative ? path.join(resolved, relative) : resolved;
+    digest.update(relative).update("\0");
+    for await (const chunk of createReadStream(file)) {
+      bytes += chunk.byteLength;
+      digest.update(chunk);
+    }
+    digest.update("\0");
   }
   return { ...source, path: resolved, checksum: digest.digest("hex"), bytes,
     files: inventory.length };
