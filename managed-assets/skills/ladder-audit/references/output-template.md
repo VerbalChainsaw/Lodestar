@@ -50,7 +50,7 @@ Every in-scope scaffold needs a removal rung.
 
 ## Next Ladder Tranche
 
-Default to 3-7 detailed rungs.
+Detail only the smallest evidence-useful next tranche. Stop adding rungs when another rung no longer reduces material uncertainty or when the tranche's cost approaches unchanged graduation. Keep later capability paths provisional until evidence reaches them.
 
 | Rung | Readiness/result | Proven baseline held | Scaffold removed | Newly active capability | Initial state | Request | Qualified oracle | Failure route | Reset |
 |---|---|---|---|---|---|---|---|---|---|
@@ -73,7 +73,7 @@ RUNG <ID>
   Sensitivity check:
   Failure route:
   Reset rule:
-  Transfer probe:
+  Transfer probe(s), limited to evidence-useful variation:
   Passing freezes:
 ```
 
@@ -112,7 +112,7 @@ Name any nondeterministic rung's required repetition count or statistical thresh
 
 ## Transfer and Graduation Gates
 
-| After rung/tranche | Material variation | Invariant that must transfer | Independent oracle |
+| After rung/tranche | Evidence-useful material variation | Invariant that must transfer | Independent oracle |
 |---|---|---|---|
 | <ID> | <bounded variation> | <shared behavior> | <evidence> |
 
@@ -135,7 +135,7 @@ Recovery replay:
 
 ## Recommended First Rung
 
-Name exactly one rung. Explain why it has the highest diagnostic value with the lowest new uncertainty.
+Name the rung to run first. Explain why it has the highest diagnostic value with the lowest new uncertainty in the selected tranche.
 
 ## Do Not Encode
 
@@ -148,5 +148,6 @@ List known answers, test identifiers, fixed paths, fixture coordinates, canned s
 - Distinguish harness `BLOCKED`, ambiguous `INCONCLUSIVE`, and product `FAIL`.
 - Qualify every oracle.
 - State reset and failure routing for every detailed rung.
+- Stop extending the tranche or transfer set when added experiments no longer reduce uncertainty or their cost approaches unchanged graduation.
 - Keep later tracks provisional until evidence reaches them.
 - Never claim ladder completion proves product completion without the unchanged graduation gate.

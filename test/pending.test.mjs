@@ -5,16 +5,13 @@ import path from "node:path";
 import test from "node:test";
 
 import { initializeDatabase, openWriteDatabase } from "../src/database.mjs";
-import { diagnoseDatabase } from "../src/doctor.mjs";
 import {
-  PENDING_MAXIMUM, pendingAdd, pendingCount, pendingDrop, pendingList, pendingPromote,
+  pendingAdd, pendingCount, pendingDrop, pendingList, pendingPromote,
   pendingScope,
 } from "../src/pending.mjs";
 import { resolveProject } from "../src/project.mjs";
 import { putRecord } from "../src/records.mjs";
-import {
-  requiredBudgetNotice, startProjection, STARTUP_BYTES,
-} from "../src/agent-state.mjs";
+import { startProjection } from "../src/agent-state.mjs";
 import { extractNotes } from "../codex-plugin/scripts/lodestar-runtime.mjs";
 
 const IDENTITY = { actor: "agent:session", agent: "agent", session: "session", harness: null };
@@ -126,9 +123,9 @@ test("dropping removes the candidate and nothing else", async (t) => {
   assert.deepEqual(listed.records.map(({ id }) => id), [keep.record.id]);
 });
 
-test("capture rejects control characters and secret material", async (t) => {
+test("capture rejects empty and control-character text", async (t) => {
   const { db, file, project } = await fixture(t);
-  for (const bad of ["", "   ", "tokenbell", "export GITHUB_TOKEN=ghp_aaaaaaaaaaaaaaaaaaaaaa"]) {
+  for (const bad of ["", "   ", "bad\u0000text"]) {
     assert.throws(
       () => pendingAdd(db, project, IDENTITY, bad, { database: file, now }),
       { code: "invalid_input" },
@@ -138,25 +135,28 @@ test("capture rejects control characters and secret material", async (t) => {
   assert.equal(pendingCount(db, project), 0);
 });
 
-test("the queue is a bounded rolling window and reports what it evicted", async (t) => {
+test("the queue preserves every candidate and lets the caller choose page size", async (t) => {
   const { db, file, project } = await fixture(t);
-  let evicted = [];
-  let firstId = null;
-  for (let index = 0; index < PENDING_MAXIMUM + 5; index += 1) {
+  for (let index = 0; index < 205; index += 1) {
     const added = pendingAdd(db, project, IDENTITY, `candidate ${index}`, { database: file, now });
-    firstId ??= added.record.id;
-    if (added.evicted?.length) evicted = evicted.concat(added.evicted);
+    assert.deepEqual(added.evicted, []);
   }
-  assert.equal(pendingCount(db, project), PENDING_MAXIMUM);
-  // Reaching the cap means review already stopped; keeping the newest is more useful
-  // than hoarding, and the eviction is reported rather than silent.
-  assert.ok(evicted.includes(firstId), "the oldest candidate is the one evicted");
-  const texts = pendingList(db, project, PENDING_MAXIMUM).records.map(({ data }) => data.text);
-  assert.equal(texts.includes("candidate 0"), false);
-  assert.equal(texts.includes(`candidate ${PENDING_MAXIMUM + 4}`), true);
+  assert.equal(pendingCount(db, project), 205);
+  const texts = pendingList(db, project, 205).records.map(({ data }) => data.text);
+  assert.equal(texts.includes("candidate 0"), true);
+  assert.equal(texts.includes("candidate 204"), true);
+  assert.throws(() => pendingList(db, project, Number.MAX_SAFE_INTEGER + 1),
+    { code: "invalid_input" });
 });
 
-test("an over-budget startup sheds to names instead of refusing to run", async (t) => {
+test("capture preserves text beyond the former command policy ceiling", async (t) => {
+  const { db, file, project } = await fixture(t);
+  const text = `mechanism ${"x".repeat(5_000)}`;
+  const added = pendingAdd(db, project, IDENTITY, text, { database: file, now });
+  assert.equal(added.record.data.text, text);
+});
+
+test("an undersized optional target preserves required records", async (t) => {
   const { db, file, project } = await fixture(t);
   for (let index = 0; index < 6; index += 1) {
     putRecord(db, {
@@ -165,146 +165,41 @@ test("an over-budget startup sheds to names instead of refusing to run", async (
     }, {});
   }
 
-  // 18 KiB of "always present" inside a 16 KiB budget is a contradiction, and `start`
-  // used to resolve it by refusing — stopping every session in the project over a
-  // marking mistake made somewhere else. It resolves it by demoting instead.
   const result = startProjection(db, project, IDENTITY,
     { database: file, startupBudget: 16 * 1024 });
   const envelope = Buffer.byteLength(JSON.stringify({ v: 1, ok: true, operation: "start",
     revision: result.revision, data: result.data, more: result.more, next: result.next }), "utf8");
-  assert.ok(envelope <= 16 * 1024, `envelope ${envelope} must stay within budget`);
-  assert.equal(result.more, true);
-  assert.ok(result.data.omitted.required > 0, "required records were demoted");
+  assert.ok(envelope > 16 * 1024, "required content may exceed an optional-context target");
+  assert.equal(result.data.budget.target_met, false);
 
-  // Demoted is not deleted. Every one is named, so the agent fetches the single record
-  // it needs rather than searching the whole scope and re-reading what it already had.
   const shed = new Set(result.data.available.map(({ id }) => id));
   const carried = new Set(result.data.required.map(({ id }) => id));
   for (let index = 0; index < 6; index += 1) {
     const id = `g:bulk${index}`;
-    assert.ok(shed.has(id) || carried.has(id), `${id} is either carried or named`);
+    assert.equal(carried.has(id), true, `${id} remains complete`);
+    assert.equal(shed.has(id), false, `${id} is not demoted`);
   }
-  for (const stub of result.data.available) {
-    assert.ok(stub.id && stub.name && stub.kind, `stub is addressable: ${JSON.stringify(stub)}`);
-  }
-  // The governance record states the operating contract and is the last thing demoted.
-  assert.ok(result.data.required.length >= 1, "startup never sheds below the contract");
+  assert.equal(result.data.required.length, 7);
 });
 
-test("the startup budget is configurable, and every source is stated", async (t) => {
-  const { db, file, project } = await fixture(t);
-  const prior = process.env.LODESTAR_STARTUP_BUDGET;
-  t.after(() => {
-    if (prior === undefined) delete process.env.LODESTAR_STARTUP_BUDGET;
-    else process.env.LODESTAR_STARTUP_BUDGET = prior;
-  });
-  delete process.env.LODESTAR_STARTUP_BUDGET;
-  const budget = (options = {}) => startProjection(db, project, IDENTITY,
-    { database: file, ...options }).data.budget;
-
-  // 24 KiB is roughly 6K tokens — generous for a small local model, negligible for a
-  // 200K-context host. It is a starting point, so it must be a default and not a wall.
-  assert.deepEqual(budget(), { bytes: STARTUP_BYTES, source: "default" });
-
-  // Precedence runs from most immediate to most durable, and a project setting beats a
-  // machine one because it is the narrower statement.
-  putRecord(db, { id: "config:startup", type: "config", name: "Machine budget",
-    scope: "global", content: { state: "known", value: { startup_budget_bytes: 40_960 } } }, {});
-  assert.deepEqual(budget(), { bytes: 40_960, source: "global" });
-  putRecord(db, { id: "p:config:startup", type: "config", name: "Project budget",
-    scope: project.scope,
-    content: { state: "known", value: { startup_budget_bytes: 24_576 } } }, {});
-  assert.deepEqual(budget(), { bytes: 24_576, source: "project" });
-  process.env.LODESTAR_STARTUP_BUDGET = "32768";
-  assert.deepEqual(budget(), { bytes: 32_768, source: "environment" });
-  assert.deepEqual(budget({ startupBudget: "49152" }), { bytes: 49_152, source: "option" });
-
-  // A budget outside the sane range is a typo, not an instruction. Honouring one would
-  // either strangle startup or defeat the bound entirely, so it falls back to default.
-  delete process.env.LODESTAR_STARTUP_BUDGET;
-  putRecord(db, { id: "config:startup", type: "config", name: "Machine budget",
-    scope: "global", content: { state: "known", value: { startup_budget_bytes: 10 } } }, {});
-  putRecord(db, { id: "p:config:startup", type: "config", name: "Project budget",
-    scope: project.scope, content: { state: "known", value: { startup_budget_bytes: 0 } } }, {});
-  assert.deepEqual(budget(), { bytes: STARTUP_BYTES, source: "default" });
-  for (const bogus of ["10", "999999999", "abc", "", "16384.5"]) {
-    assert.equal(budget({ startupBudget: bogus }).source, "default", bogus);
-  }
-
-  // Config describes how the projection is built, so carrying it would spend the budget
-  // describing the budget.
-  const projected = startProjection(db, project, IDENTITY, { database: file }).data;
-  const shown = [...projected.context, ...projected.available].map(({ id }) => id);
-  assert.equal(shown.some((id) => id.includes("config:startup")), false);
-});
-
-test("a raised budget carries what a default one has to shed", async (t) => {
+test("an explicit budget sheds what an unbounded startup carries", async (t) => {
   const { db, file, project } = await fixture(t);
   for (let index = 0; index < 40; index += 1) {
     putRecord(db, { id: `p:ctx${index}`, type: "note", name: `Note ${index}`,
       scope: project.scope,
       content: { state: "known", value: { text: `${index}:${"x".repeat(900)}` } } }, {});
   }
-  const tight = startProjection(db, project, IDENTITY, { database: file }).data;
-  const roomy = startProjection(db, project, IDENTITY,
-    { database: file, startupBudget: 128 * 1024 }).data;
+  const tight = startProjection(db, project, IDENTITY,
+    { database: file, startupBudget: 24 * 1024 }).data;
+  const roomy = startProjection(db, project, IDENTITY, { database: file }).data;
 
   assert.ok(roomy.context.length > tight.context.length, "a bigger budget carries more");
-  assert.ok(!roomy.omitted.hidden, "and stops hiding names entirely");
-  // Whatever the budget, the projection stays inside it.
-  for (const [data, limit] of [[tight, STARTUP_BYTES], [roomy, 128 * 1024]]) {
-    assert.ok(Buffer.byteLength(JSON.stringify(data), "utf8") <= limit);
-  }
-});
-
-test("marking a record required reports the budget it just spent", async (t) => {
-  const { db, file, project } = await fixture(t);
-  const put = (id, scope, text, required) => putRecord(db, { id, type: "rule", name: id, scope,
-    content: { state: "known", value: required ? { required: true, text } : { text } } }, {});
-
-  // The cost of `required` is paid at startup, in a session that may be days away and in
-  // a project the author never opens. Saying nothing at the moment of the mark is what
-  // turned a marking mistake into an unexplained startup somewhere else.
-  put("g:cheap", "global", "tiny", true);
-  assert.deepEqual(requiredBudgetNotice(db, { scope: "global",
-    content: { value: { required: true } } }), {}, "an ordinary mark is silent");
-
-  // A record that is not required never triggers the check at all.
-  assert.deepEqual(requiredBudgetNotice(db, { scope: project.scope,
-    content: { value: { text: "x" } } }), {});
-
-  put("g:heavy", "global", "x".repeat(28_000), true);
-  const notice = requiredBudgetNotice(db, { scope: "global",
-    content: { value: { required: true } } });
-  assert.equal(notice.more, true);
-  assert.match(notice.next[0], /startup budget/u);
-  assert.match(notice.next[0], /demote/u);
-
-  // It is a report, never a refusal: a bulk import must not fail on its last record.
-  assert.doesNotThrow(() => put("g:another", "global", "x".repeat(4_000), true));
-});
-
-test("doctor reports the standing startup cost of global required records", async (t) => {
-  const { db, file } = await fixture(t);
-  const baseline = diagnoseDatabase(db, { database: file }).checks.startup_budget;
-  assert.ok(baseline.global_required_bytes > 0, "the injected governance record is counted");
-  assert.equal(baseline.budget_bytes, STARTUP_BYTES);
-  assert.equal(
-    baseline.project_headroom_bytes,
-    baseline.budget_bytes - baseline.global_required_bytes,
-  );
-
-  putRecord(db, {
-    id: "g:demo:rule", type: "rule", name: "Demo rule", scope: "global",
-    content: { state: "known", value: { required: true, text: "x".repeat(2000) } },
-  }, {});
-
-  const grown = diagnoseDatabase(db, { database: file }).checks.startup_budget;
-  assert.equal(grown.global_required_records, baseline.global_required_records + 1);
-  assert.ok(
-    grown.project_headroom_bytes < baseline.project_headroom_bytes - 1900,
-    "a global required record is charged to every project",
-  );
+  assert.deepEqual(roomy.available, []);
+  assert.equal(tight.budget.target_met, false,
+    "whole optional-record stubs may themselves exceed a caller target");
+  assert.deepEqual(roomy.budget, {
+    bytes: null, source: "unbounded", applies_to: "optional", target_met: true,
+  });
 });
 
 test("only an explicit marker line is captured from a turn", () => {
@@ -319,62 +214,9 @@ test("only an explicit marker line is captured from a turn", () => {
     ["migrations are append-only"],
   );
   assert.deepEqual(extractNotes("LODESTAR NOTE: same\nLODESTAR NOTE: same"), ["same"]);
+  // No artificial capture cap: every explicit marker is a candidate.
   assert.equal(
     extractNotes([1, 2, 3, 4, 5].map((i) => `LODESTAR NOTE: fact ${i}`).join("\n")).length,
-    3,
+    5,
   );
-});
-
-test("doctor raises an issue before the startup budget runs out", async (t) => {
-  const { db, file } = await fixture(t);
-  assert.equal(
-    diagnoseDatabase(db, { database: file }).issues.some(({ code }) => code === "startup_budget_low"),
-    false,
-  );
-
-  putRecord(db, {
-    id: "g:demo:huge", type: "rule", name: "Huge rule", scope: "global",
-    content: { state: "known", value: { required: true, text: "x".repeat(12_000) } },
-  }, {});
-
-  const report = diagnoseDatabase(db, { database: file });
-  const issue = report.issues.find(({ code }) => code === "startup_budget_low");
-  // The warning has to arrive while there is still room to act, not once `start`
-  // already fails.
-  assert.ok(issue, "expected a low-headroom warning");
-  assert.ok(issue.identifiers.project_headroom_bytes < 4096);
-  assert.match(issue.action, /global required record/u);
-});
-
-test("doctor sees the project closest to exceeding the budget, not just the global cost", async (t) => {
-  const { db, file } = await fixture(t);
-  const clean = diagnoseDatabase(db, { database: file }).checks.startup_budget;
-  assert.equal(clean.healthy, true);
-  assert.equal(clean.worst_project, null);
-  assert.equal(clean.projects_with_required, 0);
-
-  // Global cost stays small; one project loads itself up. `start` sheds on global plus
-  // project, so this project is nearly dead — but a global-only measurement calls the
-  // whole registry healthy and the outage arrives without warning.
-  for (const [index, scope] of ["project:p:light", "project:p:heavy"].entries()) {
-    putRecord(db, { id: `p:req${index}`, type: "rule", name: `Rule ${index}`, scope,
-      content: { state: "known", value: { required: true, text: "x".repeat(index ? 11_000 : 40) } },
-    }, {});
-  }
-
-  const budget = diagnoseDatabase(db, { database: file }).checks.startup_budget;
-  assert.equal(budget.projects_with_required, 2);
-  assert.equal(budget.worst_project.scope, "project:p:heavy");
-  assert.ok(budget.project_headroom_bytes > 4096, "the global cost alone still looks fine");
-  assert.equal(budget.healthy, false, "but the heaviest project is not");
-  assert.equal(budget.worst_project.startup_bytes,
-    budget.worst_project.required_bytes + budget.global_required_bytes);
-
-  // The flag and the issue must never disagree: a nested "healthy": false with an empty
-  // issue list gives a reader a false to act on and nothing to act with.
-  const report = diagnoseDatabase(db, { database: file });
-  const issue = report.issues.find(({ code }) => code === "startup_budget_low");
-  assert.ok(issue, "an unhealthy budget must always raise its issue");
-  assert.equal(issue.identifiers.worst_project, "project:p:heavy");
-  assert.match(issue.action, /project:p:heavy/u);
 });

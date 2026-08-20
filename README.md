@@ -27,8 +27,8 @@ lodestar start --cwd .
 
 That returns the project identity, its governing rules, current and superseded
 decisions, relevant knowledge, who else is working, and any handoff waiting for
-this session — as JSON, bounded to 24 KiB by default, with exact follow-up commands when
-something was left out.
+this session as one complete JSON snapshot. A caller may explicitly request a smaller
+optional-context projection, but required governance and continuity stay atomic.
 
 ## Why
 
@@ -66,7 +66,7 @@ flowchart LR
 ## The normal loop
 
 ```text
-lodestar start --cwd .                      # once per session
+lodestar start --cwd .                      # obtain one validated startup snapshot
 lodestar find "release process"             # search before reading the repo
 lodestar get project:example                # exact record or alias
 lodestar links project:example              # one hop of related records
@@ -100,12 +100,21 @@ instead of silently resurfacing.
 
 ```text
 lodestar decision set database SQLite --reason "local-first, no service"
-lodestar decision show                      # FACTS and DEAD
+lodestar decision status database blocked --reason "waiting on vendor"
+lodestar decision show                      # FACTS, BLOCKED, and DEAD
 lodestar decision drop database
 ```
 
+Current decisions render as `[DECISION key=... status=ACCEPTED ...]` markers,
+paused decisions as `status=BLOCKED`, replaced values as
+`[SUPERSEDED key=... by=... ...]`, and dropped values as `[DEAD key=... ...]`.
+The Stop hook captures the same bracketed markers from an agent's final message
+into the ledger, so a decision an agent records is a decision a later session
+inherits.
+
 `lodestar start` returns the same projection, so a new session inherits both what
 is true and what was explicitly ruled out.
+
 
 ## Continuity
 
@@ -118,23 +127,33 @@ lodestar handoff status --cwd .
 lodestar handoff disarm --cwd .
 ```
 
-## Managed skills
+## Read-only skill verification
 
-One lifecycle for the bundled skills and instruction templates across Codex,
-Claude, Hermes, and OpenCode. Every replacement is staged and backed up, and the
-backup path comes back in the response.
+Lodestar carries canonical skill source but does not own external skill directories.
+It can compare existing copies without creating, replacing, synchronizing, migrating,
+backing up, or removing anything.
 
 ```text
-lodestar skills install --target all
 lodestar skills verify --target all
-lodestar skills sync --target all --dry-run
+```
+
+## Read-only AGENTS.md inspection
+
+Lodestar never writes repository or global agent files. It can inspect an existing
+repository AGENTS.md or print canonical template source for deliberate use elsewhere.
+
+```text
+lodestar agents status --cwd .
+lodestar agents verify --cwd .
+lodestar agents template --mode full --cwd .
 ```
 
 ## Keeping it current
 
-Startup is a fixed budget, not a growing list, so capture is separated from injection.
-A line beginning `LODESTAR NOTE:` in an agent's final message is captured into a
-quarantine scope that `start` never reads, which costs the budget nothing.
+Startup keeps pending capture separate from injected context. A
+`[NOTE text="..."]` marker in an agent's final message is captured into a quarantine
+scope that `start` never reads (the historical `LODESTAR NOTE: <text>` line is still
+accepted).
 
 ```text
 lodestar pending                 # review candidates
@@ -142,48 +161,40 @@ lodestar pending promote <id>    # keep one; findable by get and find
 lodestar pending drop <id>       # discard
 ```
 
-Promotion never marks a record required. `lodestar doctor` reports `startup_budget` —
-the standing cost of required records and the project closest to exceeding it — and
-raises `startup_budget_low` while there is still room to act.
+Promotion never marks a record required. `lodestar doctor` checks the schema, SQLite
+integrity, foreign keys, and stored-record semantics; it does not own startup sizing
+policy.
 
 ## The startup budget
 
-`start` renders a bounded projection. Anything that does not fit is demoted to a stub —
-`id`, `name` and `kind` in `data.available` — so one `lodestar get` recovers it. `start`
-never refuses to run; the governance record is the last thing demoted.
+Without a caller target, `start` returns all optional context. Required governance,
+decisions, and eligible handoff content are always complete and atomic.
 
-The default budget is 24 KiB, roughly 6K tokens. Set your own, most immediate first:
+An explicit `--startup-budget <positive-safe-integer>` is an optional-context projection
+target for that one call; it is not a default or a core policy. Lodestar includes whole
+optional records in deterministic priority order, then lists the remaining records as
+stable-ID stubs in `data.available`. `more`, `next`, and `data.budget` make that result
+transparent. Required material remains complete even when it exceeds the target, in
+which case `data.budget.target_met` is `false`.
 
 ```text
-lodestar start --startup-budget 65536      # this run
-LODESTAR_STARTUP_BUDGET=65536              # this host
+lodestar start --startup-budget 65536
 ```
-
-For a durable setting, write a `config` record — project scope overrides global:
-
-```json
-{ "id": "config:startup", "type": "config", "name": "Startup budget",
-  "scope": "global",
-  "content": { "state": "known", "value": { "startup_budget_bytes": 65536 } } }
-```
-
-Every projection reports `data.budget` with the value in force and its source, so a
-raise is a visible choice rather than silent drift. Values outside 8 KiB–256 KiB are
-treated as typos and ignored.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `start` | Resolve one project and return bounded startup state; claim a pending handoff when eligible. |
+| `start` | Resolve one project and return complete startup state; claim a pending handoff when eligible. |
 | `get` | Retrieve one exact ID or alias. |
-| `find` | Search bounded stored context by query, scope, and kind. |
+| `find` | Search stored context by query, scope, and kind; `--limit` requests a page. |
 | `links` | Deterministic one-hop incoming and outgoing links. |
 | `put` | Insert or replace one complete record snapshot. |
 | `work status\|start\|done\|history` | Read or update advisory work records. |
 | `handoff arm\|status\|checkpoint\|now\|disarm` | Session lane and next-session recovery. |
 | `decision set\|drop\|show\|inject` | Append decision events; project current and dead values. |
-| `skills install\|sync\|verify\|remove` | Manage package-owned client skills and templates. |
+| `skills verify` | Read-only comparison of existing skill copies with package source. |
+| `agents status\|verify\|template` | Read-only AGENTS.md inspection and template output. |
 | `pending list\|add\|promote\|drop` | Queue captured candidates outside startup. |
 | `doctor` | Diagnose schema, integrity, foreign keys, and stored semantics. |
 | `export` | Emit a deterministic registry export. |
@@ -212,8 +223,8 @@ same shape on stderr:
 }
 ```
 
-`more` says output was bounded. `next` carries the exact commands that recover
-what was omitted. Errors carry a stable `code`, `identifiers`, and an `action`.
+`more` says an explicit caller limit or optional startup target omitted additional
+results. `next` carries the exact commands that recover what was omitted. Errors carry a stable `code`, `identifiers`, and an `action`.
 
 ### Which commands write
 

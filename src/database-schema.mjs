@@ -5,23 +5,12 @@ import { validateTimestamp } from "./validate.mjs";
 export function readMetadata(db, file = null) {
   try {
     const rows = db.prepare(
-      "SELECT key, substr(value, 1, 4097) AS value, "
-        + "length(CAST(value AS BLOB)) AS bytes FROM metadata "
+      "SELECT key, value FROM metadata "
         + "WHERE key IN ("
         + "'schema_version', 'created_at', 'database_instance_id', "
         + "'database_revision'"
         + ") ORDER BY key",
     ).all();
-    if (rows.some(({ bytes }) => Number(bytes) > 4096)) {
-      throw lodestarError(
-        "invalid_database",
-        "Required Lodestar metadata exceeds its storage limit.",
-        {
-          identifiers: { database: file },
-          action: "Run lodestar doctor and use a valid Lodestar database.",
-        },
-      );
-    }
     return Object.fromEntries(rows.map(({ key, value }) => [key, value]));
   } catch (error) {
     if (error?.name === "LodestarError") throw error;

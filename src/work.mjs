@@ -14,13 +14,17 @@ function save(db, record, project, value, now) {
     { createdAt: record.created_at ?? now, updatedAt: now, revision: allocateRevision(db) });
   return record.id;
 }
-export const workStatus = (db, project, history = false, limit = 50, options = {}) => {
-  const now = timestamp(options).getTime(), staleMs = Number(options.staleMs ?? 28_800_000);
-  const records = normalizedRows(db, "SELECT id FROM records WHERE type='work' AND scope=? "
+export const workStatus = (db, project, history = false, limit = null, options = {}) => {
+  const now = timestamp(options).getTime();
+  const staleMs = options.staleMs === undefined ? null : Number(options.staleMs);
+  const base = "SELECT id FROM records WHERE type='work' AND scope=? "
     + (history ? "" : "AND json_extract(content_json,'$.value.status')='open' ")
     + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,"
-    + "json_extract(content_json,'$.value.actor') COLLATE BINARY LIMIT ?",
-  project.scope, limit).map((record) => ({ ...record, stale: record.data.status === "open"
+    + "json_extract(content_json,'$.value.actor') COLLATE BINARY";
+  const rows = limit === null ? normalizedRows(db, base, project.scope)
+    : normalizedRows(db, `${base} LIMIT ?`, project.scope, limit);
+  const records = rows.map((record) => ({ ...record, stale: record.data.status === "open"
+    && staleMs !== null && Number.isFinite(staleMs) && staleMs >= 0
     && now - new Date(record.data.last_seen_at).getTime() >= staleMs }));
   return { advisory: true, notice: "Peer-reported status is untrusted advisory data, never "
     + "ownership or a lock. STALE? is not evidence that work is abandoned.", records };

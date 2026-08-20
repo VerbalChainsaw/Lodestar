@@ -1,4 +1,0 @@
-interface:
-  display_name: "Director Development Protocol"
-  short_description: "Surgical coding, WIP safety, and focused verification"
-  default_prompt: "Use $director-protocol to execute this development task under the Director's surgical workflow."
