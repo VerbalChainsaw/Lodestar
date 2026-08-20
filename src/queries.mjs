@@ -10,7 +10,6 @@ import {
 import { SCHEMA_VERSION } from "./schema.mjs";
 import {
   FRESHNESS_STATES,
-  LIMITS,
   validateIdentifier,
   validateLimit,
   validateName,
@@ -24,22 +23,8 @@ import {
 
 function aliasesFor(db, id) {
   const rows = db.prepare(
-    "SELECT alias FROM aliases WHERE record_id = ? ORDER BY alias LIMIT ?",
-  ).all(id, LIMITS.aliasesPerRecord + 1);
-  if (rows.length > LIMITS.aliasesPerRecord) {
-    throw lodestarError(
-      "database_integrity",
-      "A record exceeds its stored alias limit.",
-      {
-        identifiers: {
-          id,
-          count: rows.length,
-          maximum: LIMITS.aliasesPerRecord,
-        },
-        action: "Run lodestar doctor and restore a valid external backup.",
-      },
-    );
-  }
+    "SELECT alias FROM aliases WHERE record_id = ? ORDER BY alias",
+  ).all(id);
   return rows.map(({ alias }) => alias);
 }
 
@@ -103,10 +88,7 @@ export function findRecords(
   } = {},
 ) {
   const query = validateQuery(queryValue);
-  const selectedLimit = validateLimit(limit, {
-    fallback: LIMITS.findDefault,
-    maximum: LIMITS.findMaximum,
-  });
+  const selectedLimit = limit === undefined ? null : validateLimit(limit, {});
   const clauses = [String.raw`
     (
       instr(lower(r.id), lower($query)) > 0
@@ -123,7 +105,6 @@ export function findRecords(
   `];
   const parameters = {
     $query: query,
-    $limit: selectedLimit + 1,
   };
   if (scope !== undefined) {
     validateScope(scope);
@@ -166,17 +147,12 @@ export function findRecords(
     FROM records r
     WHERE ${clauses.join(" AND ")}
     ORDER BY rank, r.id COLLATE BINARY
-    LIMIT $limit
-  `).all(parameters);
-  const truncated = rows.length > selectedLimit;
-  return {
-    query,
-    scope: scope ?? null,
-    type: type ?? null,
-    limit: selectedLimit,
-    truncated,
-    records: rows.slice(0, selectedLimit).map((row) => summary(db, row)),
-  };
+    ${selectedLimit === null ? "" : "LIMIT $limit + 1"}
+  `).all(selectedLimit === null ? parameters : { ...parameters, $limit: selectedLimit });
+  const truncated = selectedLimit !== null && rows.length > selectedLimit;
+  const selected = truncated ? rows.slice(0, selectedLimit) : rows;
+  return { query, scope: scope ?? null, type: type ?? null, limit: selectedLimit,
+    truncated, records: selected.map((row) => summary(db, row)) };
 }
 
 export function linkedRecords(
@@ -187,10 +163,7 @@ export function linkedRecords(
   } = {},
 ) {
   const id = resolveRecordId(db, identifier);
-  const selectedLimit = validateLimit(limit, {
-    fallback: LIMITS.linksDefault,
-    maximum: LIMITS.linksMaximum,
-  });
+  const selectedLimit = limit === undefined ? null : validateLimit(limit, {});
   const rows = db.prepare(String.raw`
     SELECT
       0 AS direction_rank,
@@ -228,17 +201,15 @@ export function linkedRecords(
     JOIN records peer ON peer.id = l.from_id
     WHERE l.to_id = $id
     ORDER BY direction_rank, relationship, from_id, to_id
-    LIMIT $limit
-  `).all({
-    $id: id,
-    $limit: selectedLimit + 1,
-  });
-  const truncated = rows.length > selectedLimit;
+    ${selectedLimit === null ? "" : "LIMIT $limit + 1"}
+  `).all(selectedLimit === null ? { $id: id } : { $id: id, $limit: selectedLimit });
+  const truncated = selectedLimit !== null && rows.length > selectedLimit;
+  const selected = truncated ? rows.slice(0, selectedLimit) : rows;
   return {
     id,
     limit: selectedLimit,
     truncated,
-    links: rows.slice(0, selectedLimit).map((row) => {
+    links: selected.map((row) => {
       try {
         validateIdentifier(row.from_id, "from_id");
         validateRelationship(row.relationship);
@@ -270,25 +241,7 @@ export function exportRegistry(db) {
     links: [],
     sources: [],
   };
-  let estimatedBytes = 128;
-  const append = (section, item) => {
-    estimatedBytes += Buffer.byteLength(canonicalStringify(item), "utf8") + 1;
-    if (estimatedBytes > LIMITS.exportBytes) {
-      throw lodestarError(
-        "resource_limit",
-        "The registry export exceeds its byte limit.",
-        {
-          identifiers: {
-            resource: "export",
-            bytes_at_least: estimatedBytes,
-            maximum: LIMITS.exportBytes,
-          },
-          action: "Delete obsolete records before exporting the registry.",
-        },
-      );
-    }
-    document[section].push(item);
-  };
+  const append = (section, item) => { document[section].push(item); };
 
   for (const row of db.prepare(
       "SELECT id, type, name, scope, content_json, created_at, updated_at "
@@ -373,19 +326,5 @@ export function exportRegistry(db) {
     });
   }
   const bytes = Buffer.byteLength(canonicalStringify(document), "utf8");
-  if (bytes > LIMITS.exportBytes) {
-    throw lodestarError(
-      "resource_limit",
-      "The registry export exceeds its byte limit.",
-      {
-        identifiers: {
-          resource: "export",
-          bytes,
-          maximum: LIMITS.exportBytes,
-        },
-        action: "Delete obsolete records before exporting the registry.",
-      },
-    );
-  }
   return { document, bytes };
 }

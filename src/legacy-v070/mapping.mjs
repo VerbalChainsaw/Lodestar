@@ -1,12 +1,6 @@
-import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
-
-import { canonicalStringify } from "../json.mjs";
 import {
   FRESHNESS_STATES,
   KNOWLEDGE_STATES,
-  LIMITS,
-  truncateUtf8,
 } from "../validate.mjs";
 import { retainLocatorHealth, selectedLocatorHealth } from "./locator-health.mjs";
 
@@ -19,13 +13,13 @@ export function locationText(location) {
     : `${location.file}#${location.item}`;
 }
 
-function cleanText(value, maximum, fallback) {
+function cleanText(value, fallback) {
   const candidate = typeof value === "string" ? value : fallback;
   const cleaned = candidate.normalize("NFC")
     .replace(CONTROL, " ")
     .replace(UNPAIRED_SURROGATE, "�")
     .trim();
-  return truncateUtf8(cleaned || fallback, maximum);
+  return cleaned || fallback;
 }
 
 function reportFieldRemap(
@@ -55,7 +49,7 @@ function recordName(payload, id, report, location) {
       ?? payload.summary
       ?? (Array.isArray(payload.aliases) ? payload.aliases[0] : null)
       ?? id;
-  const name = cleanText(original, 256, id);
+  const name = cleanText(original, id);
   if (typeof original !== "string") {
     report.unsupported.push({
       kind: "record",
@@ -78,7 +72,7 @@ function recordName(payload, id, report, location) {
 }
 
 function projectName(payload, id, report, location) {
-  const name = cleanText(payload.name, 256, id);
+  const name = cleanText(payload.name, id);
   if (typeof payload.name !== "string") {
     report.unsupported.push({
       kind: "project",
@@ -102,7 +96,7 @@ function projectName(payload, id, report, location) {
 }
 
 function recordType(payload, report, location) {
-  const type = cleanText(payload.kind ?? "legacy", 64, "legacy");
+  const type = cleanText(payload.kind ?? "legacy", "legacy");
   if (typeof payload.kind !== "string") {
     report.unsupported.push({
       kind: "record",
@@ -146,20 +140,7 @@ function knowledgeState(payload, report, location) {
 }
 
 function scopeFor(payload, defaultScope, report, location) {
-  let rawScopes = Array.isArray(payload.scope) ? payload.scope : [];
-  if (rawScopes.length > LIMITS.legacyFieldItems) {
-    report.unsupported.push({
-      kind: "record",
-      source: locationText(location),
-      identifier: payload.id ?? null,
-      reason: "scope_processing_limit",
-      items: rawScopes.length,
-      processed: LIMITS.legacyFieldItems,
-      omitted_items: rawScopes.length - LIMITS.legacyFieldItems,
-      disposition: "remaining_scopes_ignored",
-    });
-    rawScopes = rawScopes.slice(0, LIMITS.legacyFieldItems);
-  }
+  const rawScopes = Array.isArray(payload.scope) ? payload.scope : [];
   const scopes = [...new Set(rawScopes.filter((value) =>
     typeof value === "string" && value.length > 0
   ))].sort();
@@ -188,7 +169,7 @@ function scopeFor(payload, defaultScope, report, location) {
     return defaultScope;
   }
   if (scopes.length === 1) {
-    const scope = cleanText(scopes[0], 512, defaultScope);
+    const scope = cleanText(scopes[0], defaultScope);
     reportFieldRemap(
       report,
       location,
@@ -200,7 +181,7 @@ function scopeFor(payload, defaultScope, report, location) {
     return scope;
   }
   const selected = scopes.includes("global") ? "global" : scopes[0];
-  const scope = cleanText(selected, 512, defaultScope);
+  const scope = cleanText(selected, defaultScope);
   report.unsupported.push({
     kind: "record",
     source: locationText(location),
@@ -261,35 +242,7 @@ function sourceMetadata(source, payload, location, report) {
     inspection: inspectionFor(payload),
     legacy,
   };
-  const text = canonicalStringify(metadata);
-  const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes <= LIMITS.sourceMetadataBytes) return metadata;
-  const omittedFields = [
-    "ownership",
-    "generated_by",
-    "source_key",
-    "verified",
-  ].filter((field) => payload[field] !== undefined);
-  report.unsupported.push({
-    kind: "source",
-    source: locationText(location),
-    identifier: payload.id ?? null,
-    reason: "source_metadata_compacted",
-    disposition: "full_values_retained_in_record_content",
-    bytes,
-    maximum: LIMITS.sourceMetadataBytes,
-    omitted_fields: omittedFields,
-  });
-  return {
-    inspection: metadata.inspection,
-    legacy: {
-      generation: source.generation,
-      location: locationText(location),
-      compacted: true,
-      omitted_fields: omittedFields,
-      original_sha256: createHash("sha256").update(text).digest("hex"),
-    },
-  };
+  return metadata;
 }
 
 function locatorOrigin(locator, payload, location, report) {
@@ -324,13 +277,7 @@ function locatorOrigin(locator, payload, location, report) {
     });
     return null;
   }
-  let origin = normalized;
-  if (Buffer.byteLength(origin, "utf8") > LIMITS.originBytes) {
-    const suffix =
-      `#${createHash("sha256").update(origin).digest("hex").slice(0, 32)}`;
-    origin =
-      `${truncateUtf8(origin, LIMITS.originBytes - suffix.length)}${suffix}`;
-  }
+  const origin = normalized;
   reportFieldRemap(
     report,
     location,
@@ -364,33 +311,8 @@ function locatorMetadata({
       ...(health ? { health } : {}),
     },
   };
-  const text = canonicalStringify(metadata);
-  const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes <= LIMITS.sourceMetadataBytes) {
-    if (health) retainLocatorHealth(source, `${payload.id}#${index}`);
-    return metadata;
-  }
-  report.unsupported.push({
-    kind: "source",
-    source: locationText(location),
-    identifier: payload.id ?? null,
-    reason: "locator_metadata_compacted",
-    locator_index: index,
-    bytes,
-    maximum: LIMITS.sourceMetadataBytes,
-    disposition: "full_locator_retained_in_record_content",
-  });
-  return {
-    inspection: metadata.inspection,
-    legacy: {
-      generation: source.generation,
-      location: locationText(location),
-      locator_index: index,
-      locator_type: typeof locator.type === "string" ? locator.type : null,
-      compacted: true,
-      original_sha256: createHash("sha256").update(text).digest("hex"),
-    },
-  };
+  if (health) retainLocatorHealth(source, `${payload.id}#${index}`);
+  return metadata;
 }
 
 function mappedSources(source, payload, location, report) {
@@ -411,35 +333,9 @@ function mappedSources(source, payload, location, report) {
     });
     return sources;
   }
-  let locators = Array.isArray(payload.locators) ? payload.locators : [];
-  if (locators.length > LIMITS.legacyFieldItems) {
-    report.skipped.push({
-      kind: "source",
-      source: locationText(location),
-      identifier: payload.id ?? null,
-      reason: "locator_processing_limit",
-      items: locators.length,
-      processed: LIMITS.legacyFieldItems,
-      omitted_items: locators.length - LIMITS.legacyFieldItems,
-      disposition: "remaining_locator_sources_skipped",
-    });
-    locators = locators.slice(0, LIMITS.legacyFieldItems);
-  }
+  const locators = Array.isArray(payload.locators) ? payload.locators : [];
   const origins = new Set(sources.map(({ origin }) => origin));
   for (const [index, locator] of locators.entries()) {
-    if (sources.length >= LIMITS.sourcesPerRecord) {
-      report.skipped.push({
-        kind: "source",
-        source: locationText(location),
-        identifier: payload.id ?? null,
-        reason: "source_limit",
-        items: locators.length,
-        imported: sources.length - 1,
-        omitted_items: locators.length - index,
-        disposition: "remaining_locator_sources_skipped",
-      });
-      break;
-    }
     const origin = locatorOrigin(locator, payload, location, report);
     if (!origin) continue;
     if (origins.has(origin)) {

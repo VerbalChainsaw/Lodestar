@@ -40,7 +40,7 @@ function record(id, {
   };
 }
 
-test("find is bounded, filtered, and totally ordered by documented rank", () => {
+test("find accepts an explicit safe-integer page size and preserves deterministic rank", () => {
   const db = memoryDatabase();
   const now = () => new Date("2026-07-30T10:00:00.000Z");
   for (const value of [
@@ -78,12 +78,9 @@ test("find is bounded, filtered, and totally ordered by documented rank", () => 
     () => findRecords(db, "needle", { limit: "1e2" }),
     ({ code }) => code === "invalid_input",
   );
-  assert.throws(
-    () => findRecords(db, "needle", { type: "t".repeat(65) }),
-    ({ code, identifiers }) =>
-      code === "resource_limit"
-      && identifiers.field === "type"
-      && identifiers.maximum === 64,
+  assert.deepEqual(
+    findRecords(db, "needle", { type: "t".repeat(65) }).records,
+    [],
   );
   db.close();
 });

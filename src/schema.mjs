@@ -3,9 +3,10 @@ import { randomBytes } from "node:crypto";
 import {
   CONTINUITY_SCHEMA_SQL,
 } from "./continuity-schema.mjs";
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const LEGACY_SCHEMA_VERSION = 1;
 export const PREVIOUS_SCHEMA_VERSION = 2;
+export const SCHEMA_V3_VERSION = 3;
 
 export function createDatabaseInstanceId() {
   return randomBytes(32).toString("hex");
@@ -142,13 +143,251 @@ CREATE INDEX aliases_record_id
 `;
 
 export const PREVIOUS_SCHEMA_SQL = `${LEGACY_SCHEMA_SQL}\n${CONTINUITY_SCHEMA_SQL}`;
-export const SCHEMA_SQL = LEGACY_SCHEMA_SQL;
+export const SCHEMA_SQL = String.raw`
+CREATE TABLE metadata (
+  key TEXT PRIMARY KEY
+    CHECK(length(CAST(key AS BLOB)) >= 1),
+  value TEXT NOT NULL
+    CHECK(length(CAST(value AS BLOB)) >= 1)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE records (
+  id TEXT PRIMARY KEY
+    CHECK(length(CAST(id AS BLOB)) >= 1),
+  type TEXT NOT NULL
+    CHECK(length(CAST(type AS BLOB)) >= 1),
+  name TEXT NOT NULL
+    CHECK(length(CAST(name AS BLOB)) >= 1),
+  scope TEXT NOT NULL
+    CHECK(length(CAST(scope AS BLOB)) >= 1),
+  content_json TEXT NOT NULL
+    CHECK(
+      CASE WHEN json_valid(content_json) THEN (
+        json_type(content_json) = 'object'
+        AND json_type(content_json, '$.state') = 'text'
+        AND json_extract(content_json, '$.state')
+          IN ('known', 'known_empty', 'unavailable', 'unknown', 'stale')
+      ) ELSE 0 END
+    ),
+  created_at TEXT NOT NULL
+    CHECK(
+      length(CAST(created_at AS BLOB)) = 24
+      AND COALESCE(
+        strftime('%Y-%m-%dT%H:%M:%fZ', created_at) = created_at,
+        0
+      )
+    ),
+  updated_at TEXT NOT NULL
+    CHECK(
+      length(CAST(updated_at AS BLOB)) = 24
+      AND COALESCE(
+        strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) = updated_at,
+        0
+      )
+    )
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE links (
+  from_id TEXT NOT NULL
+    REFERENCES records(id) ON DELETE CASCADE,
+  relationship TEXT NOT NULL
+    CHECK(length(CAST(relationship AS BLOB)) >= 1),
+  to_id TEXT NOT NULL
+    REFERENCES records(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL
+    CHECK(
+      length(CAST(created_at AS BLOB)) = 24
+      AND COALESCE(
+        strftime('%Y-%m-%dT%H:%M:%fZ', created_at) = created_at,
+        0
+      )
+    ),
+  PRIMARY KEY (from_id, relationship, to_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE aliases (
+  alias TEXT PRIMARY KEY
+    CHECK(length(CAST(alias AS BLOB)) >= 1),
+  record_id TEXT NOT NULL
+    REFERENCES records(id) ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE sources (
+  record_id TEXT NOT NULL
+    REFERENCES records(id) ON DELETE CASCADE,
+  origin TEXT NOT NULL
+    CHECK(length(CAST(origin AS BLOB)) >= 1),
+  freshness TEXT NOT NULL
+    CHECK(freshness IN ('current', 'stale', 'unknown')),
+  metadata_json TEXT NOT NULL
+    CHECK(
+      CASE WHEN json_valid(metadata_json) THEN (
+        json_type(metadata_json) = 'object'
+        AND json_type(metadata_json, '$.inspection') = 'text'
+        AND json_extract(metadata_json, '$.inspection')
+          IN ('inspected', 'not_inspected', 'inspected_no_value', 'unknown')
+      ) ELSE 0 END
+    ),
+  PRIMARY KEY (record_id, origin)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX records_scope_type_id
+  ON records(scope, type, id);
+
+CREATE INDEX links_to_id
+  ON links(to_id, relationship, from_id);
+
+CREATE INDEX aliases_record_id
+  ON aliases(record_id, alias);
+`;
+
+// DDL used by the transactional schema-v4 migration to rebuild the capped
+// v1/v2/v3 tables without arbitrary byte ceilings. Child tables first point at
+// records_new; the migration swaps and renames them back to canonical names.
+export const SCHEMA_REBUILD_SQL = String.raw`
+CREATE TABLE metadata_new (
+  key TEXT PRIMARY KEY
+    CHECK(length(CAST(key AS BLOB)) >= 1),
+  value TEXT NOT NULL
+    CHECK(length(CAST(value AS BLOB)) >= 1)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE records_new (
+  id TEXT PRIMARY KEY
+    CHECK(length(CAST(id AS BLOB)) >= 1),
+  type TEXT NOT NULL
+    CHECK(length(CAST(type AS BLOB)) >= 1),
+  name TEXT NOT NULL
+    CHECK(length(CAST(name AS BLOB)) >= 1),
+  scope TEXT NOT NULL
+    CHECK(length(CAST(scope AS BLOB)) >= 1),
+  content_json TEXT NOT NULL
+    CHECK(
+      CASE WHEN json_valid(content_json) THEN (
+        json_type(content_json) = 'object'
+        AND json_type(content_json, '$.state') = 'text'
+        AND json_extract(content_json, '$.state')
+          IN ('known', 'known_empty', 'unavailable', 'unknown', 'stale')
+      ) ELSE 0 END
+    ),
+  created_at TEXT NOT NULL
+    CHECK(
+      length(CAST(created_at AS BLOB)) = 24
+      AND COALESCE(
+        strftime('%Y-%m-%dT%H:%M:%fZ', created_at) = created_at,
+        0
+      )
+    ),
+  updated_at TEXT NOT NULL
+    CHECK(
+      length(CAST(updated_at AS BLOB)) = 24
+      AND COALESCE(
+        strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) = updated_at,
+        0
+      )
+    )
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE links_new (
+  from_id TEXT NOT NULL
+    REFERENCES records_new(id) ON DELETE CASCADE,
+  relationship TEXT NOT NULL
+    CHECK(length(CAST(relationship AS BLOB)) >= 1),
+  to_id TEXT NOT NULL
+    REFERENCES records_new(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL
+    CHECK(
+      length(CAST(created_at AS BLOB)) = 24
+      AND COALESCE(
+        strftime('%Y-%m-%dT%H:%M:%fZ', created_at) = created_at,
+        0
+      )
+    ),
+  PRIMARY KEY (from_id, relationship, to_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE aliases_new (
+  alias TEXT PRIMARY KEY
+    CHECK(length(CAST(alias AS BLOB)) >= 1),
+  record_id TEXT NOT NULL
+    REFERENCES records_new(id) ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE sources_new (
+  record_id TEXT NOT NULL
+    REFERENCES records_new(id) ON DELETE CASCADE,
+  origin TEXT NOT NULL
+    CHECK(length(CAST(origin AS BLOB)) >= 1),
+  freshness TEXT NOT NULL
+    CHECK(freshness IN ('current', 'stale', 'unknown')),
+  metadata_json TEXT NOT NULL
+    CHECK(
+      CASE WHEN json_valid(metadata_json) THEN (
+        json_type(metadata_json) = 'object'
+        AND json_type(metadata_json, '$.inspection') = 'text'
+        AND json_extract(metadata_json, '$.inspection')
+          IN ('inspected', 'not_inspected', 'inspected_no_value', 'unknown')
+      ) ELSE 0 END
+    ),
+  PRIMARY KEY (record_id, origin)
+) STRICT, WITHOUT ROWID;
+`;
+
+export const SCHEMA_INDEXES_SQL = String.raw`
+CREATE INDEX records_scope_type_id
+  ON records(scope, type, id);
+
+CREATE INDEX links_to_id
+  ON links(to_id, relationship, from_id);
+
+CREATE INDEX aliases_record_id
+  ON aliases(record_id, alias);
+`;
+
+const REBUILD_COLUMNS = Object.freeze({
+  metadata: ["key", "value"],
+  records: [
+    "id",
+    "type",
+    "name",
+    "scope",
+    "content_json",
+    "created_at",
+    "updated_at",
+  ],
+  aliases: ["alias", "record_id"],
+  links: ["from_id", "relationship", "to_id", "created_at"],
+  sources: ["record_id", "origin", "freshness", "metadata_json"],
+});
+
+// Runs inside an open write transaction to swap the capped v1/v2/v3 tables for
+// the uncapped schema-v4 tables. All rows are copied verbatim, references are
+// deferred to commit, and foreign keys are re-enforced at the commit boundary.
+export function rebuildTables(db) {
+  db.exec("PRAGMA defer_foreign_keys = ON");
+  db.exec(SCHEMA_REBUILD_SQL);
+  for (const table of Object.keys(REBUILD_COLUMNS)) {
+    const columns = REBUILD_COLUMNS[table];
+    db.prepare(
+      `INSERT INTO ${table}_new (${columns.join(", ")})
+        SELECT ${columns.join(", ")} FROM ${table}`,
+    ).run();
+  }
+  for (const table of Object.keys(REBUILD_COLUMNS)) {
+    db.exec(`DROP TABLE ${table};`);
+  }
+  for (const table of ["metadata", "aliases", "links", "sources", "records"]) {
+    db.exec(`ALTER TABLE ${table}_new RENAME TO ${table};`);
+  }
+  db.exec(SCHEMA_INDEXES_SQL);
+}
+
 export const SCHEMA_TABLES = LEGACY_SCHEMA_TABLES;
 export const SCHEMA_INDEXES = LEGACY_SCHEMA_INDEXES;
 export const EXPECTED_COLUMNS = LEGACY_EXPECTED_COLUMNS;
 
 function normalizedSql(value) {
-  return value.replace(/\s+/gu, " ").trim();
+  return value.replace(/"/gu, "").replace(/\s+/gu, " ").trim();
 }
 
 const SQLITE_STATISTICS_DEFINITIONS = Object.freeze({
@@ -194,7 +433,8 @@ export const PREVIOUS_EXPECTED_SCHEMA_DEFINITIONS =
 export const EXPECTED_SCHEMA_DEFINITIONS = expectedDefinitions(SCHEMA_SQL);
 
 export function inspectSchemaDefinitions(db, { version = SCHEMA_VERSION } = {}) {
-  const expectedDefinitionsForVersion = version === LEGACY_SCHEMA_VERSION
+  const expectedDefinitionsForVersion = version === SCHEMA_V3_VERSION
+      || version === LEGACY_SCHEMA_VERSION
     ? LEGACY_EXPECTED_SCHEMA_DEFINITIONS
     : version === PREVIOUS_SCHEMA_VERSION ? PREVIOUS_EXPECTED_SCHEMA_DEFINITIONS
     : version === SCHEMA_VERSION ? EXPECTED_SCHEMA_DEFINITIONS : null;

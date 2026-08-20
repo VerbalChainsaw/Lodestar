@@ -1,38 +1,5 @@
-import { Buffer } from "node:buffer";
-
 import { lodestarError } from "./errors.mjs";
 import { canonicalStringify } from "./json.mjs";
-
-export const LIMITS = Object.freeze({
-  cliArgumentBytes: 16 * 1024,
-  cliArgumentsBytes: 64 * 1024,
-  commandOutputBytes: 80 * 1024 * 1024,
-  pathBytes: 16 * 1024,
-  putInputBytes: 1024 * 1024,
-  contentBytes: 256 * 1024,
-  sourceMetadataBytes: 64 * 1024,
-  aliasesPerRecord: 64,
-  linksPerRecord: 256,
-  sourcesPerRecord: 32,
-  identifierBytes: 256,
-  typeBytes: 64,
-  nameBytes: 256,
-  scopeBytes: 512,
-  relationshipBytes: 64,
-  originBytes: 4096,
-  queryBytes: 512,
-  findDefault: 20,
-  findMaximum: 100,
-  linksDefault: 100,
-  linksMaximum: 500,
-  recordsMaximum: 100_000,
-  exportBytes: 64 * 1024 * 1024,
-  importBytes: 128 * 1024 * 1024,
-  importRecords: 100_000,
-  legacyFieldItems: 10_000,
-  migrationReportItemsPerSection: 2_000,
-  migrationReportItemBytes: 4 * 1024,
-});
 
 export const KNOWLEDGE_STATES = Object.freeze([
   "known",
@@ -83,10 +50,9 @@ function plainObject(value, field) {
   return value;
 }
 
-function boundedString(
+function validString(
   value,
   field,
-  maximum,
   {
     allowControl = false,
     requireNfc = true,
@@ -94,17 +60,6 @@ function boundedString(
 ) {
   if (typeof value !== "string" || value.length === 0) {
     invalid(field, "missing or empty");
-  }
-  const bytes = Buffer.byteLength(value, "utf8");
-  if (bytes > maximum) {
-    throw lodestarError(
-      "resource_limit",
-      `${field} exceeds its byte limit.`,
-      {
-        identifiers: { field, bytes, maximum },
-        action: `Shorten ${field} and retry.`,
-      },
-    );
   }
   if (!allowControl && CONTROL.test(value)) {
     invalid(field, "not allowed to contain control characters");
@@ -136,44 +91,28 @@ function unique(values, field, key = (value) => value) {
   }
 }
 
-function boundedCanonical(value, field, maximum) {
-  const text = canonicalStringify(value);
-  const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes > maximum) {
-    throw lodestarError(
-      "resource_limit",
-      `${field} exceeds its byte limit.`,
-      {
-        identifiers: { field, bytes, maximum },
-        action: `Reduce ${field} and retry.`,
-      },
-    );
-  }
-  return text;
-}
-
 export function validateIdentifier(value, field = "id") {
-  return boundedString(value, field, LIMITS.identifierBytes);
+  return validString(value, field);
 }
 
 export function validateType(value, field = "type") {
-  return boundedString(value, field, LIMITS.typeBytes);
+  return validString(value, field);
 }
 
 export function validateName(value, field = "name") {
-  return boundedString(value, field, LIMITS.nameBytes);
+  return validString(value, field);
 }
 
 export function validateScope(value, field = "scope") {
-  return boundedString(value, field, LIMITS.scopeBytes);
+  return validString(value, field);
 }
 
 export function validateRelationship(value, field = "relationship") {
-  return boundedString(value, field, LIMITS.relationshipBytes);
+  return validString(value, field);
 }
 
 export function validateOrigin(value, field = "origin") {
-  return boundedString(value, field, LIMITS.originBytes);
+  return validString(value, field);
 }
 
 export function identifierIsValid(value) {
@@ -207,11 +146,7 @@ export function validateContent(value) {
       value: value.state ?? null,
     });
   }
-  return boundedCanonical(
-    value,
-    "content",
-    LIMITS.contentBytes,
-  );
+  return canonicalStringify(value);
 }
 
 export function validateSourceMetadata(value, field = "source.metadata") {
@@ -226,11 +161,7 @@ export function validateSourceMetadata(value, field = "source.metadata") {
       { value: metadata.inspection ?? null },
     );
   }
-  return boundedCanonical(
-    metadata,
-    field,
-    LIMITS.sourceMetadataBytes,
-  );
+  return canonicalStringify(metadata);
 }
 
 function validateAlias(value, index) {
@@ -293,23 +224,9 @@ function validateSource(value, index) {
   };
 }
 
-function boundedArray(value, field, maximum) {
+function arrayValue(value, field) {
   if (value === undefined) return [];
   if (!Array.isArray(value)) invalid(field, "not an array");
-  if (value.length > maximum) {
-    throw lodestarError(
-      "resource_limit",
-      `${field} exceeds its item limit.`,
-      {
-        identifiers: {
-          field,
-          count: value.length,
-          maximum,
-        },
-        action: `Reduce ${field} and retry.`,
-      },
-    );
-  }
   return value;
 }
 
@@ -337,20 +254,17 @@ export function validatePutInput(value) {
     && (!Number.isSafeInteger(value.priority) || value.priority < 0)) {
     invalid("priority", "not a nonnegative safe integer");
   }
-  const aliases = boundedArray(
+  const aliases = arrayValue(
     Object.hasOwn(value, "aliases") ? value.aliases : undefined,
     "aliases",
-    LIMITS.aliasesPerRecord,
   ).map(validateAlias);
-  const links = boundedArray(
+  const links = arrayValue(
     Object.hasOwn(value, "links") ? value.links : undefined,
     "links",
-    LIMITS.linksPerRecord,
   ).map(validateLink);
-  const sources = boundedArray(
+  const sources = arrayValue(
     Object.hasOwn(value, "sources") ? value.sources : undefined,
     "sources",
-    LIMITS.sourcesPerRecord,
   ).map(validateSource);
   unique(aliases, "aliases");
   unique(
@@ -373,13 +287,12 @@ export function validatePutInput(value) {
 }
 
 export function validateQuery(value) {
-  return boundedString(value, "query", LIMITS.queryBytes);
+  return validString(value, "query");
 }
 
 export function validateLimit(value, {
   field = "limit",
   fallback,
-  maximum,
 }) {
   if (value === undefined) return fallback;
   const parsed = typeof value === "number"
@@ -387,21 +300,13 @@ export function validateLimit(value, {
     : typeof value === "string" && /^[1-9]\d*$/u.test(value)
       ? Number(value)
       : Number.NaN;
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > maximum) {
-    invalid(field, `required to be an integer from 1 through ${maximum}`, {
+  // Query limits are returned as JSON numbers and used for one-row lookahead;
+  // safe integers avoid lossy pagination without imposing a product-policy maximum.
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    invalid(field, "required to be a positive safe integer", {
       value,
     });
   }
   return parsed;
 }
 
-export function truncateUtf8(value, maximum) {
-  const text = String(value);
-  if (Buffer.byteLength(text, "utf8") <= maximum) return text;
-  let result = "";
-  for (const character of text) {
-    if (Buffer.byteLength(`${result}${character}`, "utf8") > maximum) break;
-    result += character;
-  }
-  return result;
-}

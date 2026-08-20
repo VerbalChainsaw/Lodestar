@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
   claimHandoffInside, handoffArm, handoffCheckpoint, handoffDisarm, handoffNow,
-  handoffStatus, handoffTail, validateHandoff, validateHandoffTransition,
+  handoffStartupView, handoffStatus, handoffTail, validateHandoff,
+  validateHandoffTransition,
 } from "../src/continuity.mjs";
+import { CONTINUITY_SCHEMA_SQL } from "../src/continuity-schema.mjs";
 import { initializeDatabase, openWriteDatabase, transaction } from "../src/database.mjs";
 import { resolveIdentity, resolveProject } from "../src/project.mjs";
 import { putRecord } from "../src/records.mjs";
@@ -39,7 +42,7 @@ async function fixture(t) {
   return { db, database, directory, project: resolveProject(db, directory) };
 }
 
-test("continuity lanes are session-isolated and checkpoint absorbs redacted bounded tail", async (t) => {
+test("continuity lanes are session-isolated and checkpoint absorbs redacted tail", async (t) => {
   const { db, database, project } = await fixture(t);
   const source = actor("source"), other = actor("other");
   const armed = handoffArm(db, project, source, packet(), { database });
@@ -86,6 +89,72 @@ test("entry-key validation names the rejected field and accepted alphabet", () =
   const valid = packet({ entries: [{ ...packet().entries[0],
     key: "account.mutation-guard" }] });
   assert.doesNotThrow(() => validateHandoff(valid));
+});
+
+test("semantic continuity preserves complete large packets without count or text quotas", () => {
+  const long = "continuity ".repeat(8_000);
+  const rules = Array.from({ length: 64 }, (_, index) => `rule ${index} ${long}`);
+  const entries = Array.from({ length: 80 }, (_, index) => ({
+    key: `entry-${index}`, state: "fact", text: long,
+    scope: Array.from({ length: 32 }, (_, scope) => `scope-${scope}`),
+    generation: 1, provenance: { kind: "repo", sourceRef: long,
+      observedAt: "2026-08-13T12:00:00.000Z" },
+  }));
+  const evidence = Array.from({ length: 90 }, (_, index) => ({ index, detail: long }));
+  const input = packet({ goal: long, nextMove: long, rules, entries, evidence,
+    work: { current: Array.from({ length: 100 }, (_, index) => `${index}:${long}`) } });
+
+  const validated = validateHandoff(input).packet;
+  assert.deepEqual(validated, input);
+  assert.notEqual(validated, input);
+});
+
+test("tail capture and startup recovery preserve every item and full text", async (t) => {
+  const { db, database, project } = await fixture(t);
+  const source = actor("source"), claimant = actor("claimant");
+  handoffArm(db, project, source, packet(), { database });
+  const text = "tail-text-".repeat(1_000);
+  for (let index = 0; index < 20; index += 1) {
+    handoffTail(db, project, source, "assistant", `turn-${index}`, `${index}:${text}`,
+      { database });
+  }
+  const saved = handoffNow(db, project, source,
+    packet({ goal: text, nextMove: text }), { database });
+  assert.equal(saved.packet.recentTail.items.length, 20);
+  assert.equal(saved.packet.recentTail.omitted, 0);
+  assert.equal(saved.packet.recentTail.items[0].text, `0:${text}`);
+  assert.equal(saved.packet.recentTail.items[19].text, `19:${text}`);
+
+  const claim = transaction(db, () => claimHandoffInside(db, project, claimant), database);
+  assert.deepEqual(handoffStartupView(claim), {
+    recovery: claim.recovery,
+    packet: claim.packet,
+  });
+});
+
+test("continuity storage schema accepts complete long identity and content values", () => {
+  const db = new DatabaseSync(":memory:", { enableForeignKeyConstraints: true });
+  db.exec(CONTINUITY_SCHEMA_SQL);
+  const longId = "identity-".repeat(100);
+  const packetId = "packet-".repeat(100);
+  const longText = "stored continuity ".repeat(20_000);
+  const timestamp = "2026-08-13T12:00:00.000Z";
+  db.prepare("INSERT INTO continuity_lanes VALUES (?,?,?,?,?,?,?,?)").run(
+    longId, longId, longId, "armed", null, 1, timestamp, timestamp);
+  db.prepare("INSERT INTO continuity_packets VALUES (?,?,?,?,?,?,?,?,?)").run(
+    packetId, longId, null, "a".repeat(64), JSON.stringify({ longText }),
+    "b".repeat(64), longId, longId, timestamp);
+  db.prepare("INSERT INTO continuity_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    longId, null, null, longId, longId, longId, longId, "assistant", longId,
+    longText, JSON.stringify({ longText }), null, timestamp);
+  db.prepare("INSERT INTO continuity_transfers VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    longId, "c".repeat(64), longId, longId, longId, packetId, "failed", longId,
+    longId, longId, "failed", longText, timestamp, timestamp);
+  assert.equal(db.prepare("SELECT length(packet_json) AS size FROM continuity_packets")
+    .get().size > 262_144, true);
+  assert.equal(db.prepare("SELECT length(error) AS size FROM continuity_transfers")
+    .get().size > 65_536, true);
+  db.close();
 });
 
 test("now is idempotent, cannot be stolen, and only the next same-project session claims", async (t) => {
