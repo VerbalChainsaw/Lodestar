@@ -71,3 +71,20 @@ test("parseLegacyNotes maps the historical line form to NOTE markers", () => {
   assert.deepEqual(parseLegacyNotes("ordinary prose"), []);
   assert.deepEqual(parseLegacyNotes("LODESTAR NOTE: same\nLODESTAR NOTE: same").length, 2);
 });
+
+test("brackets and escaped quotes inside quoted values round-trip exactly", () => {
+  // A ] inside a quoted value must not terminate the marker or truncate the value.
+  const fields = { key: "k", value: "a]b", status: "ACCEPTED", date: "2026-08-20" };
+  const formatted = formatMarker("DECISION", fields);
+  const [parsed] = parseMarkers(formatted);
+  assert.equal(parsed.value, "a]b");
+  assert.deepEqual(parseMarkers('[NOTE text="fix the ] bracket"]'),
+    [{ kind: "NOTE", text: "fix the ] bracket" }]);
+  assert.deepEqual(parseMarkers('[NOTE text="has \\"quote\\" inside]"]'),
+    [{ kind: "NOTE", text: 'has "quote" inside]' }]);
+  assert.deepEqual(
+    parseMarkers('[NOTE text="one]two"] then [DEAD key=x value="y]z" date=2026-08-20 reason=q]'),
+    [{ kind: "NOTE", text: "one]two" },
+      { kind: "DEAD", key: "x", value: "y]z", date: "2026-08-20", reason: "q" }],
+  );
+});
