@@ -68,8 +68,13 @@ export function parseMarkers(text) {
       if (character === '"') { quoted = !quoted; continue; }
       if (character === "]" && !quoted) { end = index; break; }
     }
-    cursor = end < 0 ? text.length : end + 1;
-    if (end < 0) break;
+    if (end < 0) {
+      // Unterminated marker (stray quote or missing ]): skip this candidate and keep
+      // scanning so malformed input cannot suppress later markers in the message.
+      cursor = start + 1;
+      continue;
+    }
+    cursor = end + 1;
     const body = text.slice(start, end + 1);
     const kindMatch = /^\[(DECISION|DEAD|SUPERSEDED|NOTE)\s+([\s\S]*?)\s*\]$/iu.exec(body);
     if (!kindMatch) continue;

@@ -88,3 +88,12 @@ test("brackets and escaped quotes inside quoted values round-trip exactly", () =
       { kind: "DEAD", key: "x", value: "y]z", date: "2026-08-20", reason: "q" }],
   );
 });
+
+test("malformed markers cannot suppress later markers", () => {
+  // A stray quote or missing ] in one candidate must not disable capture of the rest.
+  assert.deepEqual(parseMarkers('[NOTE text="oops then [DECISION key=k value=v]'),
+    [{ kind: "DECISION", key: "k", value: "v" }]);
+  assert.deepEqual(parseMarkers("[NOTE text=never closes"), []);
+  assert.deepEqual(parseMarkers("junk [DECISION key=k value=v] trailing"),
+    [{ kind: "DECISION", key: "k", value: "v" }]);
+});
