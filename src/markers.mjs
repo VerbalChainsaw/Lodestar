@@ -52,19 +52,37 @@ export function formatMarker(kind, fields) {
 export function parseMarkers(text) {
   if (typeof text !== "string") return [];
   const markers = [];
-  for (const match of String(text).matchAll(BRACKET)) {
-    const kind = match[1].toUpperCase();
+  // Scan brackets while respecting double-quoted spans and backslash escapes, so a
+  // "]" inside a quoted value does not terminate the marker (and truncate a value).
+  let cursor = 0;
+  while (cursor < text.length) {
+    const start = text.indexOf("[", cursor);
+    if (start < 0) break;
+    let end = -1;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start + 1; index < text.length; index += 1) {
+      const character = text[index];
+      if (escaped) { escaped = false; continue; }
+      if (character === "\\" && quoted) { escaped = true; continue; }
+      if (character === '"') { quoted = !quoted; continue; }
+      if (character === "]" && !quoted) { end = index; break; }
+    }
+    cursor = end < 0 ? text.length : end + 1;
+    if (end < 0) break;
+    const body = text.slice(start, end + 1);
+    const kindMatch = /^\[(DECISION|DEAD|SUPERSEDED|NOTE)\s+([\s\S]*?)\s*\]$/iu.exec(body);
+    if (!kindMatch) continue;
+    const kind = kindMatch[1].toUpperCase();
     const attrs = {};
-    for (const attr of String(match[2]).matchAll(ATTR)) {
+    for (const attr of String(kindMatch[2]).matchAll(ATTR)) {
       const name = attr[1].toLowerCase();
       const value = attr[2] !== undefined
         ? attr[2].replace(/\\(["\\])/gu, "$1")
         : attr[3];
       if (attrs[name] === undefined) attrs[name] = value;
     }
-    if (["DECISION", "DEAD", "SUPERSEDED"].includes(kind) && attrs.key === undefined) {
-      continue;
-    }
+    if (["DECISION", "DEAD", "SUPERSEDED"].includes(kind) && attrs.key === undefined) continue;
     if (kind === "NOTE" && attrs.text === undefined) continue;
     // status parses case-insensitively to lowercase; display renders it uppercase.
     if (attrs.status !== undefined) attrs.status = attrs.status.toLowerCase();
@@ -72,7 +90,6 @@ export function parseMarkers(text) {
   }
   return markers;
 }
-
 // Historical capture form: "LODESTAR NOTE: <text>" lines map to NOTE markers.
 export function parseLegacyNotes(text) {
   if (typeof text !== "string") return [];
