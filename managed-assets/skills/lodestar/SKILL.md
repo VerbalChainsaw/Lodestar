@@ -13,7 +13,7 @@ work-presence, handoff, or decision ceremony.
 ## Route by capability
 
 - `lodestar start --cwd <path>` returns complete startup context by default; an explicit budget targets optional context only.
-- `lodestar put|get|find|links|delete|import|export` manages scoped knowledge.
+- `lodestar put|get|find|links|delete|export` manages scoped knowledge.
 - `lodestar work status|start|done|history|expire` manages advisory work presence.
 - `lodestar handoff arm|status|checkpoint|now|disarm` manages session continuity.
 - `lodestar decision set|drop|show|inject` manages current and superseded decisions.

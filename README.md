@@ -198,7 +198,6 @@ lodestar start --startup-budget 65536
 | `pending list\|add\|promote\|drop` | Queue captured candidates outside startup. |
 | `doctor` | Diagnose schema, integrity, foreign keys, and stored semantics. |
 | `export` | Emit a deterministic registry export. |
-| `import` | Import supported historical state into the one registry. |
 | `delete` | Delete one record and dependent rows transactionally. |
 | `init` | Explicitly initialize an empty registry; normally unnecessary. |
 
@@ -240,7 +239,7 @@ no claimable handoff, its database bytes do not change.
 
 One registry, owned by Windows, reached from WSL through a one-shot shim that
 invokes the Windows runtime. WSL never opens the SQLite file with a second
-engine. `--cwd`, `--db`, `--file`, and import paths accept Windows, MSYS, Cygwin,
+engine. `--cwd`, `--db`, and `--file` accept Windows, MSYS, Cygwin,
 WSL, and UNC forms and resolve to the same project identity.
 
 ## Storage and migration

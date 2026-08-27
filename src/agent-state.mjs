@@ -230,14 +230,6 @@ export async function dispatch(command, parsed, database, io) {
     return operationResult({ ...(await initializeDatabase(database)),
       bootstrap: AGENT_BOOTSTRAP });
   }
-  if (command === "import") {
-    const sourcePath = resolveInputPath(positionals[0]);
-    const unified = sourcePath.toLowerCase().endsWith(".json");
-    const module = await import(unified ? "./legacy-v070/unified.mjs" : "./import-v070.mjs");
-    const importer = unified ? module.importUnified : module.importV070;
-    return operationResult(await importer({ sourcePath, database,
-      dryRun: options["--dry-run"] === true }));
-  }
   if (command === "start") {
     return withDatabase(openOrInitializeWriteDatabase, database, (db) => {
       const actor = identity(options);

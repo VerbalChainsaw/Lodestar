@@ -196,7 +196,6 @@ test("every public command help path is JSON and side-effect free", async (t) =>
     "links",
     "delete",
     "doctor",
-    "import",
     "export",
     "start",
     "work",

@@ -56,13 +56,6 @@ export const COMMANDS = Object.freeze({
     booleans: [],
     positionals: 0,
   },
-  import: {
-    usage: "lodestar import <source-or-manifest.json> [--dry-run] [--db <path>]",
-    summary: "Import supported historical state into the one Lodestar registry.",
-    values: [],
-    booleans: ["--dry-run"],
-    positionals: 1,
-  },
   export: {
     usage: "lodestar export [--db <path>]",
     summary: "Export the registry as canonical JSON.",

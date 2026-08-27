@@ -115,7 +115,7 @@ sources.
   `--startup-budget` as a target for whole optional records. Required governance,
   decision state, and eligible handoff content remain complete even when they exceed
   that target.
-- `put`, import, CLI arguments, and command output are not clipped by Lodestar.
+- `put`, CLI arguments, and command output are not clipped by Lodestar.
   Actual filesystem, memory, shell, and host transport limits remain external
   boundaries and surface as their own errors.
 - `find`, `links`, work history, and pending lists return all matching rows unless
@@ -137,9 +137,3 @@ sources.
   retired byte ceilings while preserving all rows and metadata. A database
   mislabeled v4 but still carrying the capped v3 DDL is detected and rebuilt.
 - Unknown schema versions fail closed.
-- The v0.7 generation-store importer remains one-way and never mutates its
-  source.
-- A version-1 migration manifest may also import work SQLite, decision JSONL,
-  continuity JSON, and another current Lodestar SQLite source. It backs up the
-  destination, fingerprints every source, verifies imports, and records source
-  identity so a repeat does not duplicate state.
