@@ -14,6 +14,7 @@ import {
   validateIdentifier,
   validateLimit,
   validateName,
+  validateOffset,
   validateOrigin,
   validateQuery,
   validateRelationship,
@@ -109,10 +110,17 @@ export function findRecords(
     scope,
     type,
     limit,
+    offset = 0,
   } = {},
 ) {
   const query = validateQuery(queryValue);
   const selectedLimit = limit === undefined ? null : validateLimit(limit, {});
+  const selectedOffset = offset === undefined ? 0 : validateOffset(offset, {});
+  if (selectedLimit === null && selectedOffset !== 0) {
+    throw lodestarError("invalid_input",
+      "Find offset requires an explicit --limit page size.",
+      { action: "Retry with --limit set, or drop --offset for an unbounded search." });
+  }
   const clauses = [String.raw`
     (
       instr(lower(r.id), lower($query)) > 0
@@ -177,12 +185,14 @@ export function findRecords(
     FROM records r
     WHERE ${clauses.join(" AND ")}
     ORDER BY rank, r.id COLLATE BINARY
-    ${selectedLimit === null ? "" : "LIMIT $limit + 1"}
-  `).all(selectedLimit === null ? parameters : { ...parameters, $limit: selectedLimit });
+    ${selectedLimit === null ? "" : "LIMIT $limit + 1 OFFSET $offset"}
+  `).all(selectedLimit === null
+    ? parameters
+    : { ...parameters, $limit: selectedLimit, $offset: selectedOffset });
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
   return { query, scope: scope ?? null, type: type ?? null, limit: selectedLimit,
-    truncated, records: summariesForRows(db, selected) };
+    offset: selectedOffset, truncated, records: summariesForRows(db, selected) };
 }
 
 export function linkedRecords(
