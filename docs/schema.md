@@ -111,10 +111,9 @@ JSON envelopes, and exact UTC timestamp checks. It does not impose product-polic
 byte or collection ceilings on valid records, source metadata, aliases, links, or
 sources.
 
-- `start` returns all optional context by default. A caller may provide a positive
-  `--startup-budget` as a target for whole optional records. Required governance,
-  decision state, and eligible handoff content remain complete even when they exceed
-  that target.
+- `start` returns every optional record, and required governance, decision state,
+  and eligible handoff content remain complete. There is no startup-budget policy
+  and no truncation surface.
 - `put`, CLI arguments, and command output are not clipped by Lodestar.
   Actual filesystem, memory, shell, and host transport limits remain external
   boundaries and surface as their own errors.

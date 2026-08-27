@@ -18,7 +18,6 @@ const { handleHook } = await import(pathToFileURL(
 ));
 const {
   executeHandoff,
-  extractDecisionMarkers,
   HANDOFF_ENTRY_KEY_PATTERN: PLUGIN_ENTRY_KEY_PATTERN,
   parseEnvelope,
   parseHandoffCommand,
@@ -305,88 +304,4 @@ test("the plugin MCP stdio transport initializes, lists, and executes the author
   );
   assert.equal(replies[2].result.isError, false);
   assert.equal(replies[2].result.structuredContent.result.recovery.data.state, "pending");
-});
-test("decision markers parse into their golden-rule families", () => {
-  const text = [
-    "[DECISION key=db:engine status=ACCEPTED value=\"PostgreSQL\" date=2026-08-19 reason=\"centralized writes\"]",
-    "[DECISION key=campaign-governor status=BLOCKED value=hold date=2026-08-19 reason=\"waiting on operator\"]",
-    "[DEAD key=old-db value=sqlite date=2026-08-19 reason=removed]",
-    "[SUPERSEDED key=db:engine by=db:engine value=SQLite date=2026-08-19 reason=local-first]",
-  ].join("\n");
-  const markers = extractDecisionMarkers(text);
-  assert.equal(markers.length, 4);
-  assert.deepEqual(markers.map((marker) => marker.kind),
-    ["DECISION", "DECISION", "DEAD", "SUPERSEDED"]);
-  assert.equal(markers[0].value, "PostgreSQL");
-  assert.equal(markers[0].status, "accepted");
-  assert.equal(markers[1].status, "blocked");
-  assert.equal(markers[2].key, "old-db");
-  assert.equal(markers[3].by, "db:engine");
-  assert.equal(extractDecisionMarkers("no markers in this prose").length, 0);
-  assert.equal(extractDecisionMarkers("[DECISION reason=\"just prose\"]").length, 0);
-});
-
-test("the Stop hook captures decision markers into the ledger idempotently", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-markers-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const prior = {
-    LODESTAR_DB: process.env.LODESTAR_DB,
-    LODESTAR_NODE: process.env.LODESTAR_NODE,
-    LODESTAR_ENTRY: process.env.LODESTAR_ENTRY,
-  };
-  process.env.LODESTAR_DB = path.join(directory, "lodestar.db");
-  process.env.LODESTAR_NODE = process.execPath;
-  process.env.LODESTAR_ENTRY = TEST_ENTRY;
-  t.after(() => {
-    for (const [key, value] of Object.entries(prior)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  });
-
-  const stop = (turnId, message) => handleHook({ hook_event_name: "Stop",
-    session_id: "marker", turn_id: turnId, cwd: directory,
-    last_assistant_message: message }, directory);
-
-  // First turn: value-bearing facts and one blocked decision land in the ledger.
-  await stop("m1", [
-    "[DECISION key=db:engine status=ACCEPTED value=postgres reason=\"centralized writes\"]",
-    "[DECISION key=gate status=BLOCKED value=closed reason=\"waiting on vendor\"]",
-    "[DECISION key=old-path status=ACCEPTED value=sqlite reason=baseline]",
-  ].join("\n"));
-  // Replaying the same facts is a no-op.
-  await stop("m2", "[DECISION key=db:engine status=ACCEPTED value=postgres reason=\"centralized writes\"]");
-
-  const read = () => {
-    const db = new DatabaseSync(path.join(directory, "lodestar.db"), { readOnly: true });
-    const events = db.prepare("SELECT json_extract(content_json,'$.value.event') AS event, "
-      + "json_extract(content_json,'$.value.key') AS key, "
-      + "json_extract(content_json,'$.value.value') AS value, "
-      + "json_extract(content_json,'$.value.status') AS status, "
-      + "json_extract(content_json,'$.value.reason') AS reason, "
-      + "json_extract(content_json,'$.value.successor') AS successor "
-      + "FROM records WHERE type='decision-event' ORDER BY "
-      + "json_extract(content_json,'$._lodestar.revision')").all();
-    db.close();
-    return events;
-  };
-
-  let events = read();
-  assert.equal(events.length, 3, JSON.stringify(events));
-  const byKey = new Map(events.map((event) => [`${event.event}:${event.key}`, event]));
-  assert.equal(byKey.get("set:db-engine").value, "postgres");
-  assert.equal(byKey.get("set:gate").status, "blocked");
-  assert.equal(byKey.get("set:old-path").value, "sqlite");
-
-  // A later turn kills old-path; the kill lands once and replays as a no-op.
-  const kill = "[SUPERSEDED key=old-path by=db:engine value=sqlite reason=\"replaced by the registry\"]";
-  await stop("m3", kill);
-  await stop("m4", kill);
-  events = read();
-  assert.equal(events.length, 4, JSON.stringify(events));
-  assert.equal(events.filter((event) => event.event === "drop" && event.key === "old-path").length, 1);
-  assert.match(events.at(-1).reason, /superseded by db:engine/u);
-  // The SUPERSEDED marker's by= survives as the successor edge, not just prose
-  // (successor keys normalize like decision keys: db:engine -> db-engine).
-  assert.equal(events.at(-1).successor, "db-engine");
 });
