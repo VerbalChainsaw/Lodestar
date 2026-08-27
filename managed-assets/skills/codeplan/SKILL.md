@@ -11,9 +11,9 @@ description: >
   silently changing design. Emits compact IN, PLAN-OUT, and EXEC-OUT status
   lines for an auditable decision trace without forcing ceremony onto trivial
   work.
-version: 2.1.0
-platforms: [linux, macos, windows]
 metadata:
+  version: 2.1.0
+  platforms: [linux, macos, windows]
   methodology: "evidence-gated-mechanism-selection"
   tags: [variant-analysis, implementation-planning, evidence-gated, baseline-guard, divergence-audit, uncertainty-control, self-correction, regression-control]
 ---

@@ -1,12 +1,14 @@
 ---
 name: lodestar
-description: "Use Lodestar for startup context, knowledge, advisory work presence, continuity, durable decisions, read-only skill verification, and read-only agent-instruction inspection."
+description: "Explicit-only Lodestar context and continuity operations. Invoke only when the Director names Lodestar."
 ---
 
 # Lodestar
 
-Use the installed `lodestar` CLI as the single local machine-state boundary.
+When explicitly invoked, use the installed `lodestar` CLI as the single local machine-state boundary.
 Lodestar does not own external skill directories or AGENTS.md files.
+Do not invoke this skill as routine startup, lookup, implementation, testing,
+work-presence, handoff, or decision ceremony.
 
 ## Route by capability
 

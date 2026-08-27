@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.5.0 - 2026-08-27
+
 - Remove Lodestar's ownership of external skill directories and AGENTS.md files.
   `lodestar skills` is now read-only verification, and `lodestar agents` is now
   read-only status, verification, and template output.
