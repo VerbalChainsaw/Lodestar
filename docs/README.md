@@ -65,7 +65,7 @@ failed transaction leaves the recovery unclaimed.
 Exact ID or alias lookup precedes deterministic search. IDs, aliases, explicit links,
 scope, and provenance are stable and deterministic. A missing record means only
 that Lodestar lacks the knowledge; callers may then inspect the repository.
-`find` returns matching records, optionally using a caller-selected positive page size; `links` returns one explicit hop.
+`find` returns matching records, optionally using a caller-selected positive page size; `--offset` continues the page, and a truncated page reports the exact next command; `links` returns one explicit hop.
 
 ## Advisory work presence
 

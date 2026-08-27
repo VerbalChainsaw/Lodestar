@@ -172,3 +172,24 @@ test("default find omits reserved startup-snapshot cache records", () => {
   assert.deepEqual(explicit, ["startup-snapshot:probe"]);
   db.close();
 });
+
+test("find paginates with limit and offset and reports the next page", () => {
+  const db = memoryDatabase();
+  for (let index = 0; index < 5; index += 1) {
+    putRecord(db, record(`r:${index}`, { value: `shared needle ${index}` }), {});
+  }
+  const first = findRecords(db, "needle", { limit: 2, offset: 0 });
+  assert.deepEqual(first.records.map(({ id }) => id), ["r:0", "r:1"]);
+  assert.equal(first.truncated, true);
+  const second = findRecords(db, "needle", { limit: 2, offset: 2 });
+  assert.deepEqual(second.records.map(({ id }) => id), ["r:2", "r:3"]);
+  assert.equal(second.truncated, true);
+  const third = findRecords(db, "needle", { limit: 2, offset: 4 });
+  assert.deepEqual(third.records.map(({ id }) => id), ["r:4"]);
+  assert.equal(third.truncated, false);
+  assert.throws(
+    () => findRecords(db, "needle", { offset: 1 }),
+    ({ code }) => code === "invalid_input",
+  );
+  db.close();
+});

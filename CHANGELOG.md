@@ -12,6 +12,14 @@
   validate. The knowledge and inspection axes remain the full record model.
 - Default `find` omits reserved `startup-snapshot` cache records (an explicit
   `--kind startup-snapshot` still finds them).
+- `find --limit <n> --offset <m>` paginates, and a truncated page reports the
+  exact next command with the correct offset (previously `next` repeated the
+  same first page).
+- The Codex hooks fail soft: a missing or broken Lodestar runtime no longer
+  blocks session start, and a host that omits identity fields no longer blocks
+  prompt submission.
+- Remove the empty `available` stub from the startup envelope (a leftover of
+  the retired budget mechanism).
 - Remove the startup-budget mechanism entirely. `start` always returns every
   optional record; there is no `--startup-budget`, no caller target, and no
   truncation surface. `more` and `next` stay in the envelope but never fire for

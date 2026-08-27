@@ -9,7 +9,13 @@ import { resolvePluginData } from "./lodestar-mcp.mjs";
 const script = fileURLToPath(import.meta.url);
 export async function handleHook(input, dataDir) {
   if (input.hook_event_name === "UserPromptSubmit") {
-    const authorization = await authorizePrompt(input, dataDir);
+    let authorization = null;
+    try {
+      authorization = await authorizePrompt(input, dataDir);
+    } catch {
+      // Fail soft: a host that does not provide every identity field must not
+      // take the session with it. The baton is simply not granted.
+    }
     if (authorization) return { continue: true, hookSpecificOutput: {
       hookEventName: "UserPromptSubmit", additionalContext: authorization.additionalContext } };
     await recordTail(input, "user", input.prompt);
@@ -23,9 +29,20 @@ export async function handleHook(input, dataDir) {
       ...(result.allowed ? { updatedInput: result.updatedInput }
         : { permissionDecisionReason: result.reason }) } };
   }
-  if (input.hook_event_name === "SessionStart") return { continue: true,
-    hookSpecificOutput: { hookEventName: "SessionStart",
-      additionalContext: await startupContext(input) } };
+  if (input.hook_event_name === "SessionStart") {
+    let additionalContext;
+    try {
+      additionalContext = await startupContext(input);
+    } catch (error) {
+      // Fail soft like every other hook path: a missing or broken Lodestar
+      // runtime must not block the host session from starting.
+      additionalContext = "Lodestar unavailable: startup context could not be "
+        + `loaded (${error?.message ?? "unknown error"}). The session can `
+        + "continue; run `lodestar doctor` to diagnose.";
+    }
+    return { continue: true,
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } };
+  }
   if (input.hook_event_name === "Stop") {
     const message = input.last_assistant_message ?? "";
     await recordTail(input, "assistant", message);
