@@ -30,7 +30,6 @@ lodestar get
 lodestar find
 lodestar links
 lodestar delete
-lodestar import
 lodestar export
 lodestar work ...
 lodestar handoff ...
@@ -154,23 +153,11 @@ external files.
 
 ## Migration
 
-`lodestar import` accepts either a direct v0.7 knowledge store or a version-1
-JSON manifest whose sources use these kinds:
-
-```text
-knowledge-v070
-work-sqlite
-decision-jsonl
-continuity-json
-lodestar-sqlite
-```
-
-The manifest importer fingerprints sources, creates a timestamped destination
-backup, imports within one transaction, verifies source and imported identity,
-runs integrity checks, and writes deterministic migration-source records.
-Rerunning the same manifest does not duplicate records, events, lanes, packets,
-claims, or work reports. Sources remain untouched for separately authorized
-archival or deletion.
+One SQLite database with one schema and one migration path. Schema versions 1,
+2, and 3 migrate to version 4 through documented, backed-up paths; unknown
+versions fail closed. `lodestar doctor` reports schema version, integrity, and
+stored semantics. There is no legacy-store importer; migration is internal and
+automatic.
 
 ## AgentLink boundary
 

@@ -107,15 +107,12 @@ jobs:
           integrity="$(node -p "require('./.release-pack.json')[0].integrity")"
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
-          release_hero="docs/assets/lodestar-launch-hero.png"
           test -f "${package}"
-          test -f "${release_hero}"
           sha256sum "${package}" > SHA256SUMS.txt
           {
             echo "PACKAGE=${package}"
             echo "PACKAGE_INTEGRITY=${integrity}"
             echo "PACKAGE_SPEC=${name}@${version}"
-            echo "RELEASE_HERO=${release_hero}"
           } >> "${GITHUB_ENV}"
       - name: Publish exact package to npm
         shell: bash
@@ -176,7 +173,6 @@ jobs:
           release_assets=(
             "${PACKAGE}"
             SHA256SUMS.txt
-            "${RELEASE_HERO}"
           )
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" \
