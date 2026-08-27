@@ -46,8 +46,6 @@ function startProjectionInside(db, project, identity, options = {}) {
   const budget = {
     bytes: null,
     source: "unbounded",
-    applies_to: "optional",
-    target_met: true,
   };
   const data = {
     project: { id: project.id, scope: project.scope, name: project.name,
