@@ -56,7 +56,6 @@ function startProjectionInside(db, project, identity, options = {}) {
     required,
     decisions: decisionProjection(db, project),
     context: optional,
-    available: [],
     active_work: workStatus(db, project).records,
     handoff,
     pending: pendingCount(db, project),
@@ -177,12 +176,15 @@ async function dispatchRead(command, { options, positionals }, database) {
     }
     if (command === "find") {
       const result = findRecords(db, positionals[0], { scope: options["--scope"],
-        type: options["--kind"] ?? options["--type"], limit: options["--limit"] });
+        type: options["--kind"] ?? options["--type"], limit: options["--limit"],
+        offset: options["--offset"] });
       return operationResult({ query: result.query,
         records: normalizedRecordsByIds(db, result.records.map(({ id }) => id)),
       }, { revision: currentRevision(db), more: result.truncated,
         next: result.truncated
-          ? [`lodestar find "${result.query}" --limit ${result.limit}`] : [] });
+          ? [`lodestar find "${result.query}" --limit ${result.limit}`
+              + ` --offset ${result.offset + result.limit}`]
+          : [] });
     }
     if (command === "links") {
       const result = linkedRecords(db, positionals[0], { limit: options["--limit"] });
