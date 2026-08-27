@@ -2,7 +2,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  authorizePrompt, attestTool, captureMarkers, recordTail, startupContext,
+  authorizePrompt, attestTool, captureNotes, recordTail, startupContext,
 } from "./lodestar-runtime.mjs";
 import { resolvePluginData } from "./lodestar-mcp.mjs";
 
@@ -29,7 +29,7 @@ export async function handleHook(input, dataDir) {
   if (input.hook_event_name === "Stop") {
     const message = input.last_assistant_message ?? "";
     await recordTail(input, "assistant", message);
-    await captureMarkers(input, message);
+    await captureNotes(input, message);
     return { continue: true };
   }
   return { continue: true };

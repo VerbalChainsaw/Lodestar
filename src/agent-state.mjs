@@ -44,20 +44,9 @@ function startProjectionInside(db, project, identity, options = {}) {
     + "AND COALESCE(json_extract(content_json,'$.value.required'),0)!=1 ";
   const optional = db.prepare(`SELECT id ${optionalWhere}${order}`).all(project.scope)
     .map(({ id }) => normalizeRecord(getRecordById(db, id)));
-  const stub = (record) => ({
-    id: record.id,
-    kind: record.kind,
-    scope: record.scope,
-    availability: record.availability,
-    priority: record.priority,
-    revision: record.revision,
-    updated_at: record.updated_at,
-    data: { name: record.data.name },
-  });
-  const target = options.startupBudget ?? null;
   const budget = {
-    bytes: target,
-    source: target === null ? "unbounded" : "option",
+    bytes: null,
+    source: "unbounded",
     applies_to: "optional",
     target_met: true,
   };
@@ -67,32 +56,15 @@ function startProjectionInside(db, project, identity, options = {}) {
       git_common_directory: project.git_common_directory ?? null },
     required,
     decisions: decisionProjection(db, project),
-    context: [],
-    available: optional.map(stub),
+    context: optional,
+    available: [],
     active_work: workStatus(db, project).records,
     handoff,
     pending: pendingCount(db, project),
     budget,
     ...(options.snapshot ? { startup_snapshot: options.snapshot } : {}),
   };
-  if (target === null) {
-    data.context = optional;
-    data.available = [];
-  } else {
-    for (const record of optional) {
-      const candidate = data.context.concat(record);
-      const candidateData = { ...data, context: candidate,
-        available: data.available.slice(1) };
-      if (Buffer.byteLength(canonicalStringify(candidateData), "utf8") > target) break;
-      data.context = candidate;
-      data.available = candidateData.available;
-    }
-    budget.target_met = data.available.length === 0
-      && Buffer.byteLength(canonicalStringify(data), "utf8") <= target;
-  }
-  const next = [];
-  if (data.available.length > 0) next.push(`lodestar get "${data.available[0].id}"`);
-  return { data, revision: currentRevision(db), more: data.available.length > 0, next };
+  return { data, revision: currentRevision(db), more: false, next: [] };
 }
 
 export function startProjection(db, project, identity, options = {}) {
@@ -234,10 +206,7 @@ export async function dispatch(command, parsed, database, io) {
     return withDatabase(openOrInitializeWriteDatabase, database, (db) => {
       const actor = identity(options);
       const project = resolveProject(db, cwd(options));
-      const startupBudget = options["--startup-budget"] === undefined
-        ? null
-        : validateLimit(options["--startup-budget"], { field: "startup-budget" });
-      return startSnapshotProjection(db, project, actor, { database, startupBudget });
+      return startSnapshotProjection(db, project, actor, { database });
     });
   }
   if (command === "put") {

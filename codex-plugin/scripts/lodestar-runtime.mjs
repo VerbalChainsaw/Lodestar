@@ -384,84 +384,39 @@ export async function recordTail(input, role, text, options = {}) {
 
 // Capture is opt-in per marker rather than inferred from the turn. A marker is
 // deterministic: it never fires on an ordinary message, needs no extra model call,
-// and cannot fill the queue with near-misses. One capture mechanism serves every
-// kind from the one grammar (src/markers.mjs): NOTE markers quarantine as pending
-// candidates; value-bearing DECISION markers create or replace a fact; bare status
-// markers update an existing fact (and quarantine as candidates when the key is
-// unknown); DEAD and SUPERSEDED markers drop it. Every operation is idempotent, so
-// a repeated or replayed turn cannot duplicate ledger events, and a hook must
-// never fail a session over an optional capture.
+// and cannot fill the queue with near-misses. NOTE markers quarantine as pending
+// candidates. Decision markers are NOT captured: the ledger changes only through
+// explicit `lodestar decision` commands, never from parsing a final message.
 export function extractNotes(text) {
   if (typeof text !== "string") return [];
   const seen = new Set();
   for (const marker of [...parseMarkers(text), ...parseLegacyNotes(text)]) {
+    if (marker.kind !== "NOTE") continue;
     const note = String(marker.text ?? "").replace(/\s+/gu, " ").trim();
     if (note) seen.add(note);
   }
   return [...seen];
 }
 
-export async function captureMarkers(input, text, options = {}) {
-  const markers = [...parseMarkers(text), ...parseLegacyNotes(text)];
-  if (!markers.length) return { captured: 0, markers: 0, notes: 0 };
+export async function captureNotes(input, text, options = {}) {
+  const notes = extractNotes(text);
+  if (!notes.length) return { captured: 0, notes: 0 };
   for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
   const identity = ["--cwd", input.cwd, "--session", input.session_id,
     "--agent", "codex", "--harness", "codex"];
-  // Captured markers are agent-issued: their kills reopen by evidence, so a
-  // Director-issued kill can never be weakened by a hook capture.
-  const agent = ["--authority", "agent"];
-  let captured = 0, notes = 0;
-  for (const marker of markers) {
+  let captured = 0;
+  for (const note of notes) {
     try {
-      const redacted = redact({ key: marker.key, value: marker.value, by: marker.by,
-        reason: marker.reason, text: marker.text }).value;
-      const reason = [redacted.by ? `superseded by ${redacted.by}` : null,
-        redacted.reason].filter(Boolean).join("; ");
-      if (marker.kind === "NOTE") {
-        const note = String(redacted.text ?? "").replace(/\s+/gu, " ").trim();
-        if (!note) continue;
-        await runLodestar(["pending", "add", note, "--source", "hook",
-          ...identity], "", options);
-        notes += 1;
-      } else if (marker.kind === "DECISION") {
-        if (redacted.value !== undefined && redacted.value !== null
-            && redacted.value !== "") {
-          await runLodestar(["decision", "set", redacted.key, redacted.value,
-            ...agent,
-            ...(marker.status === "blocked" ? ["--status", "blocked"] : []),
-            ...(reason ? ["--reason", reason] : []), ...identity], "", options);
-        } else {
-          const prior = await runLodestar(["decision", "status", redacted.key,
-            marker.status === "blocked" ? "blocked" : "accepted",
-            ...(reason ? ["--reason", reason] : []), ...identity], "", options);
-          if (prior?.data?.current === null) {
-            await runLodestar(["pending", "add",
-              `[DECISION key=${redacted.key} status=${marker.status ?? "accepted"}`
-                + `${redacted.reason ? ` reason="${redacted.reason}"` : ""}]`,
-              "--source", "hook", ...identity], "", options);
-          }
-        }
-      } else {
-        // A SUPERSEDED kill names its successor key so the ledger can render the
-        // by= edge instead of degrading to a plain DEAD.
-        const successor = marker.kind === "SUPERSEDED" && redacted.by
-          ? ["--successor", redacted.by] : [];
-        await runLodestar(["decision", "drop", redacted.key,
-          ...agent, ...successor,
-          ...(reason ? ["--reason", reason] : []), ...identity], "", options);
-      }
+      await runLodestar(["pending", "add", note, "--source", "hook",
+        ...identity], "", options);
       captured += 1;
     } catch {
       // A hook must never fail a session over an optional capture.
     }
   }
-  return { captured, markers: markers.length, notes };
+  return { captured, notes: notes.length };
 }
 
-export function extractDecisionMarkers(text) {
-  return parseMarkers(text).filter((marker) =>
-    marker.kind === "DECISION" || marker.kind === "DEAD" || marker.kind === "SUPERSEDED");
-}
 export async function startupContext(input, options = {}) {
   for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
   const envelope = await runLodestar(["start", "--cwd", input.cwd,

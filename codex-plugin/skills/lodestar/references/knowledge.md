@@ -17,6 +17,5 @@ content narrow and sourced. Do not store secrets, credentials, raw logs,
 transient progress, or speculative claims. Use export through the CLI;
 never edit the database directly.
 
-Startup returns every optional record by default. An explicit caller target may
-omit whole optional records behind stable IDs; required governance, decisions, and
-handoff state remain complete.
+Startup returns every optional record. Required governance, decisions, and
+handoff state are always complete; there is no caller target that omits records.
