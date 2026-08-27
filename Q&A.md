@@ -33,8 +33,9 @@ Non-sandboxed sessions retain Full Control. Intentional machine boundary
 ## Prune changes shipped this session (working tree, uncommitted)
 
 - Retired skills install/sync/remove and agents apply/remove -> read-only verify/template.
-- Removed startup-budget policy: unbounded default; env + config-record sources gone;
-  only explicit per-call `--startup-budget` targets optional projection.
+- Removed the startup-budget mechanism entirely: `start` always returns every
+  optional record; no `--startup-budget` flag, no caller target, no truncation
+  surface. (Supersedes the earlier unbounded-default decision.)
 - Removed hardcoded byte/item ceilings from schema v4, validation, doctor; legacy DDL
   keeps old caps only for migration identification.
 - Removed dead code: `jsonBytes`, `truncateUtf8`, bounded-input readers

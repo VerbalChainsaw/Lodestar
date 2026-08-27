@@ -12,7 +12,7 @@ work-presence, handoff, or decision ceremony.
 
 ## Route by capability
 
-- `lodestar start --cwd <path>` returns complete startup context by default; an explicit budget targets optional context only.
+- `lodestar start --cwd <path>` returns complete startup context; startup never truncates.
 - `lodestar put|get|find|links|delete|export` manages scoped knowledge.
 - `lodestar work status|start|done|history|expire` manages advisory work presence.
 - `lodestar handoff arm|status|checkpoint|now|disarm` manages session continuity.
@@ -64,5 +64,5 @@ Project and global agent files remain wholly owned by the user and their native 
 Write a `[NOTE text="what's worth keeping"]` marker in the final message and the Stop
 hook captures it as a candidate (the historical `LODESTAR NOTE: <text>` line is still
 accepted). Candidates sit in a quarantine scope that startup never reads, so
-capturing costs the startup budget nothing. Review with `lodestar pending`, then
+capture adds nothing to startup context. Review with `lodestar pending`, then
 `promote` what is durable and `drop` the rest. Promotion never marks a record required.

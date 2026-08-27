@@ -165,21 +165,12 @@ Promotion never marks a record required. `lodestar doctor` checks the schema, SQ
 integrity, foreign keys, and stored-record semantics; it does not own startup sizing
 policy.
 
-## The startup budget
+## Complete startup
 
-Without a caller target, `start` returns all optional context. Required governance,
-decisions, and eligible handoff content are always complete and atomic.
-
-An explicit `--startup-budget <positive-safe-integer>` is an optional-context projection
-target for that one call; it is not a default or a core policy. Lodestar includes whole
-optional records in deterministic priority order, then lists the remaining records as
-stable-ID stubs in `data.available`. `more`, `next`, and `data.budget` make that result
-transparent. Required material remains complete even when it exceeds the target, in
-which case `data.budget.target_met` is `false`.
-
-```text
-lodestar start --startup-budget 65536
-```
+`start` returns all optional context. Required governance, decisions, and eligible
+handoff content are always complete and atomic. There is no startup budget and no
+truncation surface: the envelope either fits or the caller retrieves by exact ID,
+and Lodestar never silently sheds a record it was asked to return.
 
 ## Commands
 
