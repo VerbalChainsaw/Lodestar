@@ -196,14 +196,19 @@ function validateSource(value, index) {
     new Set(["origin", "freshness", "metadata"]),
     `sources[${index}]`,
   );
-  for (const field of ["origin", "freshness", "metadata"]) {
+  for (const field of ["origin", "freshness"]) {
     if (!Object.hasOwn(value, field)) {
       invalid(`sources[${index}].${field}`, "missing or empty");
     }
   }
-  const metadata = value.metadata;
+  const metadata = Object.hasOwn(value, "metadata") ? value.metadata : {};
+  // Stored metadata always carries an inspection state (the schema enforces it);
+  // a source that omits it has not been inspected, so default rather than reject.
+  const storedMetadata = Object.hasOwn(metadata, "inspection")
+    ? metadata
+    : { ...metadata, inspection: "not_inspected" };
   const metadataJson = validateSourceMetadata(
-    metadata,
+    storedMetadata,
     `sources[${index}].metadata`,
   );
   if (!FRESHNESS_STATES.includes(value.freshness)) {
@@ -219,7 +224,7 @@ function validateSource(value, index) {
       `sources[${index}].origin`,
     ),
     freshness: value.freshness,
-    metadata,
+    metadata: storedMetadata,
     metadata_json: metadataJson,
   };
 }
