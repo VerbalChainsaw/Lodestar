@@ -302,6 +302,27 @@ test("put accepts the normalized Lodestar record shape", async (t) => {
   assert.equal(JSON.parse(get.stdout).data.data.text, "round trip");
 });
 
+test("put defaults the knowledge state and source inspection instead of rejecting", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  const minimal = {
+    id: "record:minimal",
+    type: "note",
+    name: "Minimal",
+    scope: "global",
+    content: { value: { text: "no state, no arrays, bare source" } },
+    sources: [{ origin: "probe", freshness: "current" }],
+  };
+  const put = await invoke(["put", "--db", file], JSON.stringify(minimal));
+  assert.equal(put.exitCode, 0, put.stderr);
+  const get = await invoke(["get", "record:minimal", "--db", file]);
+  const data = JSON.parse(get.stdout).data;
+  assert.equal(data.availability, "known");
+  assert.equal(data.data.text, "no state, no arrays, bare source");
+  assert.deepEqual(data.sources, [{ origin: "probe", freshness: "current",
+    metadata: { inspection: "not_inspected" } }]);
+});
+
 test("the public links and delete commands operate through JSON", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");

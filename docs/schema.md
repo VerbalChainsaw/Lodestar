@@ -84,9 +84,11 @@ Resolution checks an exact ID before an exact alias. Links are directed and
 require both endpoint records to exist before commit.
 
 `content.state` is one of `known`, `known_empty`, `unavailable`, `unknown`,
-or `stale`. A missing record is not a knowledge-state claim. Source freshness
-is independently `current`, `stale`, or `unknown`; source inspection is
-`inspected`, `not_inspected`, `inspected_no_value`, or `unknown`.
+or `stale`. A missing record is not a knowledge-state claim. Writes that omit
+`content.state` store `known`; a source that omits `metadata` (or
+`metadata.inspection`) stores `inspection: "not_inspected"`; explicit values
+still validate. Source freshness is independently `current`, `stale`, or
+`unknown`.
 
 ## Agent-state kinds
 

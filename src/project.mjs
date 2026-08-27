@@ -7,9 +7,11 @@ import { lodestarError } from "./errors.mjs";
 import { translateWindowsDialectPath } from "./paths.mjs";
 import {
   contentData,
-  getRecordById,
   normalizeRecord,
+  normalizedRecordsByIds,
   parseStoredContent,
+  RECORD_BATCH,
+  recordsByRows,
 } from "./records.mjs";
 
 export const hash = (value, length = 20) => createHash("sha256")
@@ -160,7 +162,11 @@ export const recordInput = (id, type, name, projectScope, priority, data) => ({
   sources: [],
 });
 
-export const normalizedRows = (db, sql, ...values) => db
-  .prepare(sql)
-  .all(...values)
-  .map(({ id }) => normalizeRecord(getRecordById(db, id)));
+export const normalizedRows = (db, sql, ...values) => {
+  const rows = db.prepare(sql).all(...values);
+  if (rows.length === 0) return [];
+  if (Object.hasOwn(rows[0], "content_json")) {
+    return recordsByRows(db, rows).map((record) => normalizeRecord(record));
+  }
+  return normalizedRecordsByIds(db, rows.map(({ id }) => id));
+};
