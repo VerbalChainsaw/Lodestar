@@ -35,7 +35,7 @@ they do not defend against malicious file replacement, faulty storage, or
 loss. New targets are reserved with no-replace file creation and restrictive
 POSIX permissions before SQLite initialization. Published reservations are
 never removed as failure cleanup because another process may have completed
-the visible path; zero-byte reservations are resumable. Valid records, imports, startup state, CLI arguments, and successful command
+the visible path; zero-byte reservations are resumable. Valid records, startup state, CLI arguments, and successful command
 results are not clipped by Lodestar. Hostile thrown values are copied into error
 envelopes through a deliberately bounded traversal so error reporting itself
 cannot exhaust memory or recurse forever. `lodestar doctor` detects supported
@@ -43,12 +43,4 @@ schema, referential, complete stored-semantic, and SQLite integrity problems but
 does not repair them. If SQLite cannot confirm a transaction's commit outcome,
 Lodestar reports `database_commit_outcome_unknown` and preserves a newly
 initialized database for read-only diagnosis instead of deleting evidence.
-
-The legacy importer opens source files read-only, rejects symlinks in accepted
-paths, confines reads to the selected store, verifies a present integrity
-manifest, fingerprints accepted inputs, and rejects a destination inside the
-source tree. An existing destination with more than one hard link is also
-rejected so it cannot alias a source file through another path. The importer
-rolls back when transaction state proves a pre-commit failure and preserves a
-new destination when the outcome genuinely cannot be confirmed. Keep an
-independent copy of legacy data until migration has been validated, including every skipped or unsupported migration disposition.
+Keep an independent backup until changes are validated.

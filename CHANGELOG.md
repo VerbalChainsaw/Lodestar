@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Remove the retired v0.7 generation-store importer (`lodestar import`, the
+  `legacy-v070` modules, import tests, and the migration guide). The registry
+  is schema v4 with one internal migration path; there is no legacy-store
+  bridge and no import command.
+- Remove the release hero-image gate: CI no longer requires or attaches the
+  launch hero to GitHub releases. The artwork stays in `docs/assets` for the
+  README and historical release notes.
+
 ## 1.5.0 - 2026-08-27
 
 - Remove Lodestar's ownership of external skill directories and AGENTS.md files.

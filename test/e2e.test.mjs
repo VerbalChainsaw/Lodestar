@@ -15,7 +15,7 @@ import { LODESTAR_VERSION } from "../src/version.mjs";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const COMMANDS = [
   "start", "init", "put", "get", "find", "links", "delete", "doctor",
-  "import", "export", "work", "handoff", "decision", "skills",
+  "export", "work", "handoff", "decision", "skills",
 ];
 
 const digest = async (file) => createHash("sha256").update(await readFile(file)).digest("hex");
@@ -89,28 +89,6 @@ async function packedEntry(directory) {
 async function writeJson(file, value) {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${JSON.stringify(value)}\n`);
-}
-
-async function legacyStore(directory) {
-  const generation = "a".repeat(64);
-  const source = path.join(directory, "legacy");
-  const root = path.join(source, "generations", generation);
-  await writeJson(path.join(source, "current.json"), { v: 1, generation });
-  await writeJson(path.join(root, "catalog.json"), {
-    v: 1, projects: [{ id: "p:demo", name: "Demo", aliases: ["demo"], roots: ["/demo"] }],
-  });
-  await writeJson(path.join(root, "schema", "store.json"), { v: 1, record: "context-record" });
-  await mkdir(path.join(root, "records"), { recursive: true });
-  await writeFile(path.join(root, "records", "global.jsonl"), `${JSON.stringify({
-    v: 1, id: "g:rule", kind: "rule", priority: 100, scope: ["global"],
-    links: [], aliases: ["guardrail"], summary: "Inspect before changing.",
-  })}\n`);
-  await mkdir(path.join(root, "records", "projects"), { recursive: true });
-  await writeFile(path.join(root, "records", "projects", "p-demo.jsonl"), "");
-  await writeJson(path.join(root, "indexes", "locator-health.json"), {
-    v: 1, generation, locators: {},
-  });
-  return source;
 }
 
 function record(id, value, extra = {}) {
@@ -264,16 +242,6 @@ test("the packed package completes every public operation without touching live 
   ok(entry, ["delete", linked.id, "--db", database]);
   assert.equal(fails(entry, ["get", linked.id, "--db", database]).error.code,
     "record_not_found");
-
-  const importDatabase = path.join(directory, "import", "lodestar.db");
-  const legacy = await legacyStore(directory);
-  const dryRun = ok(entry, ["import", legacy, "--dry-run", "--db", importDatabase]);
-  assert.equal(dryRun.data.destination.committed, false);
-  assert.equal(await access(importDatabase).then(() => true, () => false), false);
-  assert.equal(ok(entry, ["import", legacy, "--db", importDatabase])
-    .data.destination.committed, true);
-  assert.equal(ok(entry, ["get", "guardrail", "--db", importDatabase]).data.id, "g:rule");
-  assert.equal(ok(entry, ["doctor", "--db", importDatabase]).data.healthy, true);
 
   const clientHome = path.join(directory, "clients");
   const hermesHome = path.join(clientHome, "hermes");
