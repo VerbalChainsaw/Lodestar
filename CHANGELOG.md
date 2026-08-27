@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Remove the startup-budget mechanism entirely. `start` always returns every
+  optional record; there is no `--startup-budget`, no caller target, and no
+  truncation surface. `more` and `next` stay in the envelope but never fire for
+  startup.
+- Remove the Stop hook's decision/DEAD/SUPERSEDED ledger capture: the ledger
+  changes only through explicit `lodestar decision` commands, never from parsing
+  a final message. NOTE markers still quarantine as pending candidates.
 - Remove the retired v0.7 generation-store importer (`lodestar import`, the
   `legacy-v070` modules, import tests, and the migration guide). The registry
   is schema v4 with one internal migration path; there is no legacy-store
