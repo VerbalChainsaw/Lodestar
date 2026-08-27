@@ -178,7 +178,7 @@ and Lodestar never silently sheds a record it was asked to return.
 | --- | --- |
 | `start` | Resolve one project and return complete startup state; claim a pending handoff when eligible. |
 | `get` | Retrieve one exact ID or alias. |
-| `find` | Search stored context by query, scope, and kind; `--limit` requests a page. |
+| `find` | Search stored context by query, scope, and kind; `--limit` requests a page, `--offset` continues one. |
 | `links` | Deterministic one-hop incoming and outgoing links. |
 | `put` | Insert or replace one complete record snapshot. |
 | `work status\|start\|done\|history` | Read or update advisory work records. |

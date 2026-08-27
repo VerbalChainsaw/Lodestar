@@ -315,3 +315,17 @@ export function validateLimit(value, {
   return parsed;
 }
 
+export function validateOffset(value, { field = "offset" } = {}) {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && /^(?:0|[1-9]\d*)$/u.test(value)
+      ? Number(value)
+      : Number.NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    invalid(field, "required to be a nonnegative safe integer", {
+      value,
+    });
+  }
+  return parsed;
+}
+

@@ -323,6 +323,41 @@ test("put defaults the knowledge state and source inspection instead of rejectin
     metadata: { inspection: "not_inspected" } }]);
 });
 
+test("find --offset continues to the next page and the next command carries the offset", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const file = path.join(directory, "lodestar.db");
+  const common = ["--db", file];
+  for (let index = 0; index < 3; index += 1) {
+    await invoke(["put", ...common], JSON.stringify({
+      ...inputRecord(),
+      id: `record:page${index}`,
+      name: `Page ${index}`,
+      aliases: [],
+      content: { state: "known", value: "shared page term" },
+    }));
+  }
+  const first = await invoke(
+    ["find", "shared page", "--limit", "2", ...common],
+  );
+  assert.equal(first.exitCode, 0, first.stderr);
+  assert.deepEqual(
+    JSON.parse(first.stdout).data.records.map(({ id }) => id),
+    ["record:page0", "record:page1"],
+  );
+  assert.deepEqual(
+    JSON.parse(first.stdout).next,
+    [`lodestar find "shared page" --limit 2 --offset 2`],
+  );
+  const second = await invoke(
+    ["find", "shared page", "--limit", "2", "--offset", "2", ...common],
+  );
+  assert.deepEqual(
+    JSON.parse(second.stdout).data.records.map(({ id }) => id),
+    ["record:page2"],
+  );
+  assert.equal(JSON.parse(second.stdout).more, false);
+});
+
 test("the public links and delete commands operate through JSON", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "lodestar.db");
