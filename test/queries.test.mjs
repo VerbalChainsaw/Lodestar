@@ -151,3 +151,24 @@ test("export is canonical, complete, and free of volatile export metadata", () =
   }]);
   db.close();
 });
+
+test("default find omits reserved startup-snapshot cache records", () => {
+  const db = memoryDatabase();
+  putRecord(db, record("r:real", { value: "needle in a real note" }), {});
+  putRecord(db, {
+    id: "startup-snapshot:probe",
+    type: "startup-snapshot",
+    name: "Snapshot",
+    scope: "global",
+    content: { state: "known", value: { needle: "needle in a cached projection" } },
+    aliases: [],
+    links: [],
+    sources: [],
+  }, {});
+  const records = findRecords(db, "needle").records.map(({ id }) => id);
+  assert.deepEqual(records, ["r:real"]);
+  const explicit = findRecords(db, "needle", { type: "startup-snapshot" })
+    .records.map(({ id }) => id);
+  assert.deepEqual(explicit, ["startup-snapshot:probe"]);
+  db.close();
+});
