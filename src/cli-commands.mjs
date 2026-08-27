@@ -29,9 +29,9 @@ export const COMMANDS = Object.freeze({
   },
   find: {
     usage:
-      "lodestar find <query> [--scope <scope>] [--kind <kind>] [--limit <n>]",
+      "lodestar find <query> [--scope <scope>] [--kind <kind>] [--limit <n>] [--offset <n>]",
     summary: "Search structured context.",
-    values: ["--scope", "--kind", "--type", "--limit"],
+    values: ["--scope", "--kind", "--type", "--limit", "--offset"],
     booleans: [],
     positionals: 1,
   },

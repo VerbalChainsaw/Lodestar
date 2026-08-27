@@ -305,3 +305,38 @@ test("the plugin MCP stdio transport initializes, lists, and executes the author
   assert.equal(replies[2].result.isError, false);
   assert.equal(replies[2].result.structuredContent.result.recovery.data.state, "pending");
 });
+
+test("SessionStart fails soft when the Lodestar runtime is unavailable", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-soft-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const prior = { node: process.env.LODESTAR_NODE, entry: process.env.LODESTAR_ENTRY };
+  process.env.LODESTAR_NODE = path.join(directory, "missing-node.exe");
+  process.env.LODESTAR_ENTRY = path.join(directory, "missing-entry.mjs");
+  try {
+    const response = await handleHook({
+      hook_event_name: "SessionStart",
+      session_id: "session:probe",
+      cwd: directory,
+    }, directory);
+    assert.equal(response.continue, true);
+    assert.match(
+      response.hookSpecificOutput.additionalContext,
+      /^Lodestar unavailable:/u,
+    );
+  } finally {
+    if (prior.node === undefined) delete process.env.LODESTAR_NODE;
+    else process.env.LODESTAR_NODE = prior.node;
+    if (prior.entry === undefined) delete process.env.LODESTAR_ENTRY;
+    else process.env.LODESTAR_ENTRY = prior.entry;
+  }
+});
+
+test("UserPromptSubmit fails soft when identity fields are missing", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-soft-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const response = await handleHook({
+    hook_event_name: "UserPromptSubmit",
+    prompt: "hello",
+  }, directory);
+  assert.equal(response.continue, true);
+});

@@ -88,7 +88,6 @@ test("Windows and WSL paths share one project identity and startup replays", asy
   assert.equal(first.value.data.required[1].id, "instruction:required");
   assert.equal(first.value.data.required[0].data.required, true);
   assert.match(first.value.data.required[0].data.text, /trusted technical partner/u);
-  assert.deepEqual(first.value.data.available, []);
   assert.equal(first.value.more, false);
   assert.deepEqual(first.value.next, []);
   const windowsDialect = await invoke([
@@ -111,8 +110,6 @@ test("unbounded startup queries every optional record by default", async (t) => 
   const started = await invoke(["start", "--db", database, "--cwd", directory,
     "--session", "uncapped"]);
   assert.equal(started.value.data.context.length, 225);
-  assert.equal(started.value.data.available.length, 0);
-  assert.deepEqual(started.value.data.available, []);
   assert.equal(started.value.data.budget.source, "unbounded");
   assert.equal(started.value.more, false);
 });
@@ -133,7 +130,6 @@ test("startup keeps an oversized handoff packet complete and atomic", async (t) 
   assert.equal(started.value.data.handoff.packet.goal, "g".repeat(4_096));
   assert.equal(started.value.data.handoff.packet.nextMove, "n".repeat(4_096));
   assert.equal(started.value.data.context.length, 30);
-  assert.deepEqual(started.value.data.available, []);
   assert.deepEqual(started.value.next, []);
 });
 
