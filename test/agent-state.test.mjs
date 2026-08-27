@@ -100,40 +100,6 @@ test("Windows and WSL paths share one project identity and startup replays", asy
   assert.equal(crossDialect.value.scope.cwd, windowsDialect.value.scope.cwd);
 });
 
-test("an explicit startup target never demotes oversized required context", async (t) => {
-  const { database, directory } = await fixture(t);
-  const db = await openWriteDatabase(database);
-  putRecord(db, projectRecord("instruction:oversized", "x".repeat(20_000), true));
-  db.close();
-  await invoke(["handoff", "now", "--db", database, "--cwd", directory,
-    "--session", "source"], JSON.stringify(handoffPacket()));
-
-  // `start` is the first command of every session, so refusing to run stops all work in
-  // the project — over one record someone marked required. It used to throw
-  // resource_limit here and the project was dead until a human edited the registry.
-  const started = await invoke(["start", "--db", database, "--cwd", directory,
-    "--session", "claimant", "--startup-budget", "1024"]);
-  assert.equal(started.value.ok, true);
-  assert.ok(Buffer.byteLength(started.text, "utf8") > 1024, "required content exceeds target");
-  assert.ok(started.value.data.required.some(({ id }) => id === "instruction:oversized"));
-  assert.ok(Array.isArray(started.value.data.available));
-  assert.deepEqual(started.value.data.budget,
-    { bytes: 1024, source: "option", applies_to: "optional", target_met: false });
-
-  // And because startup ran, the waiting baton was claimed as it would be on any
-  // ordinary session. The old refusal rolled that back and stranded the handoff.
-  const status = await invoke(["handoff", "status", "--db", database, "--cwd", directory,
-    "--session", "claimant"]);
-  assert.equal(status.value.data.recovery.data.state, "claimed");
-  assert.equal(status.value.data.recovery.data.claimed_by, "claimant");
-
-  const roomy = await invoke(["start", "--db", database, "--cwd", directory,
-    "--session", "roomy", "--startup-budget", "300000"]);
-  assert.equal(roomy.value.data.budget.bytes, 300000);
-  assert.equal(roomy.value.data.budget.source, "option");
-  assert.equal(roomy.value.data.budget.target_met, true);
-});
-
 test("unbounded startup queries every optional record by default", async (t) => {
   const { database, directory } = await fixture(t);
   const db = await openWriteDatabase(database);

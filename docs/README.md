@@ -51,14 +51,12 @@ deterministic order:
 1. project identity;
 2. required global and project governance;
 3. current decision facts and superseded dead values;
-4. every optional knowledge record unless the caller explicitly targets optional projection size;
+4. every optional knowledge record;
 5. advisory active-work reports; and
 6. an eligible continuity recovery, if one exists.
 
-Without a caller target, the envelope contains all optional knowledge. With an
-explicit positive `--startup-budget`, whole optional records are included in
-deterministic order and omitted records remain addressable by stable-ID stubs.
-Required governance, decisions, and handoff state are never shed or truncated.
+The envelope contains all optional knowledge. Required governance, decisions,
+and handoff state are never shed or truncated.
 Claiming a pending recovery and returning startup state are one transaction; any
 failed transaction leaves the recovery unclaimed.
 

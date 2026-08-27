@@ -35,7 +35,7 @@ async function fixture(t) {
   return { db, file, project: resolveProject(db, directory) };
 }
 
-test("a captured candidate costs the startup budget nothing", async (t) => {
+test("a captured candidate stays out of startup context", async (t) => {
   const { db, file, project } = await fixture(t);
   const before = startProjection(db, project, IDENTITY, { database: file });
   const baseline = JSON.stringify(before.data).length;
@@ -45,8 +45,8 @@ test("a captured candidate costs the startup budget nothing", async (t) => {
   }
 
   const after = startProjection(db, project, IDENTITY, { database: file });
-  // The quarantine scope is not one `start` selects, so capture can be automatic without
-  // competing for the startup budget every session must carry.
+  // The quarantine scope is not one `start` selects, so capture can be automatic
+  // without growing the startup context every session.
   assert.equal(after.data.context.length, before.data.context.length);
   assert.equal(after.data.required.length, before.data.required.length);
   assert.equal(after.data.pending, 3);
@@ -154,52 +154,6 @@ test("capture preserves text beyond the former command policy ceiling", async (t
   const text = `mechanism ${"x".repeat(5_000)}`;
   const added = pendingAdd(db, project, IDENTITY, text, { database: file, now });
   assert.equal(added.record.data.text, text);
-});
-
-test("an undersized optional target preserves required records", async (t) => {
-  const { db, file, project } = await fixture(t);
-  for (let index = 0; index < 6; index += 1) {
-    putRecord(db, {
-      id: `g:bulk${index}`, type: "rule", name: `Bulk ${index}`, scope: "global",
-      content: { state: "known", value: { required: true, text: "x".repeat(3000) } },
-    }, {});
-  }
-
-  const result = startProjection(db, project, IDENTITY,
-    { database: file, startupBudget: 16 * 1024 });
-  const envelope = Buffer.byteLength(JSON.stringify({ v: 1, ok: true, operation: "start",
-    revision: result.revision, data: result.data, more: result.more, next: result.next }), "utf8");
-  assert.ok(envelope > 16 * 1024, "required content may exceed an optional-context target");
-  assert.equal(result.data.budget.target_met, false);
-
-  const shed = new Set(result.data.available.map(({ id }) => id));
-  const carried = new Set(result.data.required.map(({ id }) => id));
-  for (let index = 0; index < 6; index += 1) {
-    const id = `g:bulk${index}`;
-    assert.equal(carried.has(id), true, `${id} remains complete`);
-    assert.equal(shed.has(id), false, `${id} is not demoted`);
-  }
-  assert.equal(result.data.required.length, 7);
-});
-
-test("an explicit budget sheds what an unbounded startup carries", async (t) => {
-  const { db, file, project } = await fixture(t);
-  for (let index = 0; index < 40; index += 1) {
-    putRecord(db, { id: `p:ctx${index}`, type: "note", name: `Note ${index}`,
-      scope: project.scope,
-      content: { state: "known", value: { text: `${index}:${"x".repeat(900)}` } } }, {});
-  }
-  const tight = startProjection(db, project, IDENTITY,
-    { database: file, startupBudget: 24 * 1024 }).data;
-  const roomy = startProjection(db, project, IDENTITY, { database: file }).data;
-
-  assert.ok(roomy.context.length > tight.context.length, "a bigger budget carries more");
-  assert.deepEqual(roomy.available, []);
-  assert.equal(tight.budget.target_met, false,
-    "whole optional-record stubs may themselves exceed a caller target");
-  assert.deepEqual(roomy.budget, {
-    bytes: null, source: "unbounded", applies_to: "optional", target_met: true,
-  });
 });
 
 test("only an explicit marker line is captured from a turn", () => {
