@@ -190,7 +190,7 @@ test("the Lodestar plugin runs all five commands, redacts, and restores one reco
     STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length,
   ));
   assert.deepEqual(projection.budget,
-    { bytes: null, source: "unbounded", applies_to: "optional", target_met: true });
+    { bytes: null, source: "unbounded" });
   const governance = projection.required.find(({ id }) =>
     id === "g:lodestar:required-governance");
   assert.equal(governance.data.v, 3);
