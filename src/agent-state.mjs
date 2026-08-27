@@ -19,8 +19,8 @@ import { pendingAdd, pendingCount, pendingDrop, pendingList,
 import { hash, normalizedRows, recordInput, resolveIdentity, resolveProject,
   scope } from "./project.mjs";
 import { exportRegistry, findRecords, linkedRecords } from "./queries.mjs";
-import { coercePutRecord, deleteRecord, getRecord, getRecordById, normalizeRecord,
-  putRecord, writeRecordSnapshot } from "./records.mjs";
+import { coercePutRecord, deleteRecord, getRecord, normalizeRecord,
+  normalizedRecordsByIds, putRecord, writeRecordSnapshot } from "./records.mjs";
 import { allocateRevision, currentRevision } from "./revisions.mjs";
 import { validateLimit, validatePutInput } from "./validate.mjs";
 import { workDone, workExpire, workStart, workStatus } from "./work.mjs";
@@ -42,8 +42,7 @@ function startProjectionInside(db, project, identity, options = {}) {
     + "AND type NOT IN ('work','handoff','project','decision-event','config','startup-snapshot') "
     + "AND type NOT LIKE 'handoff-%' "
     + "AND COALESCE(json_extract(content_json,'$.value.required'),0)!=1 ";
-  const optional = db.prepare(`SELECT id ${optionalWhere}${order}`).all(project.scope)
-    .map(({ id }) => normalizeRecord(getRecordById(db, id)));
+  const optional = normalizedRows(db, `SELECT id ${optionalWhere}${order}`, project.scope);
   const budget = {
     bytes: null,
     source: "unbounded",
@@ -180,15 +179,16 @@ async function dispatchRead(command, { options, positionals }, database) {
       const result = findRecords(db, positionals[0], { scope: options["--scope"],
         type: options["--kind"] ?? options["--type"], limit: options["--limit"] });
       return operationResult({ query: result.query,
-        records: result.records.map(({ id }) => normalizeRecord(getRecordById(db, id))),
+        records: normalizedRecordsByIds(db, result.records.map(({ id }) => id)),
       }, { revision: currentRevision(db), more: result.truncated,
         next: result.truncated
           ? [`lodestar find "${result.query}" --limit ${result.limit}`] : [] });
     }
     if (command === "links") {
       const result = linkedRecords(db, positionals[0], { limit: options["--limit"] });
-      result.links = result.links.map((link) => ({ ...link,
-        peer: normalizeRecord(getRecordById(db, link.peer.id)) }));
+      const peers = new Map(normalizedRecordsByIds(db,
+        result.links.map((link) => link.peer.id)).map((record) => [record.id, record]));
+      result.links = result.links.map((link) => ({ ...link, peer: peers.get(link.peer.id) }));
       return operationResult(result, { revision: currentRevision(db),
         more: result.truncated });
     }
