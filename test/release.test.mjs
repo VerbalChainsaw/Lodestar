@@ -94,7 +94,6 @@ test("release metadata and publication workflow agree on the package version", a
     'npm publish "./${PACKAGE}"',
     "--access public",
     "--provenance",
-    'release_hero="docs/assets/lodestar-launch-hero.png"',
     '"${release_assets[@]}"',
     'docs/releases/${GITHUB_REF_NAME}.md',
     'git merge-base --is-ancestor "${GITHUB_SHA}" origin/main',

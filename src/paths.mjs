@@ -1,5 +1,4 @@
 import os from "node:os";
-import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { lodestarError } from "./errors.mjs";
@@ -85,86 +84,4 @@ export function resolveDatabasePath({
       ? env.LODESTAR_DB
       : defaultDatabasePath({ platform, env, home, pathApi });
   return resolveInputPath(selected, { cwd, platform, pathApi, name: "database" });
-}
-
-async function prospectivePhysicalPath(candidate) {
-  const missing = [];
-  let existing = path.resolve(candidate);
-  while (true) {
-    try {
-      await lstat(existing);
-      break;
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-      const parent = path.dirname(existing);
-      if (parent === existing) throw error;
-      missing.unshift(path.basename(existing));
-      existing = parent;
-    }
-  }
-  return path.join(await realpath(existing), ...missing);
-}
-
-export async function assertImportDestinationOutsideSource({
-  source,
-  database,
-}) {
-  let physicalSource;
-  let physicalDatabase;
-  try {
-    physicalSource = await realpath(source);
-    physicalDatabase = await prospectivePhysicalPath(database);
-  } catch (error) {
-    throw lodestarError(
-      "invalid_path",
-      "The import source or destination path cannot be resolved safely.",
-      {
-        identifiers: { source, database },
-        action: "Choose accessible regular paths and retry.",
-        cause: error,
-      },
-    );
-  }
-  const relative = path.relative(physicalSource, physicalDatabase);
-  if (
-    relative === ""
-    || (
-      relative !== ".."
-      && !relative.startsWith(`..${path.sep}`)
-      && !path.isAbsolute(relative)
-    )
-  ) {
-    throw lodestarError(
-      "import_path_overlap",
-      "The destination database cannot be inside the legacy source tree.",
-      {
-        identifiers: {
-          source: physicalSource,
-          database: physicalDatabase,
-        },
-        action: "Choose a database path outside the v0.7 store.",
-      },
-    );
-  }
-  try {
-    const info = await lstat(database);
-    if (info.isFile() && info.nlink > 1) {
-      throw lodestarError(
-        "import_path_overlap",
-        "The destination database cannot be a multiply linked file.",
-        {
-          identifiers: {
-            source: physicalSource,
-            database: physicalDatabase,
-            links: info.nlink,
-          },
-          action:
-            "Choose a new or singly linked database path outside the v0.7 store.",
-        },
-      );
-    }
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  return physicalDatabase;
 }

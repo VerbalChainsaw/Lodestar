@@ -119,8 +119,6 @@ function exitCodeForCode(code) {
     code.startsWith("database_")
     || code.endsWith("_unreadable")
     || code.endsWith("_write_failed")
-    || code === "import_cleanup_failed"
-    || code === "import_commit_outcome_unknown"
   ) {
     return 5;
   }

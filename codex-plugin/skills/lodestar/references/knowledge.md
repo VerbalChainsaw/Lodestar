@@ -14,7 +14,7 @@ knowledge. It is not evidence that the proposition is false.
 
 Use `lodestar put` only when asked to save reusable project context. Keep stored
 content narrow and sourced. Do not store secrets, credentials, raw logs,
-transient progress, or speculative claims. Use export and import through the CLI;
+transient progress, or speculative claims. Use export through the CLI;
 never edit the database directly.
 
 Startup returns every optional record by default. An explicit caller target may
