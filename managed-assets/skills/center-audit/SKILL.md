@@ -1,10 +1,10 @@
 ---
 name: center-audit
-description: "Use this skill to investigate a specific suspected code defect, regression, or unsafe behavior change before editing. Triggers on requests to root-cause, validate, or challenge a known bug with bounded blast radius. Also triggers when the user asks to audit a layered surface from several perspectives, in completion, or to cover a GUI/Desktop / IPC / plugin stack with more than one lens. Performs a read-only, evidence-gated center-out audit through only proven causal edges and returns confirmed or disproven claims with trajectory, confidence, blast radius, smallest safe repair contract, and verification plan. Do not use for general code review, broad refactors, feature design, cosmetic edits, or implementing an already-proven fix."
-compatibility: "Agent Skills-compatible coding agents with repository read access. Git, exact search, LSP/AST, test, trace, schema, and subagent tools are optional accelerators. The audit itself is read-only."
+description: "Read-only, evidence-gated audit for an explicit request to audit, root-cause, validate, or challenge a specific defect, or for a concrete suspected code defect, regression, or unsafe behavior change with a reproduction, failing test, exact error/log/trace, or anchored code/state/config contract whose causal owner, blast radius, or safe repair boundary remains uncertain. Also use for explicit multi-perspective audits of layered GUI/Desktop, IPC, plugin, or service surfaces. Do not trigger for first-pass troubleshooting, ordinary configuration/credential/setup issues without defect evidence, general 'check why this fails' requests, broad review, implementation, cosmetic work, or an already-proven fix. Configuration and environment cases qualify once evidence points to a resolver, precedence, schema, or boundary-contract defect."
 metadata:
   version: "2.5.1"
   methodology: "goalpost-delta-fusion"
+  compatibility: "Agent Skills-compatible coding agents with repository read access. Git, exact search, LSP/AST, test, trace, schema, and subagent tools are optional accelerators. The audit itself is read-only."
 ---
 
 # CENTER-AUDIT: Evidence-Gated Goalpost / Delta / Fusion Method
