@@ -5,7 +5,7 @@ understanding platform.
 
 ## Knowledge boundary
 
-- Lodestar knows only records supplied or imported by a caller.
+- Lodestar knows only records supplied by a caller.
 - It does not recursively inspect repositories or automatically discover facts.
 - Missing knowledge is not proof that an underlying value does not exist.
 - `known_empty` is a direct assertion about an inspected source, not a
@@ -72,7 +72,7 @@ understanding platform.
   schema-v4 label with old capped DDL is also rebuilt. Current-schema reads use
   a read-only SQLite probe and leave database bytes unchanged.
 - A definite failure while creating a new database can leave its published
-  zero-byte reservation in place. A later `put`, `init`, or import can resume
+  zero-byte reservation in place. A later `put` or `init` can resume
   that reservation; Lodestar does not unlink it because another process may
   have completed the same visible path.
 
@@ -82,22 +82,6 @@ understanding platform.
   backed-up paths; unknown versions fail closed.
 - Version-2 migration removes retired continuity tables only when all four are
   empty. Nonempty state halts migration without changing the database.
-- Direct v0.7 import accepts only its documented generation-store layout. A
-  version-1 manifest is required for mixed historical state sources.
-- Import does not merge, overwrite populated databases, dual-write, or mutate
-  the legacy source.
-- Import rejects an existing destination with more than one hard link. This
-  avoids path-based confinement being bypassed by a destination that aliases a
-  legacy source file.
-- Migration processes and reports every valid source item and disposition.
-  Large imports remain limited by actual filesystem, memory, and SQLite
-  capacity rather than a Lodestar-owned data quota.
-- If SQLite cannot confirm an import commit, Lodestar preserves the destination
-  and reports an unknown commit outcome for read-only diagnosis instead of
-  deleting possibly committed data.
-- An import `COMMIT` exception is definite when SQLite still reports an active
-  transaction and rollback succeeds; only an ended transaction with an
-  unconfirmed commit call is reported as unknown.
 - Other writes likewise report `database_commit_outcome_unknown` when SQLite
   has ended the transaction without confirming the commit call. Initialization
   preserves the database in this state; inspect it read-only before retrying.
