@@ -83,7 +83,7 @@ test("Windows and WSL paths share one project identity and startup replays", asy
   assert.equal(first.value.data.startup_snapshot.digest, second.value.data.startup_snapshot.digest);
   assert.equal(first.value.data.context.some(({ id }) => id === "context:after-start"), false);
   assert.deepEqual(first.value.data.budget,
-    { bytes: null, source: "unbounded", applies_to: "optional", target_met: true });
+    { bytes: null, source: "unbounded" });
   assert.equal(first.value.data.required[0].id, "g:lodestar:required-governance");
   assert.equal(first.value.data.required[1].id, "instruction:required");
   assert.equal(first.value.data.required[0].data.required, true);
