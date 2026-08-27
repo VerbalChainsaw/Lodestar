@@ -5,6 +5,7 @@ import { canonicalStringify } from "./json.mjs";
 import {
   parseStoredContent,
   parseStoredMetadata,
+  RECORD_BATCH,
   resolveRecordId,
 } from "./records.mjs";
 import { SCHEMA_VERSION } from "./schema.mjs";
@@ -21,13 +22,6 @@ import {
   validateType,
 } from "./validate.mjs";
 
-function aliasesFor(db, id) {
-  const rows = db.prepare(
-    "SELECT alias FROM aliases WHERE record_id = ? ORDER BY alias",
-  ).all(id);
-  return rows.map(({ alias }) => alias);
-}
-
 function invalidStoredRow(kind, identifiers, error) {
   throw lodestarError(
     "database_integrity",
@@ -40,7 +34,9 @@ function invalidStoredRow(kind, identifiers, error) {
   );
 }
 
-function recordFields(row) {
+// Validate a stored record row and parse its content exactly once. Callers
+// destructure the returned stored object (content plus any _lodestar metadata).
+function parsedContent(row) {
   try {
     validateIdentifier(row.id);
     validateType(row.type);
@@ -48,18 +44,26 @@ function recordFields(row) {
     validateScope(row.scope);
     validateTimestamp(row.created_at, "records.created_at");
     validateTimestamp(row.updated_at, "records.updated_at");
-    const stored = parseStoredContent(row.content_json, { id: row.id });
-    const { _lodestar: _ignored, ...content } = stored;
-    return content;
+    return parseStoredContent(row.content_json, { id: row.id });
   } catch (error) {
     if (error?.code === "database_integrity") throw error;
     invalidStoredRow("record", { id: row.id ?? null }, error);
   }
 }
 
-function summary(db, row) {
-  const content = recordFields(row);
-  const aliases = aliasesFor(db, row.id);
+// Batched summary: one aliases query for every row and one content parse per
+// row. The previous per-record lookup re-parsed content_json twice and queried
+// aliases once per record, so find and links were N+1.
+function summarizeRow(row, aliases) {
+  const stored = parsedContent(row);
+  const { _lodestar, ...content } = stored;
+  let priority, revision;
+  try {
+    priority = Number(_lodestar?.priority ?? 0);
+    revision = Number(_lodestar?.revision ?? 0);
+  } catch (error) {
+    invalidStoredRow("record", { id: row.id ?? null }, error);
+  }
   try {
     for (const alias of aliases) validateIdentifier(alias, "alias");
   } catch (error) {
@@ -71,11 +75,31 @@ function summary(db, row) {
     name: row.name,
     scope: row.scope,
     state: content.state,
-    priority: Number(JSON.parse(row.content_json)._lodestar?.priority ?? 0),
-    revision: Number(JSON.parse(row.content_json)._lodestar?.revision ?? 0),
+    priority,
+    revision,
     aliases,
     updated_at: row.updated_at,
   };
+}
+
+function summariesForRows(db, rows) {
+  const summaries = new Array(rows.length);
+  if (rows.length === 0) return summaries;
+  const ids = rows.map(({ id }) => id);
+  const aliases = new Map();
+  for (let offset = 0; offset < ids.length; offset += RECORD_BATCH) {
+    const batch = ids.slice(offset, offset + RECORD_BATCH);
+    const join = batch.map(() => "?").join(",");
+    for (const { record_id, alias } of db.prepare(
+      `SELECT record_id, alias FROM aliases WHERE record_id IN (${join}) ORDER BY alias`,
+    ).all(...batch)) {
+      (aliases.get(record_id) ?? aliases.set(record_id, []).get(record_id)).push(alias);
+    }
+  }
+  for (let index = 0; index < rows.length; index += 1) {
+    summaries[index] = summarizeRow(rows[index], aliases.get(rows[index].id) ?? []);
+  }
+  return summaries;
 }
 
 export function findRecords(
@@ -115,6 +139,12 @@ export function findRecords(
     validateType(type);
     clauses.push("r.type = $type");
     parameters.$type = type;
+  } else {
+    // Reserved internal cache: `start` persists the projection as a
+    // startup-snapshot record. Users cannot create or delete that type, and
+    // searching it returns a copy of other records' content, so default find
+    // omits it unless the caller explicitly asks for the kind.
+    clauses.push("r.type != 'startup-snapshot'");
   }
   const rows = db.prepare(String.raw`
     SELECT
@@ -152,7 +182,7 @@ export function findRecords(
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
   return { query, scope: scope ?? null, type: type ?? null, limit: selectedLimit,
-    truncated, records: selected.map((row) => summary(db, row)) };
+    truncated, records: summariesForRows(db, selected) };
 }
 
 export function linkedRecords(
@@ -205,11 +235,12 @@ export function linkedRecords(
   `).all(selectedLimit === null ? { $id: id } : { $id: id, $limit: selectedLimit });
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
+  const peers = summariesForRows(db, selected);
   return {
     id,
     limit: selectedLimit,
     truncated,
-    links: selected.map((row) => {
+    links: selected.map((row, index) => {
       try {
         validateIdentifier(row.from_id, "from_id");
         validateRelationship(row.relationship);
@@ -227,7 +258,7 @@ export function linkedRecords(
         relationship: row.relationship,
         to_id: row.to_id,
         created_at: row.created_at,
-        peer: summary(db, row),
+        peer: peers[index],
       };
     }),
   };
@@ -247,7 +278,8 @@ export function exportRegistry(db) {
       "SELECT id, type, name, scope, content_json, created_at, updated_at "
         + "FROM records ORDER BY id",
     ).iterate()) {
-    const content = recordFields(row);
+    const stored = parsedContent(row);
+    const { _lodestar: _ignored, ...content } = stored;
     try {
       validateTimestamp(row.created_at, "records.created_at");
     } catch (error) {

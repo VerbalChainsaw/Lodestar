@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Batch the record fetch paths: startup context, find, links, decisions,
+  pending, and work lists now assemble records with a constant number of
+  queries instead of one query per record. Measured on a 1,000-record
+  registry: `start` ~118ms -> ~44ms, `find` ~134ms -> ~24ms.
+- Default the write metadata instead of rejecting it: `put` without
+  `content.state` stores `known`; a source without `metadata` or
+  `metadata.inspection` stores `not_inspected`. Explicit states still
+  validate. The knowledge and inspection axes remain the full record model.
+- Default `find` omits reserved `startup-snapshot` cache records (an explicit
+  `--kind startup-snapshot` still finds them).
 - Remove the startup-budget mechanism entirely. `start` always returns every
   optional record; there is no `--startup-budget`, no caller target, and no
   truncation surface. `more` and `next` stay in the envelope but never fire for
