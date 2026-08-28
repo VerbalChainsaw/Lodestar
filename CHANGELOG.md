@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.6.0 - 2026-08-28
+
 - Batch the record fetch paths: startup context, find, links, decisions,
   pending, and work lists now assemble records with a constant number of
   queries instead of one query per record. Measured on a 1,000-record
@@ -34,6 +36,10 @@
 - Remove the release hero-image gate: CI no longer requires or attaches the
   launch hero to GitHub releases. The artwork stays in `docs/assets` for the
   README and historical release notes.
+- Grow the managed skill payload additively: the `adderall` skill joins the
+  canonical set, and the current reference material is restored (`center-audit`
+  compact-mode and worked-example references, `director-protocol` agent config,
+  `ladder-audit` README). Nothing in the payload was removed or shrunk.
 
 ## 1.5.0 - 2026-08-27
 
