@@ -28,7 +28,11 @@ export const MARKER_FIELDS = Object.freeze([
 
 const BARE = /^[A-Za-z0-9][A-Za-z0-9 ._\-:/]*$/u;
 const BRACKET = /\[(DECISION|DEAD|SUPERSEDED|NOTE)\s+([^\]]*?)\s*\]/giu;
-const ATTR = /([a-z]+)\s*=\s*(?:"((?:\\.|[^"])*)"|(\S+))/giu;
+// The quoted-value matcher must be unambiguous: `[^"\\]` excludes the backslash so
+// an escape (`\\.`) is the only way to consume one. The overlapping form
+// `(?:\\.|[^"])*` lets a backslash match either alternative and can backtrack
+// exponentially on unclosed quoted values of repeated escapes.
+const ATTR = /([a-z]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|(\S+))/giu;
 export const LEGACY_NOTE = /^[ \t]*LODESTAR NOTE:[ \t]*(\S.*?)[ \t]*$/gmu;
 
 export function markerField(name, value) {
