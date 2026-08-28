@@ -121,24 +121,38 @@ export function recordsByRows(db, rows) {
   const aliases = new Map();
   const links = new Map();
   const sources = new Map();
+  // One prepared statement per batch size (the tail batch may be smaller than
+  // RECORD_BATCH) instead of one per batch: at 20K records that is ~2 prepares
+  // per table instead of ~23.
+  const aliasesStatement = new Map();
+  const linksStatement = new Map();
+  const sourcesStatement = new Map();
+  const statementFor = (cache, sql) => (size) => {
+    let stmt = cache.get(size);
+    if (!stmt) {
+      const join = Array(size).fill("?").join(",");
+      stmt = db.prepare(sql.replaceAll("?", join));
+      cache.set(size, stmt);
+    }
+    return stmt;
+  };
+  const aliasStatement = statementFor(aliasesStatement,
+    "SELECT record_id, alias FROM aliases WHERE record_id IN (?) ORDER BY alias");
+  const linkStatement = statementFor(linksStatement,
+    "SELECT from_id, relationship, to_id, created_at FROM links "
+      + "WHERE from_id IN (?) ORDER BY relationship, to_id");
+  const sourceStatement = statementFor(sourcesStatement,
+    "SELECT record_id, origin, freshness, metadata_json FROM sources "
+      + "WHERE record_id IN (?) ORDER BY origin");
   for (let offset = 0; offset < ids.length; offset += RECORD_BATCH) {
     const batch = ids.slice(offset, offset + RECORD_BATCH);
-    const join = batch.map(() => "?").join(",");
-    for (const { record_id, alias } of db.prepare(
-      `SELECT record_id, alias FROM aliases WHERE record_id IN (${join}) ORDER BY alias`,
-    ).all(...batch)) {
+    for (const { record_id, alias } of aliasStatement(batch.length).all(...batch)) {
       (aliases.get(record_id) ?? aliases.set(record_id, []).get(record_id)).push(alias);
     }
-    for (const row of db.prepare(
-      `SELECT from_id, relationship, to_id, created_at FROM links `
-        + `WHERE from_id IN (${join}) ORDER BY relationship, to_id`,
-    ).all(...batch)) {
+    for (const row of linkStatement(batch.length).all(...batch)) {
       (links.get(row.from_id) ?? links.set(row.from_id, []).get(row.from_id)).push(row);
     }
-    for (const row of db.prepare(
-      `SELECT record_id, origin, freshness, metadata_json FROM sources `
-        + `WHERE record_id IN (${join}) ORDER BY origin`,
-    ).all(...batch)) {
+    for (const row of sourceStatement(batch.length).all(...batch)) {
       (sources.get(row.record_id) ?? sources.set(row.record_id, []).get(row.record_id)).push(row);
     }
   }

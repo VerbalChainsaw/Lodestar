@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Single-pass find and links traversal: the selected rows are assembled into
+  the final normalized envelope exactly once instead of being parsed into
+  throwaway summaries and then re-fetched and re-parsed by the caller. On a
+  20,000-record registry, unbounded `find` dropped from ~1.19s to ~0.78s.
+- The find rank and filter use one pass over the aliases table (a
+  grouped CTE) instead of per-row correlated EXISTS subqueries, preserving
+  the exact/prefix/substring rank semantics.
+- Read assembly prepares one statement per batch size instead of one per
+  batch, removing ~70 statement compilations from a 20K-record find.
+
 ## 1.6.0 - 2026-08-28
 
 - Batch the record fetch paths: startup context, find, links, decisions,
