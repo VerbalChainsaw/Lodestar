@@ -89,6 +89,23 @@ test("brackets and escaped quotes inside quoted values round-trip exactly", () =
   );
 });
 
+test("quoted-value parsing stays linear on adversarial escape runs", { timeout: 10_000 }, () => {
+  // Regression for a ReDoS-shaped matcher: the former `(?:\\.|[^"])*` let a
+  // backslash match either alternative, so an unclosed quoted value of repeated
+  // escape pairs could backtrack exponentially. The scanner guard plus the
+  // unambiguous `(?:[^"\\\\]|\\.)*` pattern keep adversarial input fast; a
+  // catastrophic matcher blows past any sane bound at this size.
+  const pairs = "\\!".repeat(200_000);
+  const adversarial = '[DECISION key=k value="' + pairs + '"]';
+  const started = performance.now();
+  const [marker] = parseMarkers(adversarial);
+  const elapsed = performance.now() - started;
+  assert.equal(marker.kind, "DECISION");
+  assert.equal(marker.key, "k");
+  assert.equal(marker.value, pairs);
+  assert.ok(elapsed < 5_000, `adversarial parse took ${elapsed}ms`);
+});
+
 test("malformed markers cannot suppress later markers", () => {
   // A stray quote or missing ] in one candidate must not disable capture of the rest.
   assert.deepEqual(parseMarkers('[NOTE text="oops then [DECISION key=k value=v]'),
