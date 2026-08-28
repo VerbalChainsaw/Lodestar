@@ -3,9 +3,10 @@ import { Buffer } from "node:buffer";
 import { lodestarError } from "./errors.mjs";
 import { canonicalStringify } from "./json.mjs";
 import {
+  normalizeRecord,
   parseStoredContent,
   parseStoredMetadata,
-  RECORD_BATCH,
+  recordsByRows,
   resolveRecordId,
 } from "./records.mjs";
 import { SCHEMA_VERSION } from "./schema.mjs";
@@ -52,55 +53,12 @@ function parsedContent(row) {
   }
 }
 
-// Batched summary: one aliases query for every row and one content parse per
-// row. The previous per-record lookup re-parsed content_json twice and queried
-// aliases once per record, so find and links were N+1.
-function summarizeRow(row, aliases) {
-  const stored = parsedContent(row);
-  const { _lodestar, ...content } = stored;
-  let priority, revision;
-  try {
-    priority = Number(_lodestar?.priority ?? 0);
-    revision = Number(_lodestar?.revision ?? 0);
-  } catch (error) {
-    invalidStoredRow("record", { id: row.id ?? null }, error);
-  }
-  try {
-    for (const alias of aliases) validateIdentifier(alias, "alias");
-  } catch (error) {
-    invalidStoredRow("alias", { record_id: row.id }, error);
-  }
-  return {
-    id: row.id,
-    type: row.type,
-    name: row.name,
-    scope: row.scope,
-    state: content.state,
-    priority,
-    revision,
-    aliases,
-    updated_at: row.updated_at,
-  };
-}
-
-function summariesForRows(db, rows) {
-  const summaries = new Array(rows.length);
-  if (rows.length === 0) return summaries;
-  const ids = rows.map(({ id }) => id);
-  const aliases = new Map();
-  for (let offset = 0; offset < ids.length; offset += RECORD_BATCH) {
-    const batch = ids.slice(offset, offset + RECORD_BATCH);
-    const join = batch.map(() => "?").join(",");
-    for (const { record_id, alias } of db.prepare(
-      `SELECT record_id, alias FROM aliases WHERE record_id IN (${join}) ORDER BY alias`,
-    ).all(...batch)) {
-      (aliases.get(record_id) ?? aliases.set(record_id, []).get(record_id)).push(alias);
-    }
-  }
-  for (let index = 0; index < rows.length; index += 1) {
-    summaries[index] = summarizeRow(rows[index], aliases.get(rows[index].id) ?? []);
-  }
-  return summaries;
+// Assemble the already-selected rows into normalized records exactly once.
+// The previous path built throwaway summaries here and then re-fetched and
+// re-parsed the same rows in the caller, so find and links parsed every
+// selected record twice.
+function normalizedForRows(db, rows) {
+  return recordsByRows(db, rows).map(normalizeRecord);
 }
 
 export function findRecords(
@@ -121,6 +79,9 @@ export function findRecords(
       "Find offset requires an explicit --limit page size.",
       { action: "Retry with --limit set, or drop --offset for an unbounded search." });
   }
+  // The alias predicate comes from the single-pass alias_info CTE (defined in
+  // the main query below) instead of a per-row EXISTS: the aliases table is
+  // scanned once, not once per scanned record.
   const clauses = [String.raw`
     (
       instr(lower(r.id), lower($query)) > 0
@@ -128,11 +89,7 @@ export function findRecords(
       OR instr(lower(r.name), lower($query)) > 0
       OR instr(lower(r.scope), lower($query)) > 0
       OR instr(lower(r.content_json), lower($query)) > 0
-      OR EXISTS (
-        SELECT 1 FROM aliases a
-        WHERE a.record_id = r.id
-          AND instr(lower(a.alias), lower($query)) > 0
-      )
+      OR ai.record_id IS NOT NULL
     )
   `];
   const parameters = {
@@ -154,7 +111,19 @@ export function findRecords(
     // omits it unless the caller explicitly asks for the kind.
     clauses.push("r.type != 'startup-snapshot'");
   }
+  // One pass over aliases computes exact/prefix flags per record; the record
+  // scan LEFT JOINs that result. Rank semantics are unchanged: exact id or
+  // alias = 0, exact name = 1, prefix id/name/alias = 2, substring = 3.
   const rows = db.prepare(String.raw`
+    WITH alias_info AS (
+      SELECT
+        record_id,
+        MAX(CASE WHEN alias = $query THEN 1 ELSE 0 END) AS exact,
+        MAX(CASE WHEN instr(lower(alias), lower($query)) = 1 THEN 1 ELSE 0 END) AS prefix
+      FROM aliases
+      WHERE instr(lower(alias), lower($query)) > 0
+      GROUP BY record_id
+    )
     SELECT
       r.id,
       r.type,
@@ -164,25 +133,16 @@ export function findRecords(
       r.created_at,
       r.updated_at,
       CASE
-        WHEN r.id = $query
-          OR EXISTS (
-            SELECT 1 FROM aliases exact_alias
-            WHERE exact_alias.record_id = r.id
-              AND exact_alias.alias = $query
-          )
-          THEN 0
+        WHEN r.id = $query OR ai.exact = 1 THEN 0
         WHEN lower(r.name) = lower($query) THEN 1
         WHEN instr(lower(r.id), lower($query)) = 1
           OR instr(lower(r.name), lower($query)) = 1
-          OR EXISTS (
-            SELECT 1 FROM aliases prefix_alias
-            WHERE prefix_alias.record_id = r.id
-              AND instr(lower(prefix_alias.alias), lower($query)) = 1
-          )
+          OR ai.prefix = 1
           THEN 2
         ELSE 3
       END AS rank
     FROM records r
+    LEFT JOIN alias_info ai ON ai.record_id = r.id
     WHERE ${clauses.join(" AND ")}
     ORDER BY rank, r.id COLLATE BINARY
     ${selectedLimit === null ? "" : "LIMIT $limit + 1 OFFSET $offset"}
@@ -192,7 +152,7 @@ export function findRecords(
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
   return { query, scope: scope ?? null, type: type ?? null, limit: selectedLimit,
-    offset: selectedOffset, truncated, records: summariesForRows(db, selected) };
+    offset: selectedOffset, truncated, records: normalizedForRows(db, selected) };
 }
 
 export function linkedRecords(
@@ -245,7 +205,7 @@ export function linkedRecords(
   `).all(selectedLimit === null ? { $id: id } : { $id: id, $limit: selectedLimit });
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
-  const peers = summariesForRows(db, selected);
+  const peers = normalizedForRows(db, selected);
   return {
     id,
     limit: selectedLimit,

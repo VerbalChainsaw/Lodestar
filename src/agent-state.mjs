@@ -173,11 +173,13 @@ async function dispatchRead(command, { options, positionals }, database) {
         revision: currentRevision(db), scope: unscoped(record) });
     }
     if (command === "find") {
+      // findRecords already assembles the selected rows into normalized records
+      // exactly once; re-fetching them here doubled the read work per result.
       const result = findRecords(db, positionals[0], { scope: options["--scope"],
         type: options["--kind"] ?? options["--type"], limit: options["--limit"],
         offset: options["--offset"] });
       return operationResult({ query: result.query,
-        records: normalizedRecordsByIds(db, result.records.map(({ id }) => id)),
+        records: result.records,
       }, { revision: currentRevision(db), more: result.truncated,
         next: result.truncated
           ? [`lodestar find "${result.query}" --limit ${result.limit}`
@@ -185,10 +187,9 @@ async function dispatchRead(command, { options, positionals }, database) {
           : [] });
     }
     if (command === "links") {
+      // linkedRecords returns full normalized peers directly; the previous
+      // re-fetch by id parsed every peer a second time.
       const result = linkedRecords(db, positionals[0], { limit: options["--limit"] });
-      const peers = new Map(normalizedRecordsByIds(db,
-        result.links.map((link) => link.peer.id)).map((record) => [record.id, record]));
-      result.links = result.links.map((link) => ({ ...link, peer: peers.get(link.peer.id) }));
       return operationResult(result, { revision: currentRevision(db),
         more: result.truncated });
     }
