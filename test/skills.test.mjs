@@ -13,7 +13,7 @@ import { manageSkills } from "../src/skills.mjs";
 const MANAGED_ROOT = fileURLToPath(new URL("../managed-assets/skills", import.meta.url));
 const APPROVED = JSON.parse(
   await readFile(new URL("../managed-assets/manifest.json", import.meta.url), "utf8"),
-).skills;
+).skills.map(({ name }) => name);
 
 async function temporaryHome(t) {
   const home = await mkdtemp(path.join(os.tmpdir(), "lodestar-skills-readonly-"));

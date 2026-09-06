@@ -15,10 +15,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   initializeDatabase,
-  openOrInitializeWriteDatabase,
+  openWriteDatabase,
   openReadDatabase,
 } from "../src/database.mjs";
-import { putRecord } from "../src/records.mjs";
+import { fixture } from "./helpers/contract.mjs";
 
 const CLI = fileURLToPath(new URL("../lodestar.mjs", import.meta.url));
 
@@ -62,7 +62,7 @@ function pausedChild({
     import { DatabaseSync } from "node:sqlite";
     import {
       initializeDatabase,
-      openOrInitializeWriteDatabase
+      openWriteDatabase
     } from ${JSON.stringify(databaseModule)};
     import { putRecord } from ${JSON.stringify(recordsModule)};
     const originalExec = DatabaseSync.prototype.exec;
@@ -197,90 +197,39 @@ test("a losing initializer cannot delete a concurrent winner", async (t) => {
   db.close();
 });
 
-test("concurrent first writers preserve both records", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const database = path.join(directory, "lodestar.db");
-  const marker = path.join(directory, "opened");
-  const release = path.join(directory, "release");
-  const childRecord = {
-    id: "record:child",
-    type: "note",
-    name: "Child",
-    scope: "global",
-    content: { state: "known", value: "child" },
-    aliases: [],
-    links: [],
-    sources: [],
-  };
-  const child = pausedChild({
-    t,
-    marker,
-    release,
-    operation: `(async () => {
-      const db = await openOrInitializeWriteDatabase(
-        ${JSON.stringify(database)}
-      );
-      try {
-        return putRecord(db, ${JSON.stringify(childRecord)}, {
-          database: ${JSON.stringify(database)}
-        });
-      } finally {
-        db.close();
-      }
-    })()`,
-  });
-  await waitFor(marker);
 
-  const winnerDb = await openOrInitializeWriteDatabase(database);
-  putRecord(winnerDb, {
-    ...childRecord,
-    id: "record:winner",
-    name: "Winner",
-    content: { state: "known", value: "winner" },
-  }, { database });
-  winnerDb.close();
-  await writeFile(release, "go");
-  const loser = await childResult(child.completed);
-
-  assert.equal(loser.status, "fulfilled");
-  const db = await openReadDatabase(database);
-  assert.deepEqual(
-    db.prepare("SELECT id FROM records ORDER BY id").all()
-      .map(({ id }) => id),
-    ["record:child", "record:winner"],
-  );
-  db.close();
+test('competing processes either commit the same request once or return retryable busy without partial effects', async (t) => {
+  const f = await fixture(t);
+  const request = await f.request({ mode: 'create', record: { id: 'fact:race', kind: 'fact', name: 'Race', scope: 'global',
+    data: { value: 'once' }, aliases: [], links: [], sources: [] } }, [{ kind: 'record', id: 'fact:race' }]);
+  const outcomes = await Promise.all([cliPutChild({ t, database: f.database, record: request }), cliPutChild({ t, database: f.database, record: request })]);
+  assert.ok(outcomes.some(({ status }) => status === 0));
+  for (const outcome of outcomes) {
+    if (outcome.status !== 0) assert.equal(JSON.parse(outcome.stderr).error.code, 'database_busy');
+  }
+  const replay = await f.cli(['put'], request);
+  assert.equal(replay.code, 0, JSON.stringify(replay.value));
+  assert.equal(replay.value.request.replayed, true);
+  const db = await openReadDatabase(f.database);
+  try {
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM records WHERE type='mutation-receipt'").get().n, 1);
+    assert.equal(db.prepare("SELECT value FROM metadata WHERE key='database_revision'").get().value, '1');
+  } finally { db.close(); }
 });
 
-test("competing CLI processes survive first-write reservation races", async (t) => {
-  const directory = await temporaryDirectory(t);
-  for (let round = 0; round < 4; round += 1) {
-    const database = path.join(directory, String(round), "lodestar.db");
-    const records = Array.from({ length: 4 }, (_, writer) => ({
-      id: `record:${round}:${writer}`,
-      type: "note",
-      name: `Writer ${writer}`,
-      scope: "global",
-      content: { state: "known", value: { round, writer } },
-      aliases: [],
-      links: [],
-      sources: [],
-    }));
-    const results = await Promise.all(records.map((record) =>
-      cliPutChild({ t, database, record })
-    ));
-    assert.deepEqual(
-      results.map(({ status }) => status),
-      records.map(() => 0),
-      JSON.stringify(results.filter(({ status }) => status !== 0), null, 2),
-    );
-
-    const db = await openReadDatabase(database);
-    assert.deepEqual(
-      db.prepare("SELECT id FROM records ORDER BY id").all()
-        .map(({ id }) => id),
-      records.map(({ id }) => id).sort(),
-    );
-    db.close();
-  }
+test('busy refusal leaves the request reusable and the lock holder untouched', async (t) => {
+  const f = await fixture(t);
+  const request = await f.request({ mode: 'create', record: { id: 'fact:busy', kind: 'fact', name: 'Busy', scope: 'global',
+    data: {}, aliases: [], links: [], sources: [] } }, [{ kind: 'record', id: 'fact:busy' }]);
+  const holder = new DatabaseSync(f.database);
+  try {
+    holder.exec('BEGIN IMMEDIATE');
+    const refused = await cliPutChild({ t, database: f.database, record: request });
+    assert.notEqual(refused.status, 0);
+    assert.equal(JSON.parse(refused.stderr).error.code, 'database_busy');
+    assert.equal(holder.isTransaction, true);
+    assert.equal(holder.prepare('SELECT COUNT(*) n FROM records').get().n, 0);
+    holder.exec('ROLLBACK');
+  } finally { if (holder.isTransaction) holder.exec('ROLLBACK'); holder.close(); }
+  assert.equal((await f.cli(['put'], request)).code, 0);
 });

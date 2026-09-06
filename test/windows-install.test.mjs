@@ -35,17 +35,20 @@ test("WSL clients keep managed write state on the Linux filesystem", async () =>
 });
 
 test("the Windows POSIX shim converts paths explicitly", () => {
-  const shim = renderWindowsPosixShim();
-  assert.match(shim, /cygpath -aw "\$NODE_BIN"/u);
-  assert.match(shim, /cygpath -aw "\$LODESTAR_HOME\/lodestar\.mjs"/u);
+  const shim = renderWindowsPosixShim({ node: String.raw`C:\selected\node.exe`,
+    entry: String.raw`C:\selected\node_modules\lodestar-agent-context\lodestar.mjs` });
+  assert.match(shim, /NODE_BIN_WIN='C:\\selected\\node\.exe'/u);
+  assert.match(shim, /LODESTAR_ENTRY_WIN='C:\\selected\\node_modules/u);
+  assert.doesNotMatch(shim, /node-\*/u);
   assert.match(shim, /MSYS2_ARG_CONV_EXCL='\*'/u);
 });
 
 test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
-  const shim = renderWslShim();
-  assert.match(shim, /\/init "\$\(command -v cmd\.exe\)" -- \/d \/c echo %USERPROFILE%/u);
+  const shim = renderWslShim({ node: String.raw`C:\selected\node.exe`,
+    entry: String.raw`C:\selected\node_modules\lodestar-agent-context\lodestar.mjs` });
   assert.match(shim, /wslpath -w/u);
-  assert.match(shim, /node-\*\/node\.exe/u);
+  assert.doesNotMatch(shim, /node-\*/u);
+  assert.match(shim, /NODE_BIN='C:\\selected\\node\.exe'/u);
   assert.match(shim, /arguments\+=\(--home/u);
   assert.match(shim, /arguments\+=\(--hermes-home/u);
   assert.doesNotMatch(shim, /--codex-bootstrap|--claude-bootstrap|--hermes-bootstrap|--opencode-bootstrap/u);
@@ -53,7 +56,7 @@ test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
   assert.match(shim, /--cwd\|--home\|--hermes-home\|--opencode-root/u);
   assert.match(shim, /if \[ "\$command_name" = "skills" \]; then/u);
   assert.match(shim,
-    /exec \/init "\$NODE_BIN" -- "\$LODESTAR_ENTRY_WIN" "\$\{arguments\[@\]\}"/u);
+    /exec \/init "\$\(wslpath -u "\$NODE_BIN"\)" -- "\$LODESTAR_ENTRY_WIN" "\$\{arguments\[@\]\}"/u);
   assert.doesNotMatch(shim, /exec "\$NODE_BIN"/u);
   assert.doesNotMatch(shim, /LODESTAR_DB=/u);
 });

@@ -9,7 +9,7 @@ import { lodestarError, wrapError } from "./errors.mjs";
 import { translateWindowsDialectPath } from "./paths.mjs";
 import { pathExists } from "./windows-install.mjs";
 
-export const REPOSITORY_AGENTS_MARKER = "<!-- lodestar:managed-repository-bootstrap v1 -->";
+export const REPOSITORY_AGENTS_MARKER = "<!-- lodestar:repository-bootstrap contract-5 -->";
 const FULL_TEMPLATE = fileURLToPath(new URL(
   "../managed-assets/skills/lodestar/assets/templates/AGENTS.template.md",
   import.meta.url,

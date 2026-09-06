@@ -1,193 +1,61 @@
-import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { fixture } from './helpers/contract.mjs';
 
-import {
-  decisionDrop, decisionInjection, decisionProjection, decisionSet, decisionStatus,
-} from "../src/decision.mjs";
-import { diagnoseDatabase } from "../src/doctor.mjs";
-import { initializeDatabase, openWriteDatabase } from "../src/database.mjs";
-import { resolveIdentity, resolveProject } from "../src/project.mjs";
-import { putRecord } from "../src/records.mjs";
-
-async function fixture(t) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-decision-"));
-  const database = path.join(directory, "lodestar.db");
-  await initializeDatabase(database);
-  const db = await openWriteDatabase(database);
-  t.after(() => db.close());
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  putRecord(db, { id: "project:decision", type: "project", name: "Decision fixture",
-    scope: "global", content: { state: "known", value: { roots: [directory] } },
-    aliases: [], links: [], sources: [] });
-  const project = resolveProject(db, directory);
-  const identity = resolveIdentity({ session: "source", agent: "codex", harness: "test" }, {}, true);
-  return { db, database, directory, project, identity };
+const actor = { id: 'agent:session', agent: 'agent', session: 'session', harness: 'test' };
+async function setup(t) {
+  const f = await fixture(t);
+  await f.create('project:test', 'project', { roots: [f.root] }, 'project:test');
+  f.change = async (action, input) => f.cli(['decision', action, '--cwd', f.root], await f.request(input,
+    [{ kind: 'record', id: 'project:test' }, { kind: 'decision', scope: 'project:test', key: input.key ?? '__injection__' }], 'project:test', actor));
+  return f;
 }
 
-test("decision events are append-only and A to B to A suppresses resurrection", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  assert.equal(decisionSet(db, project, identity, "database", "SQLite",
-    { database, reason: "embedded" }).changed, true);
-  assert.equal(decisionSet(db, project, identity, "database", "PostgreSQL",
-    { database, reason: "centralized writes" }).changed, true);
-  assert.equal(decisionSet(db, project, identity, "database", "SQLite",
-    { database, reason: "local-first" }).changed, true);
-  const state = decisionProjection(db, project);
-  assert.deepEqual(state.facts.map(({ key, value }) => [key, value]), [["database", "SQLite"]]);
-  assert.deepEqual(state.dead.map(({ key, value }) => [key, value]), [["database", "PostgreSQL"]]);
-  // The projection carries the golden-rule marker vocabulary, not prose.
-  assert.match(state.projection,
-    /\[DECISION key=database status=ACCEPTED value=SQLite date=\d{4}-\d{2}-\d{2} reason=local-first\]/u);
-  // The dead entry's reason is the reason of the event that killed it, not the
-  // reason that created the superseded value.
-  assert.match(state.projection,
-    /\[SUPERSEDED key=database by=database value=PostgreSQL date=\d{4}-\d{2}-\d{2} reason=local-first reopen=director\]/u);
-  // DEAD is the power-word: the negation sentence is the product.
-  assert.match(state.projection,
-    /PostgreSQL is DEAD; do not propose, use, or restore it\. Use SQLite\./u);
-  assert.doesNotMatch(state.projection, /\[DEAD key=database/u);
-  const count = db.prepare("SELECT count(*) AS count FROM records "
-    + "WHERE type='decision-event'").get().count;
-  assert.equal(count, 3);
-  assert.equal(decisionSet(db, project, identity, "database", "SQLite", { database }).changed,
-    false);
-  assert.equal(db.prepare("SELECT count(*) AS count FROM records "
-    + "WHERE type='decision-event'").get().count, count);
+test('decision history allows reasoned A to B to A and deduplicates identical explanations', async (t) => {
+  const f = await setup(t);
+  for (const [value, reason] of [['A', 'Initial evidence'], ['B', 'Changed evidence'], ['A', 'New observation supports A']]) {
+    const result = await f.change('set', { key: 'build:Choice_A', value, reason, status: 'accepted' });
+    assert.equal(result.code, 0, JSON.stringify(result.value));
+  }
+  const before = await f.cli(['decision', 'show', 'build:Choice_A', '--cwd', f.root]);
+  assert.equal(before.value.data.facts[0].value, 'A');
+  const repeat = await f.change('set', { key: 'build:Choice_A', value: 'A', reason: 'New observation supports A', status: 'accepted' });
+  assert.equal(repeat.code, 0, JSON.stringify(repeat.value));
+  assert.equal(repeat.value.data.changed, false);
+  const after = await f.cli(['decision', 'show', 'build:Choice_A', '--cwd', f.root]);
+  assert.equal(after.value.data.dead.length, before.value.data.dead.length);
+  const corrected = await f.change('set', { key: 'build:Choice_A', value: 'A', reason: 'Corrected evidence explanation', status: 'accepted' });
+  assert.equal(corrected.value.data.changed, true);
 });
 
-test("decision drop renders a DEAD marker and injection still disables projection", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  decisionSet(db, project, identity, "test_runner", "node:test", { database });
-  decisionSet(db, project, identity, "database", "SQLite", { database });
-  assert.equal(decisionDrop(db, project, identity, "database",
-    { database, reason: "removed" }).changed, true);
-  assert.equal(decisionDrop(db, project, identity, "database", { database }).changed, false);
-  const dropped = decisionProjection(db, project).projection;
-  assert.match(dropped,
-    /\[DEAD key=database value=SQLite date=\d{4}-\d{2}-\d{2} reason=removed reopen=director\]/u);
-  assert.match(dropped,
-    /SQLite is DEAD; do not propose, use, or restore it\. It has no replacement\. Reason: removed\./u);
-  assert.equal(decisionInjection(db, project, identity, false, { database }).changed, true);
-  const disabled = decisionProjection(db, project);
-  assert.equal(disabled.enabled, false);
-  assert.equal(disabled.projection, "");
-  assert.deepEqual(disabled.facts.map(({ key }) => key), ["test-runner"]);
-  assert.equal(decisionInjection(db, project, identity, true, { database }).changed, true);
-  const report = diagnoseDatabase(db, { database });
-  assert.equal(report.checks.decisions.healthy, true);
-  assert.equal(report.checks.decisions.events, 5);
-  assert.equal(report.healthy, true);
+test('user boundaries require actual supplied direction to revise across any session', async (t) => {
+  const f = await setup(t);
+  const direction = { kind: 'user', attribution: 'asserted', reference: 'user:1', instruction: 'Keep the source intact.' };
+  assert.equal((await f.change('set', { key: 'source', value: 'keep', reason: 'User scope', status: 'accepted', direction })).code, 0);
+  const refused = await f.change('set', { key: 'source', value: 'rewrite', reason: 'Agent preference', status: 'accepted' });
+  assert.notEqual(refused.code, 0);
+  assert.equal((await f.cli(['decision', 'show', 'source', '--cwd', f.root])).value.data.facts[0].value, 'keep');
+  const forged = await f.change('set', { key: 'source', value: 'rewrite', reason: 'Changed direction', status: 'accepted',
+    direction: { ...direction, attribution: 'host_observed' } });
+  assert.notEqual(forged.code, 0);
+  assert.equal((await f.change('set', { key: 'source', value: 'rewrite', reason: 'User revised scope', status: 'accepted',
+    direction: { ...direction, reference: 'user:2', instruction: 'Now revise the source.' } })).code, 0);
 });
 
-test("decision status blocks and unblocks a fact and blocks project separately", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  decisionSet(db, project, identity, "database", "SQLite", { database });
-  assert.equal(decisionStatus(db, project, identity, "database", "blocked",
-    { database, reason: "waiting on vendor" }).changed, true);
-  const state = decisionProjection(db, project);
-  assert.equal(state.facts.length, 0);
-  assert.deepEqual(state.blocked.map(({ key }) => key), ["database"]);
-  assert.equal(state.blocked[0].status, "blocked");
-  assert.match(state.projection, /## BLOCKED/u);
-  assert.match(state.projection, /status=BLOCKED/u);
-  assert.equal(decisionStatus(db, project, identity, "database", "blocked",
-    { database }).changed, false);
-  assert.equal(decisionStatus(db, project, identity, "database", "accepted",
-    { database, reason: "resolved" }).changed, true);
-  const reopened = decisionProjection(db, project);
-  assert.equal(reopened.blocked.length, 0);
-  assert.deepEqual(reopened.facts.map(({ key }) => key), ["database"]);
-  assert.equal(decisionStatus(db, project, identity, "missing-key", "blocked",
-    { database }).changed, false);
-  assert.throws(() => decisionStatus(db, project, identity, "database", "weird",
-    { database }), { code: "invalid_input" });
-  assert.equal(diagnoseDatabase(db, { database }).checks.decisions.healthy, true);
+test('decision status and explicit successor preserve their checked head', async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.change('set', { key: 'build', value: 'old', reason: 'Initial', status: 'accepted' })).code, 0);
+  assert.equal((await f.change('status', { key: 'build', reason: 'Missing prerequisite', status: 'blocked' })).code, 0);
+  const blocked = await f.cli(['decision', 'show', 'build', '--cwd', f.root]);
+  assert.equal(blocked.value.data.blocked[0].value, 'old');
+  const result = await f.change('drop', { key: 'build', reason: 'Replacement available', status: 'superseded', successor: { key: 'build:new', value: 'new' } });
+  assert.equal(result.code, 0, JSON.stringify(result.value));
+  assert.match(JSON.stringify((await f.cli(['decision', 'show', 'build', '--cwd', f.root])).value.data), /build:new/);
 });
 
-test("decision set accepts an explicit blocked status and supersedes a blocked fact", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  assert.equal(decisionSet(db, project, identity, "gate", "closed",
-    { database, status: "blocked" }).changed, true);
-  const state = decisionProjection(db, project);
-  assert.equal(state.blocked.length, 1);
-  assert.throws(() => decisionSet(db, project, identity, "gate", "closed",
-    { database, status: "someday" }), { code: "invalid_input" });
-  // Replacing a blocked decision moves the old value to the dead ledger.
-  assert.equal(decisionSet(db, project, identity, "gate", "open",
-    { database, reason: "unblocked" }).changed, true);
-  const after = decisionProjection(db, project);
-  assert.equal(after.blocked.length, 0);
-  assert.deepEqual(after.facts.map(({ key, value }) => [key, value]), [["gate", "open"]]);
-  assert.deepEqual(after.dead.map(({ key, value }) => [key, value]), [["gate", "closed"]]);
-  assert.match(after.projection, /\[SUPERSEDED key=gate by=gate value=closed/u);
-  assert.match(after.projection,
-    /closed is DEAD; do not propose, use, or restore it\. Use open\./u);
-  assert.equal(diagnoseDatabase(db, { database }).checks.decisions.healthy, true);
-});
-
-test("old events without a status replay as accepted", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  decisionSet(db, project, identity, "legacy", "value", { database });
-  const state = decisionProjection(db, project);
-  assert.equal(state.facts[0].status, "accepted");
-  assert.match(state.projection, /status=ACCEPTED/u);
-});
-
-test("public record mutation cannot rewrite or delete command-owned decision history", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  const written = decisionSet(db, project, identity, "database", "SQLite", { database });
-  assert.throws(() => putRecord(db, { id: "manual", type: "decision-event", name: "bad",
-    scope: project.scope, content: { state: "known", value: {} }, aliases: [], links: [],
-    sources: [] }), { code: "reserved_record_type" });
-  assert.equal(written.record.kind, "decision-event");
-});
-
-test("Director-issued kills stay closed; agent kills reopen by evidence", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  const director = identity;
-  const agent = resolveIdentity({ session: "agent-session", agent: "codex", harness: "test" },
-    {}, true);
-  decisionSet(db, project, director, "database", "SQLite", { database });
-  assert.equal(decisionDrop(db, project, director, "database",
-    { database, reason: "no" }).changed, true);
-  // A different session cannot revive a Director-issued kill.
-  assert.throws(() => decisionSet(db, project, agent, "database", "SQLite", { database }),
-    (error) => error.code === "dead_decision_revival");
-  // A replacement value is always allowed.
-  assert.equal(decisionSet(db, project, agent, "database", "PostgreSQL",
-    { database }).changed, true);
-  // The killing session (the Director) can revive the same value.
-  assert.equal(decisionSet(db, project, director, "database", "SQLite",
-    { database, reason: "revived" }).changed, true);
-  const state = decisionProjection(db, project);
-  assert.deepEqual(state.facts.map(({ key, value }) => [key, value]), [["database", "SQLite"]]);
-  // Agent-issued kills reopen by evidence.
-  assert.equal(decisionSet(db, project, agent, "flag", "on",
-    { database, authority: "agent" }).changed, true);
-  assert.equal(decisionDrop(db, project, agent, "flag",
-    { database, authority: "agent" }).changed, true);
-  assert.equal(decisionSet(db, project, agent, "flag", "on", { database }).changed, true);
-  // A closed kill renders reopen=director on its marker.
-  decisionSet(db, project, director, "port", "8080", { database });
-  decisionDrop(db, project, director, "port", { database, reason: "closed" });
-  assert.match(decisionProjection(db, project).projection,
-    /\[DEAD key=port value=8080 date=\d{4}-\d{2}-\d{2} reason=closed reopen=director\]/u);
-  assert.equal(diagnoseDatabase(db, { database }).checks.decisions.healthy, true);
-});
-
-test("a drop with a successor renders SUPERSEDED and names the successor key", async (t) => {
-  const { db, database, project, identity } = await fixture(t);
-  decisionSet(db, project, identity, "engine", "legacy", { database });
-  assert.equal(decisionDrop(db, project, identity, "engine",
-    { database, successor: "engine-v2", reason: "replaced" }).changed, true);
-  const state = decisionProjection(db, project);
-  assert.deepEqual(state.dead.map(({ key, successor }) => [key, successor]),
-    [["engine", "engine-v2"]]);
-  assert.match(state.projection, /\[SUPERSEDED key=engine by=engine-v2 value=legacy/u);
-  assert.match(state.projection, /Use engine-v2\./u);
-  assert.doesNotMatch(state.projection, /It has no replacement/u);
-  assert.equal(diagnoseDatabase(db, { database }).checks.decisions.healthy, true);
+test('decision keys reject malformed spelling instead of silently conflating it', async (t) => {
+  const f = await setup(t);
+  for (const key of [' leading', 'trailing ', 'bad\nkey']) {
+    await assert.rejects(() => f.change('set', { key, value: 'x', reason: 'x', status: 'accepted' }));
+  }
 });

@@ -94,7 +94,7 @@ function validStringChunk(value, pendingHigh, resource) {
 function normalizedJson(value) {
   const holder = Object.create(null);
   const ancestors = new Set();
-  const tasks = [{ kind: "value", value, target: holder, key: "value" }];
+  const tasks = [{ kind: "value", value, target: holder, key: "value", pointer: "" }];
   while (tasks.length > 0) {
     const task = tasks.pop();
     if (task.kind === "leave") {
@@ -112,7 +112,8 @@ function normalizedJson(value) {
       }
       tasks.push({ ...task, index: task.index + 1 });
       tasks.push({ kind: "value", value: task.source[task.index],
-        target: task.target, key: task.index });
+        target: task.target, key: task.index,
+        pointer: `${task.pointer}/${task.index}` });
       continue;
     }
     if (task.kind === "object") {
@@ -126,7 +127,8 @@ function normalizedJson(value) {
         );
       }
       tasks.push({ ...task, index: task.index + 1 });
-      tasks.push({ kind: "value", value: entry, target: task.target, key });
+      tasks.push({ kind: "value", value: entry, target: task.target, key,
+        pointer: `${task.pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}` });
       continue;
     }
     const current = task.value;
@@ -137,6 +139,16 @@ function normalizedJson(value) {
     if (typeof current === "number") {
       if (!Number.isFinite(current)) {
         throw lodestarError("invalid_json", "JSON numbers must be finite.");
+      }
+      if (Number.isInteger(current) && !Number.isSafeInteger(current)) {
+        throw lodestarError(
+          "unsupported_numeric_value",
+          "Integer-valued JSON numbers must use the JavaScript safe-integer range.",
+          {
+            identifiers: { pointer: task.pointer },
+            action: "Use a string for an exact larger identifier or correct the source value.",
+          },
+        );
       }
       task.target[task.key] = Object.is(current, -0) ? 0 : current;
       continue;
@@ -162,9 +174,10 @@ function normalizedJson(value) {
     ancestors.add(current);
     tasks.push({ kind: "leave", value: current });
     tasks.push(isArray
-      ? { kind: "array", source: current, target: result, index: 0 }
+      ? { kind: "array", source: current, target: result, index: 0,
+        pointer: task.pointer }
       : { kind: "object", source: current, target: result,
-        keys: Object.keys(current).sort(), index: 0 });
+        keys: Object.keys(current).sort(), index: 0, pointer: task.pointer });
   }
   return holder.value;
 }
@@ -227,7 +240,9 @@ export function parseJsonText(
     assertTextBytes(text, maximum, resource, identifiers);
   }
   try {
-    return JSON.parse(text);
+    const value = JSON.parse(text);
+    assertJsonNumericDomain(text);
+    return value;
   } catch (error) {
     throw wrapError(
       error,
@@ -236,6 +251,76 @@ export function parseJsonText(
       { identifiers },
     );
   }
+}
+
+export function assertJsonNumericDomain(text) {
+  let offset = 0;
+  const whitespace = () => {
+    while (/\s/u.test(text[offset] ?? "")) offset += 1;
+  };
+  const stringToken = () => {
+    const start = offset++;
+    while (offset < text.length) {
+      if (text[offset] === "\\") offset += 2;
+      else if (text[offset++] === '"') return JSON.parse(text.slice(start, offset));
+    }
+    return "";
+  };
+  const inspectValue = (pointer) => {
+    whitespace();
+    if (text[offset] === '"') {
+      stringToken();
+      return;
+    }
+    if (text[offset] === "{") {
+      offset += 1;
+      whitespace();
+      if (text[offset] === "}") { offset += 1; return; }
+      while (offset < text.length) {
+        whitespace();
+        const key = stringToken();
+        whitespace();
+        offset += 1;
+        inspectValue(`${pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`);
+        whitespace();
+        if (text[offset++] === "}") return;
+      }
+      return;
+    }
+    if (text[offset] === "[") {
+      offset += 1;
+      whitespace();
+      if (text[offset] === "]") { offset += 1; return; }
+      let index = 0;
+      while (offset < text.length) {
+        inspectValue(`${pointer}/${index++}`);
+        whitespace();
+        if (text[offset++] === "]") return;
+      }
+      return;
+    }
+    const token = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/uy;
+    token.lastIndex = offset;
+    const match = token.exec(text);
+    if (match) {
+      offset = token.lastIndex;
+      const numeric = Number(match[0]);
+      if (!Number.isFinite(numeric)
+        || (Number.isInteger(numeric) && !Number.isSafeInteger(numeric))) {
+        throw lodestarError(
+          "unsupported_numeric_value",
+          "A JSON number is outside the supported numeric domain.",
+          {
+            identifiers: { pointer, value: match[0] },
+            action: "Use a string for an exact larger identifier or correct the source value.",
+          },
+        );
+      }
+      return;
+    }
+    while (/[A-Za-z]/u.test(text[offset] ?? "")) offset += 1;
+  };
+  inspectValue("");
 }
 
 
@@ -293,4 +378,3 @@ export async function readStreamComplete(
   if (pendingHigh) throw invalidUtf8(resource);
   return decodeUtf8(Buffer.concat(chunks), { resource });
 }
-

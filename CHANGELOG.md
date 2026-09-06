@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-09-06
+
+- Replace the schema-4 compatibility runtime with one contract-5 read/write model,
+  explicit database instance and recovery epoch, checked target bases, idempotent
+  receipts, retained history, and connection-level writer fences.
+- Make project orientation read-only and fresh. Remove startup-cache, hook,
+  attestation, session-tail, automatic initialization, and private-governance fallback
+  paths.
+- Preserve exact raw records and associations, reject unsafe numeric JSON before
+  rounding, attach explicit semantics and evidence metadata, and retire records without
+  physically deleting their history.
+- Add one explicit, backup-verified schema-4 conversion and forward schema-5 recovery
+  promotion that allocates a new epoch. Historical schema converters no longer ship in
+  production.
+- Route generic, decision, work, handoff, and pending writes through the same admitted
+  mutation owner. Revision and event order, rather than timestamps, determine accepted
+  state.
+- Replace the Codex hook integration with a native automatic skill and three thin MCP
+  tools derived from the installed package's command, request, and mutation schemas.
+- Retain all seven managed skills. Record each maintained source and distribution owner
+  plus exact raw byte membership and SHA-256 in the contract-5 manifest. Remove the
+  bundled private Golden Rules payload.
+- Preserve the Windows-owned one-shot boundary for Windows shells, MSYS/Cygwin, and WSL.
+
 - Single-pass find and links traversal: the selected rows are assembled into
   the final normalized envelope exactly once instead of being parsed into
   throwaway summaries and then re-fetched and re-parsed by the caller. On a

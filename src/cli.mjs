@@ -10,6 +10,7 @@ import { dispatch, operationResult } from "./agent-state.mjs";
 import { resolveDatabasePath } from "./paths.mjs";
 import { manageSkills } from "./skills.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
+import { CONTRACT_VERSION } from "./schema.mjs";
 export { LODESTAR_VERSION } from "./version.mjs";
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
 function helpData(command = null) {
@@ -178,10 +179,14 @@ function parseCommand(command, args) {
 }
 function writeSuccess(io, operation, result, human) {
   const envelope = {
-    v: 1,
+    v: CONTRACT_VERSION,
     ok: true,
     operation,
     revision: result.revision,
+    database_instance_id: result.database_instance_id,
+    database_epoch: result.database_epoch,
+    request: result.request,
+    ...(result.receipt_id ? { receipt_id: result.receipt_id } : {}),
     scope: result.scope,
     data: result.data,
     more: result.more,
@@ -293,12 +298,19 @@ export async function runCli(
     }
     let text;
     try {
+      const identifiers = normalized.envelope.error.identifiers ?? {};
+      const revision = Number.isSafeInteger(identifiers.revision) ? identifiers.revision
+        : Number.isSafeInteger(identifiers.database_revision) ? identifiers.database_revision : null;
       text = canonicalStringify({
-        v: 1,
+        v: CONTRACT_VERSION,
         ok: false,
         operation: attemptedOperation,
-        revision: null,
-        scope: { project: null, cwd: null, session: null, actor: null },
+        revision,
+        database_instance_id: identifiers.database_instance_id ?? null,
+        database_epoch: identifiers.database_epoch ?? null,
+        request: identifiers.request_id ? { id: identifiers.request_id } : null,
+        scope: { project: identifiers.project ?? null, cwd: identifiers.cwd ?? null,
+          session: identifiers.session ?? null, actor: identifiers.actor ?? null },
         error: normalized.envelope.error,
         more: false,
         next: normalized.envelope.error?.action
@@ -307,10 +319,13 @@ export async function runCli(
       });
     } catch {
       text = JSON.stringify({
-        v: 1,
+        v: CONTRACT_VERSION,
         ok: false,
         operation: "cli",
         revision: null,
+        database_instance_id: null,
+        database_epoch: null,
+        request: null,
         scope: { project: null, cwd: null, session: null, actor: null },
         error: {
           code: "internal_error",
