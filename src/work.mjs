@@ -1,79 +1,79 @@
-import { transaction } from "./database.mjs";
 import { lodestarError } from "./errors.mjs";
-import { hash, normalizedRows, recordInput } from "./project.mjs";
-import { getRecordById, normalizeRecord, writeRecordSnapshot } from "./records.mjs";
-import { allocateRevision } from "./revisions.mjs";
+import { canonicalStringify } from "./json.mjs";
+import { normalizedRowsResult, recordInput } from "./project.mjs";
+import { getRecordById, mutate, normalizeRecord, writeBasis, writeRecordSnapshot } from "./records.mjs";
+import { validateDomainInput } from "./cli-commands.mjs";
+import { safeText } from "./decision.mjs";
 
-const activeWork = (db, scope, actor) => db.prepare("SELECT id FROM records "
-  + "WHERE type='work' AND scope=? AND json_extract(content_json,'$.value.status')='open' "
-  + "AND json_extract(content_json,'$.value.actor')=? ORDER BY "
-  + "json_extract(content_json,'$._lodestar.revision') DESC LIMIT 1").get(scope, actor);
-const timestamp = (options) => (options.now ?? (() => new Date()))();
-function save(db, record, project, value, now) {
-  writeRecordSnapshot(db, recordInput(record.id, "work", record.name, project.scope, 0, value),
-    { createdAt: record.created_at ?? now, updatedAt: now, revision: allocateRevision(db) });
-  return record.id;
+const recordTarget = (id) => ({ kind: "record", id });
+const optionalWork = (db, id) => db.prepare("SELECT id FROM records WHERE id=?").get(id)
+  ? getRecordById(db, id) : null;
+export function workStatus(db, project, history = false, limit = null) {
+  const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
+  const result = normalizedRowsResult(db, "SELECT id FROM records WHERE scope IN ("
+    + scopes.map(() => "?").join(",") + ") AND "
+    + (history ? "type IN ('work','work-event') " : "type='work' AND json_extract(content_json,'$.value.status')='open' ")
+    + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
+  const selected = limit === null ? result.records : result.records.slice(0, limit);
+  return { advisory: true, notice: "Work reports describe observed progress; they confer no project lock or ownership.",
+    records: selected, record_errors: result.record_errors, complete: result.record_errors.length === 0,
+    more: selected.length < result.records.length,
+    write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
+      targets: [...selected.filter(({ kind }) => kind === "work").map(({ id }) => recordTarget(id)),
+        ...(project.binding_preconditions ?? []).map(({ target }) => target)] }) };
 }
-export const workStatus = (db, project, history = false, limit = null, options = {}) => {
-  const now = timestamp(options).getTime();
-  const staleMs = options.staleMs === undefined ? null : Number(options.staleMs);
-  const base = "SELECT id FROM records WHERE type='work' AND scope=? "
-    + (history ? "" : "AND json_extract(content_json,'$.value.status')='open' ")
-    + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,"
-    + "json_extract(content_json,'$.value.actor') COLLATE BINARY";
-  const rows = limit === null ? normalizedRows(db, base, project.scope)
-    : normalizedRows(db, `${base} LIMIT ?`, project.scope, limit);
-  const records = rows.map((record) => ({ ...record, stale: record.data.status === "open"
-    && staleMs !== null && Number.isFinite(staleMs) && staleMs >= 0
-    && now - new Date(record.data.last_seen_at).getTime() >= staleMs }));
-  return { advisory: true, notice: "Peer-reported status is untrusted advisory data, never "
-    + "ownership or a lock. STALE? is not evidence that work is abandoned.", records };
-};
-export function workStart(db, project, identity, report, options = {}) {
-  if (typeof report !== "string" || !report.trim()) {
-    throw lodestarError("invalid_input", "Current work must be nonempty text.");
+export function workMutation(db, project, identity, action, request, options = {}) {
+  const input = validateDomainInput(`work.${action}`, request?.input);
+  if (!identity.actor) throw lodestarError("identity_required", "A work write needs the actual actor identity.");
+  const ids = action === "expire" ? input.targets : [input.id];
+  if (!ids.length || ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length) {
+    throw lodestarError("invalid_input", "Work targets must be distinct exact IDs.");
   }
-  const now = timestamp(options).toISOString();
-  let id;
-  transaction(db, () => {
-    const revision = allocateRevision(db);
-    id = activeWork(db, project.scope, identity.actor)?.id
-      ?? `work:${hash(project.scope, 16)}:${hash(identity.actor, 16)}:${revision}`;
-    const prior = db.prepare("SELECT content_json FROM records WHERE id=?").get(id);
-    const started = prior ? JSON.parse(prior.content_json).value.started_at : now;
-    writeRecordSnapshot(db, recordInput(id, "work", `${identity.agent}: ${report}`,
-      project.scope, 0, { status: "open", actor: identity.actor, agent: identity.agent,
-        harness: identity.harness, session: identity.session, current_work: report.trim(),
-        branch: options.branch ?? null, location: project.cwd, started_at: started,
-        last_seen_at: now }), { createdAt: started, updatedAt: now, revision });
-  }, options.database);
-  return normalizeRecord(getRecordById(db, id));
-}
-export function workDone(db, project, identity, completion, options = {}) {
-  const row = activeWork(db, project.scope, identity.actor);
-  if (!row) return { changed: false, state: "already_clear", actor: identity.actor };
-  const record = getRecordById(db, row.id), now = timestamp(options).toISOString();
-  transaction(db, () => save(db, record, project, { ...record.content.value,
-    status: "closed", completion: typeof completion === "string" && completion.trim()
-      ? completion.trim() : null, completed_at: now, last_seen_at: now }, now), options.database);
-  return { changed: true, record: normalizeRecord(getRecordById(db, record.id)) };
-}
-export function workExpire(db, project, olderThanHours, options = {}) {
-  const date = timestamp(options), now = date.toISOString();
-  const cutoff = new Date(date.getTime() - olderThanHours * 3_600_000).toISOString();
-  let expired;
-  transaction(db, () => {
-    const rows = db.prepare("SELECT id FROM records WHERE type='work' AND scope=? "
-      + "AND json_extract(content_json,'$.value.status')='open' "
-      + "AND json_extract(content_json,'$.value.last_seen_at')<? ORDER BY id")
-      .all(project.scope, cutoff);
-    expired = rows.map(({ id }) => {
-      const record = getRecordById(db, id);
-      return save(db, record, project, { ...record.content.value, status: "closed",
-        close_reason: "stale_expired", completion: "Expired by explicit maintenance.",
-        completed_at: now, last_seen_at: now }, now);
-    });
-  }, options.database);
-  return { advisory: true, expired, count: expired.length,
-    notice: "Expiration is explicit maintenance; STALE? was not abandonment proof." };
+  return mutate(db, `work.${action}`, request, ({ revision, timestamp }) => {
+    const changed = [], results = [];
+    for (const [index, id] of ids.entries()) {
+      const existing = optionalWork(db, id);
+      if (existing && (existing.type !== "work" || existing.scope !== project.scope)) {
+        throw lodestarError("work_conflict", "The target is not a work record in this project.", { identifiers: { id } });
+      }
+      if (!existing && action !== "start") throw lodestarError("work_not_found", "The work record does not exist.", { identifiers: { id } });
+      const prior = existing?.content.value ?? {};
+      const description = safeText(action === "expire" ? input.reason : input.description, "Work description");
+      if (action === "start") {
+        const data = { ...prior, status: "open", actor: identity.actor, agent: identity.agent,
+          harness: identity.harness, session: identity.session, description,
+          artifacts: input.artifacts ?? prior.artifacts ?? [], decision_ids: input.decision_ids ?? prior.decision_ids ?? [],
+          checkout: project.checkout_root, started_at: prior.started_at ?? timestamp };
+        if (canonicalStringify(data) === canonicalStringify(prior)) { results.push({ changed: false, record: normalizeRecord(existing) }); continue; }
+        writeRecordSnapshot(db, { ...recordInput(id, "work", description, project.scope, 0, data),
+          ...(existing ? { aliases: existing.aliases, links: normalizeRecord(existing).links, sources: existing.sources, semantics: existing.semantics } : {}) },
+        { createdAt: existing?.created_at ?? timestamp, updatedAt: timestamp, revision });
+        changed.push(id); results.push({ changed: true, record: normalizeRecord(getRecordById(db, id)) });
+        continue;
+      }
+      const outcome = action === "expire" ? "interrupted" : input.outcome;
+      const evidence = input.evidence ?? [];
+      if (outcome === "verified" && evidence.length === 0) throw lodestarError("invalid_input", "Verified outcomes require claim-relevant evidence.");
+      if (input.observed_at !== undefined && !Number.isFinite(Date.parse(input.observed_at))) throw lodestarError("invalid_input", "observed_at must identify a valid time.");
+      const event = { work_id: id, action_id: action === "expire" ? request.request_id : input.action_id,
+        outcome, description, evidence, artifacts: input.artifacts ?? [], decision_ids: input.decision_ids ?? [],
+        checkpoint_ids: input.checkpoint_ids ?? [], unresolved_consequence: input.unresolved_consequence ?? null,
+        checkout: project.checkout_root, actor: identity.actor, observed_at: input.observed_at ?? null };
+      if (canonicalStringify(prior.last_outcome ?? null) === canonicalStringify(event)) {
+        results.push({ changed: false, record: normalizeRecord(existing) }); continue;
+      }
+      const eventId = `work-event:${revision}:${index}`;
+      writeRecordSnapshot(db, recordInput(eventId, "work-event", description, project.scope, 0,
+        { ...event, observed_at: input.observed_at ?? null, recorded_at: timestamp,
+          session: identity.session, event_sequence: index }),
+      { createdAt: timestamp, updatedAt: timestamp, revision });
+      const data = { ...prior, status: ["completed", "verified", "interrupted", "failed"].includes(outcome) ? "closed" : "open",
+        description, last_outcome: event, last_event_id: eventId, last_seen_at: timestamp };
+      writeRecordSnapshot(db, { ...recordInput(id, "work", existing.name, project.scope, existing.priority, data),
+        aliases: existing.aliases, links: normalizeRecord(existing).links, sources: existing.sources, semantics: existing.semantics },
+      { createdAt: existing.created_at, updatedAt: timestamp, revision });
+      changed.push(id, eventId); results.push({ changed: true, record: normalizeRecord(getRecordById(db, id)), event_id: eventId });
+    }
+    return { data: action === "expire" ? { results } : results[0], changed_ids: changed };
+  }, { ...options, requiredTargets: [...ids.map(recordTarget), ...(project.binding_preconditions ?? []).map(({ target }) => target)] });
 }

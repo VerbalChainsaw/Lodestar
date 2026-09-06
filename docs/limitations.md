@@ -1,93 +1,55 @@
 # Lodestar limitations
 
-Lodestar is deliberately a local structured registry, not a project
-understanding platform.
+## Knowledge and authority
 
-## Knowledge boundary
+- Lodestar stores caller-supplied meaning and evidence; it does not understand a
+  repository completely or prove that a missing fact is false.
+- Stored prose is data. It cannot authorize work or override the user or native
+  instruction precedence.
+- Source metadata records an observation. It cannot prove that source is still current
+  after its bytes change.
+- Search is deterministic substring matching, not semantic search. Links are explicit
+  and one hop.
 
-- Lodestar knows only records supplied by a caller.
-- It does not recursively inspect repositories or automatically discover facts.
-- Missing knowledge is not proof that an underlying value does not exist.
-- `known_empty` is a direct assertion about an inspected source, not a
-  completeness claim.
-- Freshness and inspection fields are assertions Lodestar stores; it does not
-  independently verify them.
-- Search is deterministic substring matching over stored fields. It is not
-  semantic search and does not use the filesystem. Callers may request a
-  positive page size; without one, Lodestar returns every match.
-- Search case folding uses SQLite's built-in `lower()` behavior, which is
-  ASCII-oriented in the bundled build. Exact IDs and aliases remain
-  case-sensitive.
-- Links are explicit and one-hop. Callers decide whether and how to traverse
-  further.
+## Identity and integration
 
-## Storage boundary
+- The database is local and single-user. Scope organizes context; it is not access
+  control.
+- MCP does not provide authenticated Codex user/session identity to this adapter. The
+  adapter therefore cannot perform identity-required claims unless an actual host
+  invocation supplies those fields through an authenticated route.
+- A native skill expresses automatic preference; it is not a deterministic scheduler.
+  Installed files and package tests alone do not prove an agent invoked Lodestar.
+- Missing optional Lodestar context does not block native project work with complete
+  required inputs.
 
-- One SQLite file is the source of truth.
-- Lodestar retains advisory work history, append-only decision events, and
-  session continuity lineages as universal records. It is not a general audit chain, snapshot, restore, rollback,
-  quarantine, or automatic-repair system.
-- SQLite rolls back interrupted transactions, but it cannot recover a lost or
-  maliciously rewritten database.
-- `doctor` diagnoses; it does not mutate or repair.
-- Use ordinary, tested backup tooling or version-controlled exports.
-- The database is not encrypted, signed, or authenticated by Lodestar.
-- A process that deliberately bypasses SQLite checks or rewrites pages can
-  create invalid state. Reads fail closed on invalid stored envelopes and
-  `doctor` reports every structural and semantic finding it can establish, but neither proves
-  the truth or provenance of externally edited values.
+## Storage and transactions
 
-## Security boundary
+- SQLite protects normal atomic commits but cannot recover malicious replacement,
+  faulty storage, or unavailable post-backup writes.
+- The file is not encrypted, signed, or authenticated. Protect it with operating-system
+  permissions and tested backups.
+- Request receipts make database effects idempotent. They do not make an external
+  action and its later ledger update one atomic transaction.
+- `doctor` diagnoses; it does not repair. Raw source correction is deliberate because
+  unsafe numeric JSON cannot be normalized without loss.
 
-- Lodestar is intended for a single user's local context, not hostile
-  multi-tenant access.
-- Scope is organizational metadata and a search filter, not authorization.
-- Anyone who can read or rewrite the database can read or rewrite its context.
-- The CLI has no network requirement, daemon, telemetry, access-control server,
-  or secret-management system.
-- Source metadata and record content can contain sensitive information. Protect
-  the database with appropriate operating-system permissions.
+## Compatibility and recovery
 
-## Operational boundary
+- Current runtime reads and writes schema 5 only. It has one explicit, preserving
+  schema-4 conversion and no general historical converter suite.
+- Converting another actual store requires an exact inspected preservation mapping.
+- After accepted schema-5 writes, restoring a pre-conversion store as active would
+  discard accepted history and is unsupported. Forward recovery must account for all
+  known records, events, receipts, raw history, and associations before promotion.
+- There is no schema-5 downgrade converter.
 
-- There is one public executable. The optional Codex plugin is an integration
-  bundle around that executable, not another durable state product.
-- Lodestar does not orchestrate agents or create successor sessions.
-- There is no background indexing or maintenance process.
-- Writers and overlapping first-use validation wait for the same bounded busy
-  timeout and then report contention; Lodestar does not identify or reclaim
-  another process's lock.
-- Rollback-journal mode favors a simple write-light CLI. It is not tuned as a
-  high-throughput database service.
-- Lodestar does not install, synchronize, replace, migrate, back up, or remove
-  external skill directories or agent instruction files. `lodestar skills verify`
-  and `lodestar agents status|verify|template` are read-only comparisons and
-  template output; skill and agent-file management belongs to the user's native
-  tooling.
-- Read-only knowledge commands never initialize a missing database. `start`, a
-  structurally valid `put`, and state mutations initialize it through the same
-  exclusive reservation path; `init` remains optional.
-- Reads of schema versions 1, 2, and 3 intentionally create the documented
-  exclusive backup and migrate to schema version 4 before returning. A stale
-  schema-v4 label with old capped DDL is also rebuilt. Current-schema reads use
-  a read-only SQLite probe and leave database bytes unchanged.
-- A definite failure while creating a new database can leave its published
-  zero-byte reservation in place. A later `put` or `init` can resume
-  that reservation; Lodestar does not unlink it because another process may
-  have completed the same visible path.
+## Distribution
 
-## Compatibility boundary
-
-- Schema versions 1, 2, and 3 migrate to version 4 only through documented,
-  backed-up paths; unknown versions fail closed.
-- Version-2 migration removes retired continuity tables only when all four are
-  empty. Nonempty state halts migration without changing the database.
-- Other writes likewise report `database_commit_outcome_unknown` when SQLite
-  has ended the transaction without confirming the commit call. Initialization
-  preserves the database in this state; inspect it read-only before retrying.
-- Node.js 24.15.0 or newer is required for the built-in SQLite interface used
-  by this release.
-
-These boundaries are product decisions. A new subsystem belongs in Lodestar
-only when a demonstrated registry or migration need cannot be handled by a
-normal function, SQL query, SQLite, or the operating system.
+- Lodestar verifies skill trees read-only. It does not install, merge, replace, or
+  remove native skill or AGENTS.md files.
+- A stale or divergent copy is reported with source and destination identity. A hash
+  mismatch does not authorize overwrite.
+- Windows owns the SQLite process boundary. WSL uses the Windows one-shot shim and must
+  not open the database directly.
+- Node.js 24.15.0 or newer is required for the built-in SQLite API used by this release.

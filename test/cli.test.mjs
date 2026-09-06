@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { runCli } from "../src/cli.mjs";
 import { initializeDatabase, openWriteDatabase } from "../src/database.mjs";
 import { lodestarError } from "../src/errors.mjs";
-import { putRecord } from "../src/records.mjs";
+import { fixture } from "./helpers/contract.mjs";
 
 function capture(input = "") {
   let stdout = "";
@@ -57,133 +57,6 @@ function inputRecord() {
     sources: [],
   };
 }
-
-test("CLI initializes, writes, reads, searches, diagnoses, and exports JSON", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const common = ["--db", file];
-
-  const initialized = await invoke(["init", ...common]);
-  assert.equal(initialized.exitCode, 0);
-  assert.equal(JSON.parse(initialized.stdout).data.created, true);
-
-  const put = await invoke(
-    ["put", ...common],
-    JSON.stringify(inputRecord()),
-  );
-  assert.equal(put.exitCode, 0, put.stderr);
-  assert.equal(JSON.parse(put.stdout).data.id, "record:cli");
-
-  const get = await invoke(["get", "cli alias", ...common]);
-  assert.equal(get.exitCode, 0, get.stderr);
-  assert.equal(JSON.parse(get.stdout).data.availability, "known");
-
-  const find = await invoke(["find", "searchable", ...common]);
-  assert.deepEqual(
-    JSON.parse(find.stdout).data.records.map(({ id }) => id),
-    ["record:cli"],
-  );
-
-  const doctor = await invoke(["doctor", ...common]);
-  assert.equal(doctor.exitCode, 0, doctor.stderr);
-  assert.equal(JSON.parse(doctor.stdout).data.healthy, true);
-
-  const exported = await invoke(["export", ...common]);
-  assert.equal(JSON.parse(exported.stdout).data.records.length, 1);
-});
-
-test("the first valid put initializes its database without a setup command", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "missing", "lodestar.db");
-
-  const put = await invoke(
-    ["put", "--db", file],
-    JSON.stringify(inputRecord()),
-  );
-  assert.equal(put.exitCode, 0, put.stderr);
-  assert.equal(JSON.parse(put.stdout).data.id, "record:cli");
-
-  const get = await invoke(["get", "cli alias", "--db", file]);
-  assert.equal(get.exitCode, 0, get.stderr);
-  assert.equal(JSON.parse(get.stdout).data.id, "record:cli");
-});
-
-test("the first valid put resumes a zero-byte database reservation", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  await writeFile(file, "");
-
-  const put = await invoke(
-    ["put", "--db", file],
-    JSON.stringify(inputRecord()),
-  );
-  assert.equal(put.exitCode, 0, put.stderr);
-
-  const get = await invoke(["get", "record:cli", "--db", file]);
-  assert.equal(get.exitCode, 0, get.stderr);
-  assert.equal(JSON.parse(get.stdout).data.id, "record:cli");
-});
-
-test("invalid first puts and missing reads remain side-effect free", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "missing", "lodestar.db");
-  const invalid = await invoke(
-    ["put", "--db", file],
-    JSON.stringify({ id: "invalid" }),
-  );
-  assert.equal(invalid.exitCode, 2);
-  assert.equal(JSON.parse(invalid.stderr).error.code, "invalid_input");
-  await assert.rejects(access(path.dirname(file)), { code: "ENOENT" });
-
-  for (const args of [
-    ["get", "missing", "--db", file],
-    ["find", "missing", "--db", file],
-    ["links", "missing", "--db", file],
-    ["doctor", "--db", file],
-    ["export", "--db", file],
-  ]) {
-    const result = await invoke(args);
-    assert.notEqual(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stderr).error.code, "database_not_found");
-    await assert.rejects(access(path.dirname(file)), { code: "ENOENT" });
-  }
-});
-
-test("a first put never replaces an existing non-Lodestar file", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "owned.db");
-  const sentinel = Buffer.from("not a Lodestar database");
-  await writeFile(file, sentinel);
-
-  const put = await invoke(
-    ["put", "--db", file],
-    JSON.stringify(inputRecord()),
-  );
-  assert.notEqual(put.exitCode, 0);
-  assert.equal(put.stdout, "");
-  assert.deepEqual(await readFile(file), sentinel);
-});
-
-test("concurrent first puts preserve both valid records", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "missing", "lodestar.db");
-  const records = ["first", "second"].map((suffix) => ({
-    ...inputRecord(),
-    id: `record:${suffix}`,
-    name: `Record ${suffix}`,
-    aliases: [`alias ${suffix}`],
-  }));
-
-  const puts = await Promise.all(records.map((record) =>
-    invoke(["put", "--db", file], JSON.stringify(record))
-  ));
-  for (const put of puts) assert.equal(put.exitCode, 0, put.stderr);
-  for (const record of records) {
-    const get = await invoke(["get", record.id, "--db", file]);
-    assert.equal(get.exitCode, 0, get.stderr);
-    assert.equal(JSON.parse(get.stdout).data.id, record.id);
-  }
-});
 
 test("every public command help path is JSON and side-effect free", async (t) => {
   const directory = await temporaryDirectory(t);
@@ -248,208 +121,6 @@ test("help and version answer to both spellings", async (t) => {
   // A bad name is still a bad name, whichever way it is asked for.
   const bogus = await invoke(["help", "bogus", "--db", file]);
   assert.equal(JSON.parse(bogus.stderr).error.code, "unknown_command");
-});
-
-test("legacy direct-content records remain readable through every lookup command", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const common = ["--db", file];
-  const legacy = {
-    id: "instruction:legacy",
-    type: "instruction",
-    name: "Legacy instruction",
-    scope: "global",
-    content: { state: "known", required: true, text: "preserve this guidance" },
-    aliases: ["legacy guidance"],
-    links: [],
-    sources: [],
-  };
-  await invoke(["put", ...common], JSON.stringify(legacy));
-  await invoke(["put", ...common], JSON.stringify({
-    ...inputRecord(), id: "record:legacy-link", aliases: [],
-    links: [{ relationship: "documents", to_id: legacy.id }],
-  }));
-
-  const get = await invoke(["get", "legacy guidance", ...common]);
-  assert.equal(get.exitCode, 0, get.stderr);
-  assert.equal(JSON.parse(get.stdout).data.data.text, "preserve this guidance");
-  const find = await invoke(["find", "preserve this", ...common]);
-  assert.deepEqual(JSON.parse(find.stdout).data.records.map(({ id }) => id), [legacy.id]);
-  const links = await invoke(["links", legacy.id, ...common]);
-  assert.equal(JSON.parse(links.stdout).data.links[0].peer.data.value, "searchable phrase");
-  const doctor = await invoke(["doctor", ...common]);
-  assert.equal(JSON.parse(doctor.stdout).data.healthy, true);
-});
-
-test("put accepts the normalized Lodestar record shape", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const normalized = {
-    v: 1,
-    id: "record:normalized",
-    kind: "note",
-    scope: "global",
-    availability: "known",
-    priority: 700,
-    data: { name: "Normalized", aliases: ["normalized alias"], text: "round trip" },
-    links: [],
-    sources: [],
-  };
-  const put = await invoke(["put", "--db", file], JSON.stringify(normalized));
-  assert.equal(put.exitCode, 0, put.stderr);
-  assert.equal(JSON.parse(put.stdout).data.priority, 700);
-  const get = await invoke(["get", "normalized alias", "--db", file]);
-  assert.equal(JSON.parse(get.stdout).data.data.text, "round trip");
-});
-
-test("put defaults the knowledge state and source inspection instead of rejecting", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const minimal = {
-    id: "record:minimal",
-    type: "note",
-    name: "Minimal",
-    scope: "global",
-    content: { value: { text: "no state, no arrays, bare source" } },
-    sources: [{ origin: "probe", freshness: "current" }],
-  };
-  const put = await invoke(["put", "--db", file], JSON.stringify(minimal));
-  assert.equal(put.exitCode, 0, put.stderr);
-  const get = await invoke(["get", "record:minimal", "--db", file]);
-  const data = JSON.parse(get.stdout).data;
-  assert.equal(data.availability, "known");
-  assert.equal(data.data.text, "no state, no arrays, bare source");
-  assert.deepEqual(data.sources, [{ origin: "probe", freshness: "current",
-    metadata: { inspection: "not_inspected" } }]);
-});
-
-test("find --offset continues to the next page and the next command carries the offset", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const common = ["--db", file];
-  for (let index = 0; index < 3; index += 1) {
-    await invoke(["put", ...common], JSON.stringify({
-      ...inputRecord(),
-      id: `record:page${index}`,
-      name: `Page ${index}`,
-      aliases: [],
-      content: { state: "known", value: "shared page term" },
-    }));
-  }
-  const first = await invoke(
-    ["find", "shared page", "--limit", "2", ...common],
-  );
-  assert.equal(first.exitCode, 0, first.stderr);
-  assert.deepEqual(
-    JSON.parse(first.stdout).data.records.map(({ id }) => id),
-    ["record:page0", "record:page1"],
-  );
-  assert.deepEqual(
-    JSON.parse(first.stdout).next,
-    [`lodestar find "shared page" --limit 2 --offset 2`],
-  );
-  const second = await invoke(
-    ["find", "shared page", "--limit", "2", "--offset", "2", ...common],
-  );
-  assert.deepEqual(
-    JSON.parse(second.stdout).data.records.map(({ id }) => id),
-    ["record:page2"],
-  );
-  assert.equal(JSON.parse(second.stdout).more, false);
-});
-
-test("the public links and delete commands operate through JSON", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const common = ["--db", file];
-  await invoke(["init", ...common]);
-  await invoke(["put", ...common], JSON.stringify(inputRecord()));
-  await invoke(["put", ...common], JSON.stringify({
-    ...inputRecord(),
-    id: "record:linked",
-    name: "Linked",
-    aliases: [],
-    links: [{ relationship: "related", to_id: "record:cli" }],
-  }));
-
-  const links = await invoke(["links", "record:cli", ...common]);
-  assert.equal(links.exitCode, 0, links.stderr);
-  assert.deepEqual(
-    JSON.parse(links.stdout).data.links.map(
-      ({ direction, relationship, from_id: fromId }) =>
-        [direction, relationship, fromId],
-    ),
-    [["incoming", "related", "record:linked"]],
-  );
-
-  const deleted = await invoke(["delete", "record:cli", ...common]);
-  assert.equal(deleted.exitCode, 0, deleted.stderr);
-  assert.equal(JSON.parse(deleted.stdout).data.deleted.links, 1);
-  const linked = await invoke(["get", "record:linked", ...common]);
-  assert.deepEqual(JSON.parse(linked.stdout).data.links, []);
-});
-
-test("read-only commands do not change database bytes or create sidecars", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const common = ["--db", file];
-  await invoke(["init", ...common]);
-  await invoke(["put", ...common], JSON.stringify(inputRecord()));
-  const snapshot = async () => ({
-    digest: createHash("sha256").update(await readFile(file)).digest("hex"),
-    entries: (await readdir(directory)).sort(),
-  });
-  const before = await snapshot();
-  for (const args of [
-    ["get", "record:cli", ...common],
-    ["find", "record", ...common],
-    ["links", "record:cli", ...common],
-    ["doctor", ...common],
-    ["export", ...common],
-  ]) {
-    const result = await invoke(args);
-    assert.equal(result.exitCode, 0, result.stderr);
-    assert.deepEqual(await snapshot(), before);
-  }
-});
-
-test("errors use the stable JSON structure and a nonzero exit", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  await invoke(["init", "--db", file]);
-  const result = await invoke(["get", "missing", "--db", file]);
-  assert.equal(result.exitCode, 3);
-  assert.equal(result.stdout, "");
-  assert.deepEqual(JSON.parse(result.stderr), {
-    v: 1,
-    ok: false,
-    operation: "get",
-    revision: null,
-    scope: { project: null, cwd: null, session: null, actor: null },
-    error: {
-      action: "Use lodestar find or inspect the repository directly.",
-      code: "record_not_found",
-      identifiers: { requested: "missing" },
-      message: "No record or alias matched the requested identifier.",
-    },
-    more: false,
-    next: ["Use lodestar find or inspect the repository directly."],
-  });
-});
-
-test("the option terminator preserves flag-shaped identifiers", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  const common = ["--db", file];
-  await invoke(["init", ...common]);
-  await invoke(["put", ...common], JSON.stringify({
-    ...inputRecord(),
-    id: "--record",
-    aliases: [],
-  }));
-  const result = await invoke(["get", ...common, "--", "--record"]);
-  assert.equal(result.exitCode, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).data.id, "--record");
 });
 
 test("put rejects malformed UTF-8 instead of replacing bytes", async (t) => {
@@ -558,34 +229,6 @@ test("the spawned CLI leaves its argument boundary to the host OS", () => {
   assert.match(hostFailure.code, /^(E2BIG|EINVAL|ENAMETOOLONG)$/u);
 });
 
-test("the CLI emits valid JSON beyond the former output ceiling", {
-  timeout: 120_000,
-}, async (t) => {
-  const directory = await temporaryDirectory(t);
-  const file = path.join(directory, "lodestar.db");
-  await initializeDatabase(file);
-  const db = await openWriteDatabase(file);
-  const text = "x".repeat(261_000);
-  for (let index = 0; index < 322; index += 1) {
-    putRecord(db, {
-      ...inputRecord(),
-      id: `instruction:large:${index}`,
-      type: "instruction",
-      name: `Large required instruction ${index}`,
-      content: { state: "known", value: { required: true, text } },
-      aliases: [],
-    });
-  }
-  db.close();
-
-  const result = await invoke(["start", "--db", file, "--cwd", directory]);
-  assert.equal(result.exitCode, 0, result.stderr);
-  assert.ok(Buffer.byteLength(result.stdout, "utf8") > 80 * 1024 * 1024);
-  const output = JSON.parse(result.stdout);
-  assert.equal(output.ok, true);
-  assert.equal(output.data.required.length, 323);
-});
-
 test("the CLI does not trust or amplify forged Lodestar errors", async () => {
   const forged = new Error("x".repeat(100_000));
   forged.name = "LodestarError";
@@ -604,10 +247,11 @@ test("the CLI does not trust or amplify forged Lodestar errors", async () => {
   assert.equal(result.output().stdout, "");
   assert.ok(Buffer.byteLength(result.output().stderr, "utf8") < 4096);
   assert.deepEqual(JSON.parse(result.output().stderr), {
-    v: 1,
+    v: 5,
     ok: false,
     operation: "put",
     revision: null,
+    database_instance_id: null, database_epoch: null, request: null,
     scope: { project: null, cwd: null, session: null, actor: null },
     error: {
       action: "Retry the command. If it fails again, run lodestar doctor.",
@@ -664,10 +308,11 @@ test("the CLI always normalizes unreadable genuine error diagnostics", async () 
   assert.equal(exitCode, 2);
   assert.equal(result.output().stdout, "");
   assert.deepEqual(JSON.parse(result.output().stderr), {
-    v: 1,
+    v: 5,
     ok: false,
     operation: "put",
     revision: null,
+    database_instance_id: null, database_epoch: null, request: null,
     scope: { project: null, cwd: null, session: null, actor: null },
     error: {
       action: "Review the identifiers and retry with valid Lodestar input.",
@@ -678,4 +323,68 @@ test("the CLI always normalizes unreadable genuine error diagnostics", async () 
     more: false,
     next: ["Review the identifiers and retry with valid Lodestar input."],
   });
+});
+
+test('ordinary reads and writes never initialize, convert, or replace an absent or unrelated store', async (t) => {
+  const root = await temporaryDirectory(t), file = path.join(root, 'missing', 'lodestar.db');
+  for (const command of [['start'], ['get', 'missing'], ['find', 'needle'], ['export'], ['put']]) {
+    const result = await invoke([...command, '--db', file], '{}');
+    assert.notEqual(result.exitCode, 0);
+  }
+  await assert.rejects(access(path.dirname(file)), { code: 'ENOENT' });
+  const foreign = path.join(root, 'foreign.db');
+  await writeFile(foreign, 'not a database');
+  const before = await readFile(foreign);
+  assert.notEqual((await invoke(['init', '--db', foreign])).exitCode, 0);
+  assert.deepEqual(await readFile(foreign), before);
+});
+
+test('CLI returns reusable absence bases and preserves explicit request identity through put/delete/history', async (t) => {
+  const f = await fixture(t);
+  const missing = await f.cli(['get', 'fact:cli']);
+  assert.equal(missing.value.error.code, 'record_not_found');
+  const basis = missing.value.error.identifiers.write_basis;
+  assert.equal(basis.targets[0].expected_revision, null);
+  const input = { mode: 'create', record: { id: 'fact:cli', kind: 'fact', name: 'CLI fact', scope: 'global',
+    availability: 'known', data: { content: 'complete text' }, aliases: ['cli fact'], links: [], sources: [] } };
+  const request = { v: 5, request_id: 'cli-create', write_basis: basis, input };
+  const put = await f.cli(['put'], request);
+  assert.equal(put.code, 0, JSON.stringify(put.value));
+  assert.equal(put.value.request.replayed, false);
+  assert.equal((await f.cli(['put'], request)).value.request.replayed, true);
+  const get = await f.cli(['get', 'cli fact']);
+  assert.equal(get.value.data.data.content, 'complete text');
+  const retired = await f.cli(['delete'], { v: 5, request_id: 'retire', write_basis: get.value.data.write_basis,
+    input: { id: 'fact:cli', reason: 'Superseded by new evidence' } });
+  assert.equal(retired.code, 0, JSON.stringify(retired.value));
+  assert.equal((await f.cli(['get', 'fact:cli'])).value.data.semantics.lifecycle, 'historical');
+  assert.equal((await f.cli(['find', 'complete text'])).value.data.records.length, 0);
+  assert.ok((await f.cli(['find', 'complete text', '--history'])).value.data.records.some(({ id }) => id === 'fact:cli'));
+});
+
+test('find page continuation pins the database revision and retains search filters', async (t) => {
+  const f = await fixture(t);
+  for (const id of ['fact:1', 'fact:2', 'fact:3']) await f.create(id, 'fact', { query: 'needle' }, 'project:one');
+  const first = await f.cli(['find', 'needle', '--scope', 'project:one', '--kind', 'fact', '--limit', '1']);
+  assert.equal(first.value.more, true);
+  assert.equal(first.value.next[0].command, 'find');
+  assert.ok(first.value.next[0].args.includes('--scope'));
+  assert.ok(first.value.next[0].args.includes('--kind'));
+  const second = await f.cli(['find', 'needle', '--scope', 'project:one', '--kind', 'fact', '--limit', '1', '--offset', '1', '--at-revision', String(first.value.revision)]);
+  assert.equal(second.code, 0);
+  assert.notEqual(second.value.data.records[0].id, first.value.data.records[0].id);
+  await f.create('fact:other', 'fact', { unrelated: true });
+  const stale = await f.cli(['find', 'needle', '--limit', '1', '--offset', '2', '--at-revision', String(first.value.revision)]);
+  assert.equal(stale.value.error.code, 'read_revision_conflict');
+});
+
+test('the CLI delivers required source bytes beyond the former output ceiling', { timeout: 120000 }, async (t) => {
+  const f = await fixture(t);
+  const content = 'x'.repeat(80 * 1024 * 1024 + 1);
+  await writeFile(path.join(f.root, 'AGENTS.md'), content);
+  const result = await f.cli(['start', '--cwd', f.root]);
+  assert.equal(result.code, 0);
+  const source = result.value.data.required.find(({ path: file }) => file === path.join(f.root, 'AGENTS.md'));
+  assert.equal(source.text.length, content.length);
+  assert.equal(source.sha256, createHash('sha256').update(content).digest('hex'));
 });

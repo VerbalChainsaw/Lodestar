@@ -2,7 +2,9 @@
 
 Lodestar documents this small toolchain rather than treating it as one giant rules file. Each part closes a specific failure mode without granting Lodestar ownership over another tool's files.
 
-Lodestar ships canonical reference content from npm. It owns its database and package bytes only. External skill directories and agent-instruction files remain owned by their native environments.
+Lodestar ships canonical reference content in its package. It owns its database and
+package bytes only. External skill directories and agent-instruction files remain
+owned by their native environments.
 
 ---
 
@@ -11,17 +13,23 @@ Lodestar ships canonical reference content from npm. It owns its database and pa
 `lodestar-agent-context` · [github.com/VerbalChainsaw/Lodestar](https://github.com/VerbalChainsaw/Lodestar) · MIT · Node 24.15+
 
 ```bash
-npm install --global lodestar-agent-context
+npm install --global ./lodestar-agent-context-2.0.0.tgz
+lodestar init
 lodestar skills verify --target all
 ```
+
+This release uses the supplied local tarball until 2.0.0 is published to the package
+registry.
 
 Lodestar does not install or synchronize external skill directories. Place skills
 through the native environment or a deliberate user-owned distribution step, then use
 read-only verification when comparison is useful.
 
-A local context registry. Project knowledge, decisions, work presence, startup snapshots, and continuity live in one universal-record SQLite database and come back through stable IDs, exact aliases, deterministic search, and explicit links. No background service or runtime network dependency.
+A local context registry. Project knowledge, decisions, work outcomes, and continuity live in one universal-record SQLite database and come back through stable IDs, exact aliases, deterministic search, and explicit links. Fresh orientation is read-only and is never persisted as a startup snapshot. No background service or runtime network dependency.
 
-**What it covers.** Agents open a session by recursively searching the repo and rebuilding context the project already knows, and that burns a good chunk of a window before any work starts. Lodestar gives them a smaller first move.
+**What it covers.** Agents can start project work by recursively searching the repo
+and rebuilding context the project already knows, and that burns a good chunk of a
+window before any work starts. Lodestar gives them a smaller first move.
 
 The mechanism is exact retrieval with optional caller-selected paging:
 
@@ -32,13 +40,17 @@ The mechanism is exact retrieval with optional caller-selected paging:
 | `links <id-or-alias>` | **One hop** of incoming and outgoing links. Never a transitive dump of the graph. |
 | `export` | A deterministic JSON representation, when you actually want everything. |
 
-Every success is one JSON object on stdout, `{"ok": true, "data": {}}`. Every failure is one stable object on stderr carrying a code, a message, the identifiers requested, and an `action` field telling the agent what to do next. `--human` formats it for people. Help and version never open or create a database.
+Every success is one contract-5 JSON envelope on stdout, including `v`, `ok`,
+`operation`, database/revision/scope fields, `data`, `more`, and `next`. Every failure
+is one envelope on stderr carrying the same context plus a code, message, identifiers,
+and action. `--human` formats it for people. Help and version never open or create a
+database.
 
-The part I care most about is what it refuses to claim. Record content carries one of five states: `known`, `known_empty`, `unavailable`, `unknown`, `stale`. Whether a source was actually checked is tracked on a separate axis as `inspected`, `not_inspected`, `inspected_no_value`, or `unknown`. So `known_empty` means a checked source genuinely supports an empty value, which is a different fact from nobody having looked, and neither one means the project is complete. Writes do not have to spell all of that out: a `put` that omits `content.state` stores `known`, and a source that omits inspection stores `not_inspected` — explicit states still validate, but a fresh fact or a bare source is never rejected for leaving metadata at its default.
+The part I care most about is what it refuses to claim. Record availability and semantic attribution stay explicit, and source observations identify the evidence actually inspected. Missing provenance is preserved as uncertainty rather than rewritten as user direction or a fresh observation. New writes provide complete semantics; the core rejects unsafe numeric input before JavaScript can round it.
 
 A missing record means only that Lodestar lacks that knowledge. It is not evidence the thing does not exist. Its published agent contract is five lines: use Lodestar before recursively searching, retrieve through stable IDs or aliases, follow explicit links for related context, treat a missing record as missing knowledge rather than proof of absence, and inspect the repository normally when Lodestar is insufficient. It does not infer readiness, score completeness, or claim its records fully describe anything.
 
-Durability is ordinary SQLite done carefully: `BEGIN IMMEDIATE`, foreign keys, `synchronous=FULL`, read-only query-only connections for reads, and a finite lock wait so a one-shot CLI cannot hang behind another writer beyond its host execution window. Startup replay snapshots are ordinary universal records, not a second persistence format or background service.
+Durability is ordinary SQLite done carefully: admitted `BEGIN IMMEDIATE` transactions, foreign keys, `synchronous=FULL`, read-only query-only connections for reads, explicit target revisions, one database revision per logical mutation, and idempotent request receipts. Writer fences reject retained old clients even when they still hold an open connection.
 
 A note on the 1.0 rewrite, since it is relevant to the rules in this repo. The original version had generation trees, commit pointers, heartbeat locks, snapshots, and custom rollback. 1.0 replaced all of that with ordinary SQLite transactions. It does less and is easier to operate. I wrote a freeze rule telling agents to stop gold-plating, then had to apply it to my own tool, which was humbling.
 
@@ -86,17 +98,13 @@ Lodestar is the active authority for its own context database. It does not distr
 lodestar skills verify --target all
 lodestar agents status --cwd .
 lodestar start --cwd .
-lodestar work start "<scope>"
-lodestar work done "<result>"
+lodestar work start --file <request.json>
+lodestar work done --file <request.json>
 ```
 
-Identity comes from the host, not the shell. In a host running the Lodestar plugin
-(Codex Desktop), call the bundled tools — `lodestar_work_start`, `lodestar_work_done`,
-`lodestar_work_status` — which carry the exact session id the host already knows.
-A plain shell has no session id, so `lodestar work start` there requires an explicit
-`--session <id>`. Lodestar refuses rather than guessing: work records are keyed by
-actor, so a guessed session would capture and then overwrite a concurrent peer's
-marker.
+Identity comes from actual host context, never from an adapter default. The native MCP
+tools pass through authenticated actor fields only when the host provides them. A
+plain shell must provide its identity explicitly for operations that require a claimant.
 ```text
 lodestar handoff status --cwd .
 ```

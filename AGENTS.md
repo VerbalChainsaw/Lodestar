@@ -1,8 +1,8 @@
-# Lodestar governance
+# Lodestar repository instructions
 
 ## Unified Lodestar boundary
 
-Lodestar is the single machine-state suite. Startup context, knowledge, work
+Lodestar is the single machine-state suite. Project orientation, knowledge, work
 presence, and handoff use one executable, one universal record model, and one
 SQLite database.
 
@@ -10,7 +10,7 @@ Lodestar may own only:
 
 - atomic, idempotent typed-record operations;
 - the `start`, knowledge, `work`, and `handoff` command families;
-- one versioned JSON success/error envelope; and
+- one contract-5 JSON success/error envelope; and
 - migration and doctor support required by that persisted state.
 
 Unless the Director explicitly reauthorizes them, Lodestar must not own or implement:

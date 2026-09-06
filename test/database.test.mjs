@@ -20,6 +20,7 @@ import {
   commit,
   openReadDatabase,
   openWriteDatabase,
+  admittedTransaction,
   transaction,
 } from "../src/database.mjs";
 import {
@@ -80,7 +81,8 @@ test("initializes the universal-record schema and is read-only when repeated", a
       .map(({ key, value }) => [key, value]),
   );
   assert.equal(metadata.created_at, "2026-07-30T10:00:00.000Z");
-  assert.equal(metadata.schema_version, "4");
+  assert.equal(metadata.schema_version, "5");
+  assert.match(metadata.database_epoch, /^[0-9a-f]{64}$/u);
   assert.equal(metadata.database_revision, "0");
   assert.match(metadata.database_instance_id, /^[0-9a-f]{64}$/u);
   db.close();
@@ -157,7 +159,7 @@ test("a failed transaction leaves no partial records", async (t) => {
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
   const db = openConnection(file);
-  assert.throws(() => transaction(db, () => {
+  assert.throws(() => admittedTransaction(db, () => {
     db.prepare(
       "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(
@@ -207,7 +209,7 @@ test("commit ambiguity is explicit and preserves a possibly committed init", asy
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
 });
@@ -241,7 +243,7 @@ test("definite init commit failure preserves a resumable reservation", async (t)
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
 });
@@ -252,14 +254,14 @@ test("SQLite rolls back an interrupted uncommitted transaction", async (t) => {
   await initializeDatabase(file);
   const databaseModule = new URL("../src/database.mjs", import.meta.url).href;
   const script = [
-    `import { openConnection } from ${JSON.stringify(databaseModule)};`,
+    `import { admittedTransaction, openConnection } from ${JSON.stringify(databaseModule)};`,
     `const db = openConnection(${JSON.stringify(file)});`,
-    "db.exec('BEGIN IMMEDIATE');",
+    "admittedTransaction(db, () => {",
     "db.prepare('INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)').run(",
     "'record:interrupted','note','Interrupted','global',",
     "'{\"state\":\"known\",\"value\":true}',",
     "'2026-07-30T10:00:00.000Z','2026-07-30T10:00:00.000Z');",
-    "process.exit(0);",
+    "process.exit(0); });",
   ].join("\n");
   const child = spawnSync(
     process.execPath,
@@ -304,7 +306,7 @@ test("initialization resumes an interrupted zero-byte reservation", async (t) =>
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
 });
@@ -340,27 +342,21 @@ test("schema constraints allow complete content and enforce exact timestamps", a
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
   const db = openConnection(file);
-  const insert = db.prepare(
-    "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
-  assert.doesNotThrow(() => insert.run(
-    "😀".repeat(256),
-    "note",
-    "Too many bytes",
-    "global",
-    '{"state":"known"}',
-    "2026-07-30T10:00:00.000Z",
-    "2026-07-30T10:00:00.000Z",
-  ));
-  assert.throws(() => insert.run(
-    "record:bad-time",
-    "note",
-    "Bad time",
-    "global",
-    '{"state":"known"}',
-    "2026-02-30T10:00:00.000Z",
-    "2026-07-30T10:00:00.000Z",
-  ));
+  admittedTransaction(db, () => {
+    const insert = db.prepare(
+      "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    assert.doesNotThrow(() => insert.run(
+      "😀".repeat(256), "note", "Too many bytes", "global",
+      '{"state":"known"}', "2026-07-30T10:00:00.000Z",
+      "2026-07-30T10:00:00.000Z",
+    ));
+    assert.throws(() => insert.run(
+      "record:bad-time", "note", "Bad time", "global",
+      '{"state":"known"}', "2026-02-30T10:00:00.000Z",
+      "2026-07-30T10:00:00.000Z",
+    ));
+  });
   db.close();
 });
 
@@ -382,7 +378,7 @@ test("concurrent initialization never overwrites another creator", async (t) => 
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
   if (process.platform !== "win32") {

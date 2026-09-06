@@ -8,7 +8,7 @@ export function readMetadata(db, file = null) {
       "SELECT key, value FROM metadata "
         + "WHERE key IN ("
         + "'schema_version', 'created_at', 'database_instance_id', "
-        + "'database_revision'"
+        + "'database_epoch', 'database_revision'"
         + ") ORDER BY key",
     ).all();
     return Object.fromEntries(rows.map(({ key, value }) => [key, value]));
@@ -103,6 +103,19 @@ export function assertSupportedSchema(db, file = null) {
         identifiers: {
           database: file,
           database_instance_id: metadata.database_instance_id ?? null,
+        },
+        action: "Run lodestar doctor and use a valid Lodestar database.",
+      },
+    );
+  }
+  if (!/^[0-9a-f]{64}$/u.test(metadata.database_epoch ?? "")) {
+    throw lodestarError(
+      "invalid_database",
+      "The database recovery epoch is invalid.",
+      {
+        identifiers: {
+          database: file,
+          database_epoch: metadata.database_epoch ?? null,
         },
         action: "Run lodestar doctor and use a valid Lodestar database.",
       },

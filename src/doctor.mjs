@@ -9,6 +9,7 @@ import { diagnoseDecisions } from "./decision.mjs";
 import { diagnoseHandoff } from "./continuity.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { validateTimestamp } from "./validate.mjs";
+export { migrationPreflight } from "./schema-migration.mjs";
 
 function orderedNames(db, type) {
   return db.prepare(
@@ -61,6 +62,8 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       schema_version: null,
       database_created_at: null,
       database_instance_id: null,
+      database_epoch: null,
+      database_revision: null,
       counts: {
         records: null,
         links: null,
@@ -125,11 +128,14 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   let schemaVersion = null;
   let databaseCreatedAt = null;
   let databaseInstanceId = null;
+  let databaseEpoch = null;
+  let databaseRevision = null;
   if (validColumns.metadata) {
     const metadataRows = db.prepare(
       "SELECT key, value FROM metadata "
       + "WHERE key IN ("
-      + "'schema_version', 'created_at', 'database_instance_id'"
+      + "'schema_version', 'created_at', 'database_instance_id', "
+      + "'database_epoch', 'database_revision'"
       + ") ORDER BY key",
     ).all();
     const metadata = Object.fromEntries(
@@ -139,6 +145,8 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     schemaVersion = schemaValue === String(SCHEMA_VERSION) ? SCHEMA_VERSION : schemaValue;
     databaseCreatedAt = metadata.created_at ?? null;
     databaseInstanceId = metadata.database_instance_id ?? null;
+    databaseEpoch = metadata.database_epoch ?? null;
+    databaseRevision = metadata.database_revision ?? null;
     if (schemaValue !== String(SCHEMA_VERSION)) {
       add(
         "unsupported_schema",
@@ -164,6 +172,15 @@ export function diagnoseDatabase(db, { database = null } = {}) {
         "The database instance ID is invalid.",
         { database_instance_id: databaseInstanceId },
       );
+    }
+    if (!/^[0-9a-f]{64}$/u.test(metadata.database_epoch ?? "")) {
+      add("database_epoch_invalid", "The database recovery epoch is invalid.",
+        { database_epoch: databaseEpoch });
+    }
+    if (!/^(?:0|[1-9][0-9]*)$/u.test(metadata.database_revision ?? "")
+      || !Number.isSafeInteger(Number(metadata.database_revision))) {
+      add("database_revision_invalid", "The database revision is invalid.",
+        { database_revision: databaseRevision });
     }
   }
 
@@ -242,6 +259,8 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     schema_version: schemaVersion,
     database_created_at: databaseCreatedAt,
     database_instance_id: databaseInstanceId,
+    database_epoch: databaseEpoch,
+    database_revision: databaseRevision === null ? null : Number(databaseRevision),
     counts,
     checks: {
       integrity: integrity.length === 1 && integrity[0] === "ok"

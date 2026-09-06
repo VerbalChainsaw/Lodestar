@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
 import { chmod, mkdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const PACKAGE_ENTRY = fileURLToPath(new URL("../lodestar.mjs", import.meta.url));
+const bashLiteral = (value) => `'${String(value).replaceAll("'", `'"'"'`)}'`;
 
 export async function pathExists(candidate) {
   try { await stat(candidate); return true; }
@@ -27,7 +30,7 @@ export async function resolveClientStateHome(home) {
   return resolved;
 }
 
-export function renderWindowsPosixShim() {
+export function renderWindowsPosixShim({ node = process.execPath, entry = PACKAGE_ENTRY } = {}) {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -36,39 +39,19 @@ if ! command -v cygpath >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -z "\${LODESTAR_HOME:-}" ]; then
-  for directory in "$HOME"/.local/opt/node-*/node_modules/lodestar-agent-context; do
-    if [ -f "$directory/lodestar.mjs" ]; then
-      LODESTAR_HOME="$directory"
-      break
-    fi
-  done
-fi
-
-if [ -z "\${LODESTAR_HOME:-}" ] || [ ! -f "$LODESTAR_HOME/lodestar.mjs" ]; then
-  echo "LODESTAR ERROR: lodestar.mjs not found. Set LODESTAR_HOME or reinstall Lodestar." >&2
+NODE_BIN_WIN=${bashLiteral(node)}
+LODESTAR_ENTRY_WIN=${bashLiteral(entry)}
+NODE_BIN="$(cygpath -u "$NODE_BIN_WIN")"
+LODESTAR_ENTRY="$(cygpath -u "$LODESTAR_ENTRY_WIN")"
+if [ ! -x "$NODE_BIN" ] || [ ! -f "$LODESTAR_ENTRY" ]; then
+  echo "LODESTAR ERROR: selected Windows Lodestar installation is unavailable; reinstall its launcher." >&2
   exit 1
 fi
-
-NODE_BIN=""
-for executable in "$HOME"/.local/opt/node-*/node.exe; do
-  if [ -x "$executable" ]; then
-    NODE_BIN="$executable"
-    break
-  fi
-done
-if [ -z "$NODE_BIN" ]; then
-  echo "LODESTAR ERROR: pinned Windows node.exe not found" >&2
-  exit 1
-fi
-
-NODE_BIN_WIN="$(cygpath -aw "$NODE_BIN")"
-LODESTAR_ENTRY_WIN="$(cygpath -aw "$LODESTAR_HOME/lodestar.mjs")"
 MSYS2_ARG_CONV_EXCL='*' exec "$NODE_BIN_WIN" "$LODESTAR_ENTRY_WIN" "$@"
 `;
 }
 
-export function renderWslShim() {
+export function renderWslShim({ node = process.execPath, entry = PACKAGE_ENTRY } = {}) {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -77,28 +60,12 @@ if [ ! -x /init ] || ! command -v cmd.exe >/dev/null 2>&1 || ! command -v wslpat
   exit 1
 fi
 
-WINDOWS_PROFILE_WIN="$(/init "$(command -v cmd.exe)" -- /d /c echo %USERPROFILE% 2>/dev/null | tr -d '\r')"
-WINDOWS_PROFILE="$(wslpath -u "$WINDOWS_PROFILE_WIN")"
-LODESTAR_HOME=""
-NODE_BIN=""
-for directory in "$WINDOWS_PROFILE"/.local/opt/node-*/node_modules/lodestar-agent-context; do
-  if [ -f "$directory/lodestar.mjs" ]; then
-    LODESTAR_HOME="$directory"
-    break
-  fi
-done
-for executable in "$WINDOWS_PROFILE"/.local/opt/node-*/node.exe; do
-  if [ -f "$executable" ]; then
-    NODE_BIN="$executable"
-    break
-  fi
-done
-if [ -z "$LODESTAR_HOME" ] || [ -z "$NODE_BIN" ]; then
-  echo "LODESTAR ERROR: installed Windows Lodestar runtime not found" >&2
+NODE_BIN=${bashLiteral(node)}
+LODESTAR_ENTRY_WIN=${bashLiteral(entry)}
+if [ ! -f "$(wslpath -u "$NODE_BIN")" ] || [ ! -f "$(wslpath -u "$LODESTAR_ENTRY_WIN")" ]; then
+  echo "LODESTAR ERROR: selected Windows Lodestar installation is unavailable; reinstall its launcher." >&2
   exit 1
 fi
-
-LODESTAR_ENTRY_WIN="$(wslpath -w "$LODESTAR_HOME/lodestar.mjs")"
 arguments=("$@")
 if [ "\${1:-}" = "skills" ] || [ "\${1:-}" = "agents" ]; then
   command_name="\${1:-}"
@@ -125,7 +92,7 @@ if [ "\${1:-}" = "skills" ] || [ "\${1:-}" = "agents" ]; then
     [ "$saw_hermes_home" = true ] || arguments+=(--hermes-home "$(wslpath -w "$HOME/.hermes")")
   fi
 fi
-exec /init "$NODE_BIN" -- "$LODESTAR_ENTRY_WIN" "\${arguments[@]}"
+exec /init "$(wslpath -u "$NODE_BIN")" -- "$LODESTAR_ENTRY_WIN" "\${arguments[@]}"
 `;
 }
 

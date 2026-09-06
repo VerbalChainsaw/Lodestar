@@ -23,13 +23,12 @@ an AGENTS.md file. Lodestar also never writes a global agent file through the sk
 command. Copying or merging a template is a deliberate user-owned operation performed
 outside Lodestar.
 
-## Choose one owner for each rule
+## Choose one owner for each instruction
 
-The full project template and minimal bootstrap are alternatives, not layers to install
-together. Keep detailed project-specific rules in the repository when they must be
-versioned with the code or available independently of Lodestar. Use the minimal stub
-only when complete required project governance comes from startup. Never maintain the
-same detailed doctrine in both places.
+Keep detailed project instructions in the repository when they must be versioned with
+the code or available independently of Lodestar. The minimal bootstrap only documents
+automatic invocation and data handling; it is not a replacement behavioral contract.
+Never maintain the same detailed instruction body in both places.
 
 Before using a template:
 

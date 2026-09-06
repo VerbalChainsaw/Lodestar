@@ -1,84 +1,83 @@
-import { transaction } from "./database.mjs";
-import { safeText } from "./decision.mjs";
+import { safeText, applyDecision, normalizeDecisionKey } from "./decision.mjs";
 import { lodestarError } from "./errors.mjs";
-import { hash, normalizedRows, recordInput } from "./project.mjs";
-import { getRecordById, normalizeRecord, writeRecordSnapshot } from "./records.mjs";
-import { allocateRevision } from "./revisions.mjs";
+import { normalizedRowsResult, recordInput } from "./project.mjs";
+import { applyPutInput, getRecordById, mutate, normalizeRecord, preparePutEvidence, writeBasis, writeRecordSnapshot } from "./records.mjs";
+import { validateDomainInput } from "./cli-commands.mjs";
 
-// Candidates live outside normal global/project startup scope until explicitly promoted.
-// This is a semantic quarantine boundary, not a byte-budget mechanism.
 export const pendingScope = (project) => `pending:${project.scope}`;
-
-const LIST = "SELECT id FROM records WHERE type='pending' AND scope=? "
-  + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id";
-
-export const pendingCount = (db, project) => Number(db
-  .prepare("SELECT count(*) AS count FROM records WHERE type='pending' AND scope=?")
-  .get(pendingScope(project)).count);
-
+const candidateScopes = (project) => [...new Set([project.scope, pendingScope(project),
+  ...(project.historical_scopes ?? []).flatMap((scope) => [scope, `pending:${scope}`])])];
 export function pendingList(db, project, limit = null) {
-  if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1))
-    throw lodestarError("invalid_input", "Pending limit must be a positive safe integer.");
-  const records = limit === null ? normalizedRows(db, LIST, pendingScope(project))
-    : normalizedRows(db, `${LIST} LIMIT ?`, pendingScope(project), limit);
-  return { scope: pendingScope(project), count: pendingCount(db, project), records };
+  const scopes = candidateScopes(project);
+  const result = normalizedRowsResult(db, "SELECT id FROM records WHERE type='pending' AND scope IN ("
+    + scopes.map(() => "?").join(",") + ") AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'unresolved') NOT IN ('historical','superseded') "
+    + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
+  return { count: result.records.length,
+    records: limit === null ? result.records : result.records.slice(0, limit),
+    record_errors: result.record_errors, complete: result.record_errors.length === 0,
+    write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
+      targets: [...result.records.map(({ id }) => ({ kind: "record", id })),
+        ...(project.binding_preconditions ?? []).map(({ target }) => target)] }) };
 }
-
-export function pendingAdd(db, project, identity, rawText, options = {}) {
-  const text = safeText(rawText, "Pending text");
-  const source = options.source === undefined
-    ? "agent"
-    : safeText(options.source, "Pending source");
-  const now = (options.now ?? (() => new Date()))().toISOString();
-  return transaction(db, () => {
-    // Identical text from the same source is one candidate, so a retried or repeated
-    // turn cannot flood the queue.
-    const key = hash(`${source}\0${text}`, 20);
-    const id = `pending:${hash(project.scope, 16)}:${key}`;
-    const prior = db.prepare("SELECT id FROM records WHERE id=?").get(id);
-    if (prior) return { added: false, record: normalizeRecord(getRecordById(db, id)) };
-    const revision = allocateRevision(db);
-    writeRecordSnapshot(db, recordInput(id, "pending", text,
-      pendingScope(project), 0, { v: 1, required: false, text, source,
-        actor: identity.actor, session: identity.session, captured_at: now }),
-    { createdAt: now, updatedAt: now, revision });
-    return { added: true, evicted: [], record: normalizeRecord(getRecordById(db, id)) };
-  }, options.database);
-}
-
-function candidate(db, project, id) {
-  const row = db.prepare("SELECT id,scope FROM records WHERE id=?").get(String(id));
-  if (!row || row.scope !== pendingScope(project)) {
-    throw lodestarError("pending_not_found", "No pending candidate with that id in this project.",
-      { identifiers: { id, scope: pendingScope(project) } });
+export const pendingCount = (db, project) => pendingList(db, project).count;
+export function pendingMutation(db, project, identity, action, request, options = {}) {
+  const input = validateDomainInput(`pending.${action}`, request?.input);
+  const putEvidence = input.destination?.operation === "put"
+    ? preparePutEvidence(db, input.destination.input, request) : {};
+  const targets = [{ kind: "record", id: input.id }, ...(project.binding_preconditions ?? []).map(({ target }) => target)];
+  if (action === "promote") {
+    const destination = input.destination;
+    if (destination.operation === "put") {
+      const id = destination.input?.id ?? destination.input?.record?.id;
+      if (!id) throw lodestarError("invalid_input", "A promotion destination needs an exact record ID.");
+      targets.push({ kind: "record", id });
+    } else if (destination.operation === "decision.set") {
+      validateDomainInput("decision.set", destination.input);
+      targets.push({ kind: "decision", scope: project.scope, key: normalizeDecisionKey(destination.input.key) });
+      targets.push(...(destination.input.resolved_heads ?? []).map((id) => ({ kind: "record", id })));
+    } else throw lodestarError("invalid_input", "Promotion destination operation must be put or decision.set.");
   }
-  return getRecordById(db, row.id);
-}
-
-// Promotion moves the candidate into project scope and never marks it required.
-export function pendingPromote(db, project, identity, id, options = {}) {
-  const record = candidate(db, project, id);
-  const now = (options.now ?? (() => new Date()))().toISOString();
-  const promoted = `note:${record.id.slice("pending:".length)}`;
-  return transaction(db, () => {
-    const value = record.content.value;
-    writeRecordSnapshot(db, recordInput(promoted, "note", record.name, project.scope, 0,
-      { v: 1, required: false, text: value.text, source: value.source,
-        captured_at: value.captured_at, promoted_at: now, promoted_by: identity.actor }),
-    { createdAt: value.captured_at ?? now, updatedAt: now, revision: allocateRevision(db) });
-    // Deleted inline rather than through deleteRecord: transactions are not nestable,
-    // and dependent rows cascade from the records row.
-    db.prepare("DELETE FROM records WHERE id=?").run(record.id);
-    return { promoted: true, id: promoted, scope: project.scope,
-      record: normalizeRecord(getRecordById(db, promoted)) };
-  }, options.database);
-}
-
-export function pendingDrop(db, project, id, options = {}) {
-  const record = candidate(db, project, id);
-  return transaction(db, () => {
-    allocateRevision(db);
-    db.prepare("DELETE FROM records WHERE id=?").run(record.id);
-    return { dropped: true, id: record.id };
-  }, options.database);
+  return mutate(db, `pending.${action}`, request, (context) => {
+    const { revision, timestamp } = context;
+    const row = db.prepare("SELECT id FROM records WHERE id=?").get(input.id);
+    const prior = row ? getRecordById(db, input.id) : null;
+    if (prior && (prior.type !== "pending" || !candidateScopes(project).includes(prior.scope))) {
+      throw lodestarError("pending_conflict", "The target is not a candidate in this project.", { identifiers: { id: input.id } });
+    }
+    if (action === "add") {
+      if (prior) throw lodestarError("pending_conflict", "A candidate with this ID already exists.", { identifiers: { id: input.id } });
+      const text = safeText(input.text, "Candidate text");
+      writeRecordSnapshot(db, { ...recordInput(input.id, "pending", text, project.scope, 0,
+        { text, source: input.source ?? null, actor: identity.actor, captured_at: timestamp }),
+        semantics: { lifecycle: "unresolved", context_role: "on_demand", basis: "asserted",
+          applicability: { project: project.scope, checkout: project.checkout_root ?? null } } },
+      { createdAt: timestamp, updatedAt: timestamp, revision });
+      return { data: { added: true, record: normalizeRecord(getRecordById(db, input.id)) }, changed_ids: [input.id] };
+    }
+    if (!prior) throw lodestarError("pending_not_found", "The candidate does not exist.", { identifiers: { id: input.id } });
+    let promoted = null, changed = [input.id];
+    if (action === "promote") {
+      if (["historical", "superseded"].includes(prior.semantics?.lifecycle)) {
+        throw lodestarError("pending_conflict", "This candidate has already been settled; inspect its history.");
+      }
+      const destination = input.destination;
+      if (destination.operation === "put") {
+        const destinationId = destination.input.id ?? destination.input.record?.id;
+        const destinationScope = destination.input.record?.scope ?? db.prepare("SELECT scope FROM records WHERE id=?").get(destinationId)?.scope;
+        if (destinationScope !== project.scope) throw lodestarError("project_binding_conflict", "Promotion must target this canonical project.");
+        promoted = applyPutInput(db, destination.input, { ...context, ...putEvidence });
+        if (promoted.revision === revision) changed.push(promoted.id);
+      } else {
+        const result = applyDecision(db, project, identity, "set", destination.input, context);
+        promoted = result.data; changed.push(...result.changed_ids);
+      }
+    } else safeText(input.reason, "Candidate retirement reason");
+    writeRecordSnapshot(db, { ...recordInput(prior.id, prior.type, prior.name, prior.scope, prior.priority,
+      { ...prior.content.value, settlement: action, reason: input.reason ?? "Promoted through an explicit checked destination.",
+        destination: action === "promote" ? input.destination : null }),
+      aliases: prior.aliases, links: normalizeRecord(prior).links, sources: prior.sources,
+      semantics: { ...prior.semantics, lifecycle: action === "promote" ? "superseded" : "historical", context_role: "on_demand" } },
+    { createdAt: prior.created_at, updatedAt: timestamp, revision });
+    return { data: { settled: true, record: normalizeRecord(getRecordById(db, input.id)), promoted }, changed_ids: changed };
+  }, { ...options, requiredTargets: targets });
 }

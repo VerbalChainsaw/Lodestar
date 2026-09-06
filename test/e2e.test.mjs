@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import {
-  access, mkdir, mkdtemp, readFile, readdir, rm, writeFile,
-} from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -13,258 +10,123 @@ import { fileURLToPath } from "node:url";
 import { LODESTAR_VERSION } from "../src/version.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const COMMANDS = [
-  "start", "init", "put", "get", "find", "links", "delete", "doctor",
-  "export", "work", "handoff", "decision", "skills",
-];
+const NODE = process.execPath;
 
-const digest = async (file) => createHash("sha256").update(await readFile(file)).digest("hex");
-
-function npmRun(args, cwd) {
-  const bundled = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-  const npmCli = process.env.npm_execpath ?? (existsSync(bundled) ? bundled : null);
-  const command = npmCli ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
-  const result = spawnSync(command, npmCli ? [npmCli, ...args] : args, {
-    cwd, encoding: "utf8", shell: !npmCli && process.platform === "win32",
-  });
+function npm(args, cwd) {
+  const bundled = path.join(path.dirname(NODE), "node_modules", "npm", "bin", "npm-cli.js");
+  const cli = process.env.npm_execpath ?? (existsSync(bundled) ? bundled : null);
+  const command = cli ? NODE : process.platform === "win32" ? "npm.cmd" : "npm";
+  const result = spawnSync(command, cli ? [cli, ...args] : args,
+    { cwd, encoding: "utf8", shell: !cli && process.platform === "win32" });
   assert.equal(result.status, 0, result.stderr || result.error?.stack);
   return result.stdout;
 }
 
-function raw(entry, args, { cwd, input } = {}) {
-  return spawnSync(process.execPath, [entry, ...args], {
-    cwd, input, encoding: "utf8", windowsHide: true,
-  });
+function invoke(entry, args, { input, cwd } = {}) {
+  const result = spawnSync(NODE, [entry, ...args],
+    { input, cwd, encoding: "utf8", windowsHide: true });
+  const text = (result.stdout.trim() ? result.stdout : result.stderr).trim();
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr,
+    value: text ? JSON.parse(text) : null };
 }
 
-function ok(entry, args, options = {}) {
-  const result = raw(entry, args, options);
-  const expectedStatus = options.status ?? 0;
-  assert.equal(result.status, expectedStatus, result.stderr || result.error?.stack);
-  assert.equal(result.stderr, "", `successful ${args.join(" ")} wrote stderr`);
-  const envelope = JSON.parse(result.stdout);
-  assert.equal(envelope.ok, true, result.stdout);
-  return envelope;
-}
-
-function fails(entry, args, options = {}) {
-  const result = raw(entry, args, options);
-  assert.notEqual(result.status, 0, result.stdout);
-  assert.equal(result.stdout, "", `failed ${args.join(" ")} wrote stdout`);
-  const envelope = JSON.parse(result.stderr);
-  assert.equal(envelope.ok, false, result.stderr);
-  return envelope;
-}
-
-function concurrent(entry, invocations, cwd) {
-  return Promise.all(invocations.map(({ args, input }) => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entry, ...args], {
-      cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "", stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (text) => { stdout += text; });
-    child.stderr.setEncoding("utf8").on("data", (text) => { stderr += text; });
-    child.on("error", reject);
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-    child.stdin.end(input ?? "");
-  })));
-}
-
-async function packedEntry(directory) {
-  const packDirectory = path.join(directory, "pack");
+async function installPacked(directory) {
+  const pack = path.join(directory, "pack");
   const prefix = path.join(directory, "prefix");
-  await mkdir(packDirectory, { recursive: true });
-  const report = JSON.parse(npmRun(
-    ["pack", "--json", "--ignore-scripts", "--pack-destination", packDirectory], ROOT,
-  ));
-  const archive = path.join(packDirectory, report[0].filename);
-  npmRun([
-    "install", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", archive,
-  ], ROOT);
-  const entry = path.join(prefix, "node_modules", "lodestar-agent-context", "lodestar.mjs");
+  await mkdir(pack, { recursive: true });
+  const report = JSON.parse(npm(["pack", "--json", "--ignore-scripts", "--pack-destination", pack], ROOT));
+  const archive = path.join(pack, report[0].filename);
+  npm(["install", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", archive], ROOT);
+  const packageRoot = path.join(prefix, "node_modules", "lodestar-agent-context");
+  const entry = path.join(packageRoot, "lodestar.mjs");
   await access(entry);
-  return entry;
+  return { packageRoot, entry };
 }
 
-async function writeJson(file, value) {
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(value)}\n`);
-}
-
-function record(id, value, extra = {}) {
-  return {
-    id, type: "note", name: id, scope: "global",
-    content: { state: "known", value }, aliases: [], links: [], sources: [], ...extra,
-  };
-}
-
-function handoffPacket(overrides = {}) {
-  return {
-    goal: "Continue the Lodestar end-to-end proof",
-    rules: ["Preserve current user work"],
-    entries: [{ key: "storage", state: "fact", text: "Use one SQLite database",
-      scope: ["project"], generation: 1, provenance: { kind: "repo",
-        sourceRef: "AGENTS.md", observedAt: "2026-08-13T12:00:00.000Z" } }],
-    work: { completed: [], current: ["verification"], files: [] },
-    nextMove: "Continue the end-to-end proof",
-    evidence: [],
-    ...overrides,
-  };
-}
-
-test("the packed package completes every public operation without touching live state", {
+test("the staged package installs and exercises the current one-shot contract", {
   timeout: 120_000,
 }, async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-packed-e2e-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-2-installed-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const entry = await packedEntry(directory);
-  const project = path.join(directory, "project");
-  const database = path.join(directory, "registry", "lodestar.db");
-  const absent = path.join(directory, "absent.db");
-  await mkdir(project);
+  const { packageRoot, entry } = await installPacked(directory);
+  const database = path.join(directory, "state", "lodestar.db");
+  const clientHome = path.join(directory, "client-home");
 
-  // Read from the source of truth: a literal here silently fails every version bump.
-  assert.equal(ok(entry, ["--version"]).data.version, LODESTAR_VERSION);
-  for (const command of COMMANDS) ok(entry, [command, "--help", "--db", absent]);
-  assert.equal(await access(absent).then(() => true, () => false), false);
-  assert.equal(fails(entry, ["not-a-command"]).error.code, "unknown_command");
+  const version = invoke(entry, ["--version"]);
+  assert.equal(version.status, 0, version.stderr);
+  assert.equal(version.value.v, 5);
+  assert.equal(version.value.data.version, LODESTAR_VERSION);
 
-  assert.equal(ok(entry, ["init", "--db", database]).data.created, true);
-  const initializedHash = await digest(database);
-  assert.equal(ok(entry, ["init", "--db", database]).data.created, false);
-  assert.equal(await digest(database), initializedHash, "repeated init changed database bytes");
+  const initialized = invoke(entry, ["init", "--db", database]);
+  assert.equal(initialized.status, 0, initialized.stderr);
+  const basis = {
+    database_instance_id: initialized.value.database_instance_id,
+    database_epoch: initialized.value.database_epoch,
+    project_scope: "project:test",
+    checkout: null,
+    targets: [
+      { kind: "record", id: "fact:installed", expected_revision: null },
+      { kind: "record", id: "project:test", expected_revision: null },
+    ],
+  };
+  const request = {
+    v: 5,
+    request_id: "installed-create",
+    write_basis: basis,
+    input: { mode: "create", record: {
+      id: "fact:installed", kind: "fact", name: "Installed fact",
+      scope: "project:test", availability: "known", priority: 10,
+      data: { command: "npm test" }, aliases: ["installed fact"], links: [], sources: [],
+      semantics: { subject: "build:test-command", lifecycle: "current",
+        context_role: "orientation", basis: "asserted",
+        applicability: { project: "project:test", checkout: null } },
+    } },
+  };
+  const created = invoke(entry, ["put", "--db", database], { input: JSON.stringify(request) });
+  assert.equal(created.status, 0, created.stderr);
+  assert.equal(created.value.request.replayed, false);
+  assert.equal(invoke(entry, ["put", "--db", database], { input: JSON.stringify(request) })
+    .value.request.replayed, true);
 
-  const target = record("record:target", { text: "target" }, { aliases: ["target alias"] });
-  const linked = record("record:linked", { text: "searchable integration phrase" }, {
-    aliases: ["linked alias"],
-    links: [{ relationship: "documents", to_id: target.id }],
-    sources: [{ origin: "e2e", freshness: "current",
-      metadata: { inspection: "inspected", inspected_at: "2026-08-13T12:00:00.000Z" } }],
-  });
-  ok(entry, ["put", "--db", database], { input: JSON.stringify(target) });
-  ok(entry, ["put", "--db", database], { input: JSON.stringify(linked) });
-  assert.equal(ok(entry, ["get", "linked alias", "--db", database]).data.id, linked.id);
-  assert.deepEqual(ok(entry, ["find", "integration phrase", "--db", database])
-    .data.records.map(({ id }) => id), [linked.id]);
-  assert.equal(ok(entry, ["links", linked.id, "--db", database]).data.links[0].peer.id,
-    target.id);
+  const read = invoke(entry, ["get", "installed fact", "--db", database]);
+  assert.equal(read.status, 0, read.stderr);
+  assert.equal(read.value.data.id, "fact:installed");
+  assert.equal(read.value.data.data.command, "npm test");
+  assert.equal(read.value.data.write_basis.database_epoch, basis.database_epoch);
 
-  const beforeReads = await digest(database);
-  const readCommands = [
-    ["get", target.id], ["find", "integration"], ["links", linked.id], ["export"],
-    ["doctor"], ["work", "status", "--cwd", project],
-    ["work", "history", "--cwd", project], ["handoff", "status", "--cwd", project],
-  ];
-  for (const args of readCommands) ok(entry, [...args, "--db", database], { cwd: project });
-  assert.equal(await digest(database), beforeReads, "a read-only CLI operation changed bytes");
-  assert.deepEqual((await readdir(path.dirname(database))).filter((name) =>
-    name.startsWith("lodestar.db-") || name.startsWith("lodestar.db.")), []);
+  const retired = invoke(entry, ["delete", "--db", database], { input: JSON.stringify({
+    v: 5, request_id: "installed-retire", write_basis: read.value.data.write_basis,
+    input: { id: "fact:installed", reason: "Replaced by current source" },
+  }) });
+  assert.equal(retired.status, 0, retired.stderr);
+  assert.equal(retired.value.data.retired, true);
+  const history = invoke(entry, ["get", "fact:installed", "--history", "--db", database]);
+  assert.equal(history.status, 0, history.stderr);
+  assert.ok(history.value.data.versions.length >= 1);
 
-  const beforeFailure = await digest(database);
-  const invalidReplacement = { ...linked, name: "must roll back",
-    links: [{ relationship: "documents", to_id: "missing:target" }] };
-  assert.equal(fails(entry, ["put", "--db", database], {
-    input: JSON.stringify(invalidReplacement),
-  }).error.code, "link_target_not_found");
-  assert.equal(await digest(database), beforeFailure, "failed put changed database bytes");
-  assert.equal(ok(entry, ["get", linked.id, "--db", database]).data.data.name, linked.name);
-
-  const identity = ["--cwd", project, "--session", "work-session", "--agent", "codex",
-    "--harness", "e2e"];
-  ok(entry, ["work", "start", "first report", ...identity, "--db", database], { cwd: project });
-  ok(entry, ["work", "start", "updated report", ...identity, "--db", database], { cwd: project });
-  const active = ok(entry, ["work", "status", "--cwd", project, "--db", database], {
-    cwd: project,
-  });
-  assert.equal(active.data.records.length, 1);
-  assert.equal(active.data.records[0].data.current_work, "updated report");
-  ok(entry, ["work", "done", "complete", ...identity, "--db", database], { cwd: project });
-  assert.equal(ok(entry, ["work", "history", "--cwd", project, "--db", database], {
-    cwd: project,
-  }).data.records[0].data.status, "closed");
-
-  const packet = handoffPacket({ goal: "Claim exactly once" });
-  ok(entry, ["handoff", "arm", "--cwd", project, "--session", "source",
-    "--agent", "codex", "--harness", "e2e", "--db", database], {
-    cwd: project, input: JSON.stringify(packet),
-  });
-  ok(entry, ["handoff", "checkpoint", "--cwd", project, "--session", "source",
-    "--agent", "codex", "--harness", "e2e", "--db", database], {
-    cwd: project, input: JSON.stringify(handoffPacket({ nextMove: "Open the next session" })),
-  });
-  ok(entry, ["handoff", "disarm", "--cwd", project, "--session", "source",
-    "--agent", "codex", "--harness", "e2e", "--db", database], { cwd: project });
-  ok(entry, ["handoff", "now", "--cwd", project, "--session", "source",
-    "--agent", "codex", "--harness", "e2e", "--db", database], {
-    cwd: project, input: JSON.stringify(packet),
-  });
-  const claimants = Array.from({ length: 8 }, (_, index) => ({
-    args: ["start", "--cwd", project, "--session", `claim-${index}`, "--agent", "codex",
-      "--harness", "e2e", "--db", database],
-  }));
-  const claims = await concurrent(entry, claimants, project);
-  assert.ok(claims.every(({ status, stderr }) => status === 0 && stderr === ""));
-  const claimEnvelopes = claims.map(({ stdout }) => JSON.parse(stdout));
-  const winners = claimEnvelopes.filter(({ data }) => data.handoff !== null);
-  assert.equal(winners.length, 1, "concurrent startup claimed the baton more than once");
-  const claimant = winners[0].data.handoff.recovery.data.claimed_by;
-  const retry = ok(entry, ["start", "--cwd", project, "--session", claimant,
-    "--agent", "codex", "--harness", "e2e", "--db", database], { cwd: project });
-  assert.equal(retry.data.handoff.recovery.id, winners[0].data.handoff.recovery.id);
-
-  const decisionIdentity = ["--cwd", project, "--session", "decisions", "--agent", "codex",
-    "--harness", "e2e", "--db", database];
-  ok(entry, ["decision", "set", "database", "SQLite", "--reason", "initial", ...decisionIdentity],
-    { cwd: project });
-  ok(entry, ["decision", "set", "database", "PostgreSQL", "--reason", "replaced",
-    ...decisionIdentity], { cwd: project });
-  ok(entry, ["decision", "set", "database", "SQLite", "--reason", "restored",
-    ...decisionIdentity], { cwd: project });
-  const decisions = ok(entry, ["decision", "show", "--cwd", project, "--db", database],
-    { cwd: project }).data;
-  assert.equal(decisions.facts[0].value, "SQLite");
-  assert.deepEqual(decisions.dead.map(({ value }) => value), ["PostgreSQL"]);
-
-  const workRacers = Array.from({ length: 6 }, (_, index) => ({
-    args: ["work", "start", `race-${index}`, "--cwd", project, "--session", "same-session",
-      "--agent", "codex", "--harness", "e2e", "--db", database],
-  }));
-  const workResults = await concurrent(entry, workRacers, project);
-  assert.ok(workResults.every(({ status, stderr }) => status === 0 && stderr === ""));
-  const afterRace = ok(entry, ["work", "status", "--cwd", project, "--db", database], {
-    cwd: project,
-  }).data.records.filter(({ data }) => data.session === "same-session");
-  assert.equal(afterRace.length, 1, "same actor acquired multiple active work records");
-
-  const deleted = ok(entry, ["delete", target.id, "--db", database]);
-  assert.equal(deleted.data.deleted.links, 1);
-  assert.equal(ok(entry, ["links", linked.id, "--db", database]).data.links.length, 0);
-  ok(entry, ["delete", linked.id, "--db", database]);
-  assert.equal(fails(entry, ["get", linked.id, "--db", database]).error.code,
-    "record_not_found");
-
-  const clientHome = path.join(directory, "clients");
-  const hermesHome = path.join(clientHome, "hermes");
-  const opencodeRoot = path.join(clientHome, "opencode-skills");
-  const clientArgs = ["--target", "all", "--home", clientHome,
-    "--hermes-home", hermesHome, "--opencode-root", opencodeRoot];
-  const verification = ok(entry, ["skills", "verify", ...clientArgs], { status: 4 });
-  assert.equal(verification.data.readOnly, true);
-  assert.equal(verification.data.verified, false);
+  const skills = invoke(entry, ["skills", "verify", "--target", "codex", "--home", clientHome]);
+  assert.equal(skills.status, 4);
+  assert.equal(skills.value.data.contract, 5);
   assert.equal(await access(clientHome).then(() => true, () => false), false);
-  for (const operation of ["install", "sync", "remove"]) {
-    assert.equal(fails(entry, ["skills", operation, ...clientArgs]).error.code,
-      "skills_read_only");
-    assert.equal(await access(clientHome).then(() => true, () => false), false);
-  }
 
-  const repositoryAgents = path.join(project, "AGENTS.md");
-  const agentsStatus = ok(entry, ["agents", "status", "--cwd", project]);
-  assert.equal(agentsStatus.data.readOnly, true);
-  assert.equal(await access(repositoryAgents).then(() => true, () => false), false);
-  for (const operation of ["apply", "remove"]) {
-    assert.equal(fails(entry, ["agents", operation, "--cwd", project]).error.code,
-      "repository_agents_read_only");
-    assert.equal(await access(repositoryAgents).then(() => true, () => false), false);
-  }
+  const mcp = path.join(packageRoot, "codex-plugin", "scripts", "lodestar-mcp.mjs");
+  const nativeRequest = { ...request, request_id: "installed-native-create",
+    write_basis: { ...basis, targets: [
+      { kind: "record", id: "fact:native", expected_revision: null },
+      { kind: "record", id: "project:test", expected_revision: null },
+    ] },
+    input: { ...request.input, record: { ...request.input.record,
+      id: "fact:native", name: "Native fact", aliases: [] } } };
+  const described = spawnSync(NODE, [mcp], {
+    cwd: directory, encoding: "utf8",
+    env: { ...process.env, LODESTAR_NODE: NODE, LODESTAR_ENTRY: entry, LODESTAR_DB: database },
+    input: `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+      params: { name: "lodestar_mutate", arguments: { operation: "put", request: nativeRequest } } })}\n`,
+  });
+  assert.equal(described.status, 0, described.stderr);
+  const response = JSON.parse(described.stdout);
+  assert.equal(response.result.structuredContent.v, 5);
+  assert.equal(response.result.structuredContent.data.id, "fact:native");
+  assert.equal(invoke(entry, ["get", "fact:native", "--db", database]).value.data.id,
+    "fact:native");
 });

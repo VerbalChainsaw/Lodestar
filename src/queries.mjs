@@ -10,6 +10,7 @@ import {
   resolveRecordId,
 } from "./records.mjs";
 import { SCHEMA_VERSION } from "./schema.mjs";
+import { readMetadata } from "./database.mjs";
 import {
   FRESHNESS_STATES,
   validateIdentifier,
@@ -57,8 +58,19 @@ function parsedContent(row) {
 // The previous path built throwaway summaries here and then re-fetched and
 // re-parsed the same rows in the caller, so find and links parsed every
 // selected record twice.
-function normalizedForRows(db, rows) {
-  return recordsByRows(db, rows).map(normalizeRecord);
+export function normalizedForRows(db, rows) {
+  try { return { records: recordsByRows(db, rows).map(normalizeRecord), record_errors: [] }; }
+  catch (error) { if (!["record_requires_source_correction", "unsupported_numeric_value"].includes(error.code)) throw error; }
+  const records = [], record_errors = [];
+  for (const row of rows) {
+    try { records.push(normalizeRecord(recordsByRows(db, [row])[0])); }
+    catch (error) {
+      if (!["record_requires_source_correction", "unsupported_numeric_value"].includes(error.code)) throw error;
+      record_errors.push({ code: error.code, message: error.message,
+        identifiers: { ...error.identifiers, id: row.id }, action: error.action });
+    }
+  }
+  return { records, record_errors };
 }
 
 export function findRecords(
@@ -69,6 +81,7 @@ export function findRecords(
     type,
     limit,
     offset = 0,
+    history = false,
   } = {},
 ) {
   const query = validateQuery(queryValue);
@@ -104,13 +117,12 @@ export function findRecords(
     validateType(type);
     clauses.push("r.type = $type");
     parameters.$type = type;
-  } else {
-    // Reserved internal cache: `start` persists the projection as a
-    // startup-snapshot record. Users cannot create or delete that type, and
-    // searching it returns a copy of other records' content, so default find
-    // omits it unless the caller explicitly asks for the kind.
-    clauses.push("r.type != 'startup-snapshot'");
+  } else if (!history) {
+    // Internal histories duplicate current facts; explicit history reads can
+    // retrieve them while ordinary discovery stays useful.
+    clauses.push("r.type NOT IN ('startup-snapshot','mutation-receipt','migration-source','work-event','handoff-packet')");
   }
+  if (!history) clauses.push("COALESCE(json_extract(r.content_json,'$._lodestar.semantics.lifecycle'),'current') NOT IN ('historical','superseded')");
   // One pass over aliases computes exact/prefix flags per record; the record
   // scan LEFT JOINs that result. Rank semantics are unchanged: exact id or
   // alias = 0, exact name = 1, prefix id/name/alias = 2, substring = 3.
@@ -152,7 +164,7 @@ export function findRecords(
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
   return { query, scope: scope ?? null, type: type ?? null, limit: selectedLimit,
-    offset: selectedOffset, truncated, records: normalizedForRows(db, selected) };
+    offset: selectedOffset, truncated, ...normalizedForRows(db, selected) };
 }
 
 export function linkedRecords(
@@ -160,10 +172,15 @@ export function linkedRecords(
   identifier,
   {
     limit,
+    offset = 0,
   } = {},
 ) {
   const id = resolveRecordId(db, identifier);
   const selectedLimit = limit === undefined ? null : validateLimit(limit, {});
+  const selectedOffset = offset === undefined ? 0 : validateOffset(offset, {});
+  if (selectedLimit === null && selectedOffset !== 0) throw lodestarError("invalid_input",
+    "Links offset requires an explicit --limit page size.",
+    { action: "Retry with --limit set, or drop --offset for an unbounded read." });
   const rows = db.prepare(String.raw`
     SELECT
       0 AS direction_rank,
@@ -201,15 +218,19 @@ export function linkedRecords(
     JOIN records peer ON peer.id = l.from_id
     WHERE l.to_id = $id
     ORDER BY direction_rank, relationship, from_id, to_id
-    ${selectedLimit === null ? "" : "LIMIT $limit + 1"}
-  `).all(selectedLimit === null ? { $id: id } : { $id: id, $limit: selectedLimit });
+    ${selectedLimit === null ? "" : "LIMIT $limit + 1 OFFSET $offset"}
+  `).all(selectedLimit === null ? { $id: id }
+    : { $id: id, $limit: selectedLimit, $offset: selectedOffset });
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
-  const peers = normalizedForRows(db, selected);
+  const normalized = normalizedForRows(db, selected);
+  const peers = new Map(normalized.records.map((record) => [record.id, record]));
   return {
     id,
     limit: selectedLimit,
+    offset: selectedOffset,
     truncated,
+    record_errors: normalized.record_errors,
     links: selected.map((row, index) => {
       try {
         validateIdentifier(row.from_id, "from_id");
@@ -228,105 +249,23 @@ export function linkedRecords(
         relationship: row.relationship,
         to_id: row.to_id,
         created_at: row.created_at,
-        peer: peers[index],
+        peer: peers.get(row.id) ?? null,
       };
     }),
   };
 }
 
 export function exportRegistry(db) {
-  const document = {
-    schema_version: SCHEMA_VERSION,
-    records: [],
-    aliases: [],
-    links: [],
-    sources: [],
-  };
-  const append = (section, item) => { document[section].push(item); };
-
-  for (const row of db.prepare(
-      "SELECT id, type, name, scope, content_json, created_at, updated_at "
-        + "FROM records ORDER BY id",
-    ).iterate()) {
-    const stored = parsedContent(row);
-    const { _lodestar: _ignored, ...content } = stored;
-    try {
-      validateTimestamp(row.created_at, "records.created_at");
-    } catch (error) {
-      invalidStoredRow("record", { id: row.id }, error);
-    }
-    append("records", {
-      id: row.id,
-      type: row.type,
-      name: row.name,
-      scope: row.scope,
-      content,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    });
+  // Export is exact evidence, including payloads that cannot be normalized safely.
+  // It is not a current-context projection and never strips reserved metadata.
+  const document = { v: SCHEMA_VERSION, schema_version: SCHEMA_VERSION,
+    metadata: Object.fromEntries(db.prepare("SELECT key,value FROM metadata ORDER BY key").all()
+      .map(({ key, value }) => [key, value])), private_state: true };
+  for (const [table, order] of [["records", "id"], ["aliases", "alias"],
+    ["links", "from_id,relationship,to_id"], ["sources", "record_id,origin"]]) {
+    document[table] = db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
   }
-  for (const { alias, record_id: recordId } of db.prepare(
-    "SELECT alias, record_id FROM aliases ORDER BY alias",
-  ).iterate()) {
-    try {
-      validateIdentifier(alias, "alias");
-      validateIdentifier(recordId, "record_id");
-    } catch (error) {
-      invalidStoredRow("alias", { alias }, error);
-    }
-    append("aliases", { alias, record_id: recordId });
-  }
-  for (const {
-    from_id: fromId,
-    relationship,
-    to_id: toId,
-    created_at: createdAt,
-  } of db.prepare(
-      "SELECT from_id, relationship, to_id, created_at FROM links "
-        + "ORDER BY from_id, relationship, to_id",
-    ).iterate()) {
-    try {
-      validateIdentifier(fromId, "from_id");
-      validateRelationship(relationship);
-      validateIdentifier(toId, "to_id");
-      validateTimestamp(createdAt, "links.created_at");
-    } catch (error) {
-      invalidStoredRow("link", { from_id: fromId, to_id: toId }, error);
-    }
-    append("links", {
-      from_id: fromId,
-      relationship,
-      to_id: toId,
-      created_at: createdAt,
-    });
-  }
-  for (const row of db.prepare(
-      "SELECT record_id, origin, freshness, metadata_json FROM sources "
-        + "ORDER BY record_id, origin",
-    ).iterate()) {
-    let metadata;
-    try {
-      validateIdentifier(row.record_id, "record_id");
-      validateOrigin(row.origin);
-      if (!FRESHNESS_STATES.includes(row.freshness)) throw new Error();
-      metadata = parseStoredMetadata(row.metadata_json, {
-        id: row.record_id,
-        origin: row.origin,
-      });
-    } catch (error) {
-      if (error?.code === "database_integrity") throw error;
-      invalidStoredRow("source", {
-        record_id: row.record_id,
-        origin: row.origin,
-      }, error);
-    }
-    append("sources", {
-      record_id: row.record_id,
-      origin: row.origin,
-      freshness: row.freshness,
-      metadata,
-    });
-  }
-  const bytes = Buffer.byteLength(canonicalStringify(document), "utf8");
-  return { document, bytes };
+  document.schema = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema "
+    + "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
+  return { document, bytes: Buffer.byteLength(canonicalStringify(document), "utf8") };
 }

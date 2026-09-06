@@ -1,73 +1,107 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import { COMMANDS, MUTATION_INPUTS } from "../../src/cli-commands.mjs";
+import { MUTATION_REQUEST_SCHEMA } from "../../src/records.mjs";
+import { CONTRACT_VERSION } from "../../src/schema.mjs";
 import {
-  executeHandoff, executeWork, HANDOFF_COMMANDS, HANDOFF_PACKET_SCHEMA,
-  WORK_COMMANDS, workToolCommand,
+  mutationCommand, packageVersion, runInstalledLodestar,
 } from "./lodestar-runtime.mjs";
 
-// Read from the manifest beside this script rather than a literal. A hardcoded version
-// reports whatever was true when it was typed, so an installed build silently claims to
-// be a release it is not.
-function pluginVersion(scriptUrl = import.meta.url) {
-  try {
-    const manifest = path.join(path.dirname(path.dirname(fileURLToPath(scriptUrl))),
-      ".codex-plugin", "plugin.json");
-    return JSON.parse(readFileSync(manifest, "utf8")).version ?? "unknown";
-  } catch {
-    return "unknown";
-  }
+const READ_COMMANDS = Object.freeze({
+  start: ["start"], get: ["get"], find: ["find"], links: ["links"],
+  doctor: ["doctor"], export: ["export"],
+  "work.status": ["work", "status"], "work.history": ["work", "history"],
+  "handoff.status": ["handoff", "status"], "handoff.history": ["handoff", "history"],
+  "decision.show": ["decision", "show"], "decision.status": ["decision", "status"],
+  "pending.list": ["pending", "list"],
+  "skills.verify": ["skills", "verify"], "agents.status": ["agents", "status"],
+  "agents.verify": ["agents", "verify"], "agents.template": ["agents", "template"],
+});
+const MUTATION_OPERATIONS = Object.freeze({
+  put: MUTATION_REQUEST_SCHEMA.properties.input,
+  delete: MUTATION_REQUEST_SCHEMA.properties.input,
+  ...MUTATION_INPUTS,
+});
+
+for (const command of Object.values(READ_COMMANDS)) {
+  if (!Object.hasOwn(COMMANDS, command[0])) throw new Error(`Unknown shared command: ${command[0]}`);
 }
 
-export function resolvePluginData(
-  pluginData = process.env.PLUGIN_DATA,
-  scriptUrl = import.meta.url,
-) {
-  if (pluginData) return pluginData;
-  const file = fileURLToPath(scriptUrl), scripts = path.dirname(file);
-  const version = path.dirname(scripts), plugin = path.dirname(version);
-  const marketplace = path.dirname(plugin), cache = path.dirname(marketplace);
-  return path.join(path.dirname(cache), "data",
-    `${path.basename(plugin)}-${path.basename(marketplace)}`);
+function requestSchema(inputSchema) {
+  return {
+    ...MUTATION_REQUEST_SCHEMA,
+    properties: { ...MUTATION_REQUEST_SCHEMA.properties, input: inputSchema },
+  };
 }
 
-const tools = HANDOFF_COMMANDS.map((command) => ({
-  name: `lodestar_handoff_${command}`,
-  description: `${command[0].toUpperCase()}${command.slice(1)} the exact host-authorized `
-    + "Lodestar continuity state for this project and session.",
-  inputSchema: ["arm", "checkpoint", "now"].includes(command)
-    ? { type: "object", additionalProperties: false, required: ["packet"],
-      properties: { packet: HANDOFF_PACKET_SCHEMA } }
-    : { type: "object", additionalProperties: false, properties: {} },
-}));
-
-// Exposed as tools rather than left to the shell so each call carries the host
-// session. A shell has no session id, so a CLI fallback can only guess, and a wrong
-// guess overwrites a concurrent peer's marker.
-tools.push(...WORK_COMMANDS.map((command) => ({
-  name: `lodestar_work_${command}`,
-  description: command === "status"
-    ? "List advisory work reports for this project."
-    : `Mark this session's advisory work as ${command} for this project.`,
-  inputSchema: command === "status"
-    ? { type: "object", additionalProperties: false, properties: {} }
-    : { type: "object", additionalProperties: false,
-      ...(command === "start" ? { required: ["report"] } : {}),
-      properties: { report: { type: "string",
-        description: "One line describing the work area." } } },
-})));
+export const NATIVE_TOOLS = Object.freeze([
+  {
+    name: "lodestar_describe",
+    description: "Return the installed Lodestar contract, command declarations, and structured mutation inputs.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    name: "lodestar_read",
+    description: "Run one current read-only Lodestar command through the installed one-shot package.",
+    inputSchema: {
+      type: "object", additionalProperties: false, required: ["operation"],
+      properties: {
+        operation: { type: "string", enum: Object.keys(READ_COMMANDS) },
+        arguments: { type: "array", items: { type: "string" } },
+      },
+    },
+  },
+  {
+    name: "lodestar_mutate",
+    description: "Apply one guarded contract-5 update using a read result's write_basis. Retry a lost response with the exact same request.",
+    inputSchema: {
+      oneOf: Object.entries(MUTATION_OPERATIONS).map(([operation, schema]) => ({
+        type: "object", additionalProperties: false, required: ["operation", "request"],
+        properties: {
+          operation: { const: operation },
+          request: requestSchema(schema),
+        },
+      })),
+    },
+  },
+]);
 
 function reply(id, result, error) {
-  process.stdout.write(`${JSON.stringify(error ? { jsonrpc: "2.0", id,
-    error: { code: -32000, message: error instanceof Error ? error.message : String(error) } }
-    : { jsonrpc: "2.0", id, result })}\n`);
+  const message = error
+    ? { jsonrpc: "2.0", id, error: { code: -32000,
+      message: error instanceof Error ? error.message : String(error),
+      ...(error?.envelope ? { data: error.envelope } : {}) } }
+    : { jsonrpc: "2.0", id, result };
+  process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+export async function callNativeTool(name, input = {}) {
+  if (name === "lodestar_describe") return {
+    contract: CONTRACT_VERSION,
+    package_version: packageVersion(),
+    commands: COMMANDS,
+    mutation_inputs: MUTATION_OPERATIONS,
+  };
+  if (name === "lodestar_read") {
+    const command = READ_COMMANDS[input.operation];
+    if (!command) throw new Error(`Unknown read operation: ${input.operation}`);
+    return await runInstalledLodestar([...command, ...(input.arguments ?? [])]);
+  }
+  if (name === "lodestar_mutate") {
+    if (!Object.hasOwn(MUTATION_OPERATIONS, input.operation)) {
+      throw new Error(`Unknown mutation operation: ${input.operation}`);
+    }
+    return await runInstalledLodestar(mutationCommand(input.operation), {
+      input: `${JSON.stringify(input.request)}\n`,
+    });
+  }
+  throw new Error(`Unknown native tool: ${name}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const dataDir = resolvePluginData();
   for await (const line of createInterface({ input: process.stdin })) {
     let message;
     try { message = JSON.parse(line); } catch { continue; }
@@ -76,18 +110,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (message.method === "initialize") reply(message.id, {
         protocolVersion: message.params?.protocolVersion ?? "2025-03-26",
         capabilities: { tools: {} },
-        serverInfo: { name: "lodestar", version: pluginVersion() },
+        serverInfo: { name: "lodestar", version: packageVersion() },
       });
       else if (message.method === "ping") reply(message.id, {});
-      else if (message.method === "tools/list") reply(message.id, { tools });
-      else if (message.method === "tools/call"
-          && tools.some(({ name }) => name === message.params?.name)) {
-        const run = workToolCommand(message.params.name) ? executeWork : executeHandoff;
-        const result = await run(
-          `lodestar__${message.params.name}`,
-          message.params.arguments ?? {},
-          dataDir,
-        );
+      else if (message.method === "tools/list") reply(message.id, { tools: NATIVE_TOOLS });
+      else if (message.method === "tools/call") {
+        const result = await callNativeTool(message.params?.name, message.params?.arguments ?? {});
         reply(message.id, { content: [{ type: "text", text: JSON.stringify(result) }],
           structuredContent: result, isError: false });
       } else reply(message.id, null, new Error(`Method not found: ${message.method}`));
