@@ -138,6 +138,9 @@
   canonical set, and the current reference material is restored (`center-audit`
   compact-mode and worked-example references, `director-protocol` agent config,
   `ladder-audit` README). Nothing in the payload was removed or shrunk.
+- Harden marker attribute parsing: the quoted-value matcher is now the
+  unambiguous `(?:[^"\\]|\\.)*` form, removing the ReDoS-shaped overlap
+  between escape and plain-character alternatives (CodeQL high).
 
 ## 1.5.0 - 2026-08-27
 
