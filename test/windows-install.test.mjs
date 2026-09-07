@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fsPromises from "node:fs/promises";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -120,6 +122,30 @@ test("launcher updates preserve custom bytes and repeated concurrent installs co
   assert.equal((await readdir(directory)).filter((name) => name.endsWith(".tmp")).length, 0);
 });
 
+test("launcher publication detects changed targets and verifies preserved backup bytes", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-shim-race-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const originalWrite = fsPromises.writeFile;
+  for (const changed of ["target", "backup"]) {
+    const target = path.join(directory, changed);
+    const baseline = "#!/bin/bash\necho accepted\n";
+    const newer = "#!/bin/bash\necho newer local edit\n";
+    await originalWrite(target, baseline);
+    const mock = t.mock.method(fsPromises, "writeFile", async (destination, ...args) => {
+      await originalWrite(destination, ...args);
+      if (String(destination).endsWith(".bak")) {
+        await originalWrite(changed === "target" ? target : destination, newer);
+      }
+    });
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(installWindowsPosixShim(target, { expectedContent: baseline }),
+        { code: changed === "target" ? "launcher_conflict" : "launcher_backup_failed" });
+      assert.equal(await readFile(target, "utf8"), changed === "target" ? newer : baseline);
+    } finally { mock.mock.restore(); syncBuiltinESMExports(); }
+  }
+});
+
 test("WSL transports actual arguments and working directory across the Windows boundary", async (t) => {
   if (process.platform !== "win32") return t.skip("Requires Windows with WSL interop");
   const available = spawnSync("wsl.exe", ["--", "bash", "-c", "test -x /init && command -v wslpath"],
@@ -153,6 +179,17 @@ test("WSL transports actual arguments and working directory across the Windows b
   assert.equal(value(customHomes, "--claude-home"), `${homeWin}\\custom-claude`);
   assert.equal(value(customHomes, "--xdg-config-home"), `${homeWin}\\custom-xdg`);
   assert.equal(value(customHomes, "--opencode-root"), `${homeWin}\\custom-opencode\\skills`);
+  const hostEnvironment = "export HERMES_HOME=\"$HOME/custom-hermes\" CODEX_HOME=\"$HOME/custom-codex\" CLAUDE_CONFIG_DIR=\"$HOME/custom-claude\" XDG_CONFIG_HOME=\"$HOME/custom-xdg\" OPENCODE_CONFIG_DIR=\"$HOME/custom-opencode\"\n";
+  const isolated = parse(invoke(home, ["setup", "--home", `${home}/other-user`], hostEnvironment));
+  assert.equal(value(isolated, "--home"), `${homeWin}\\other-user`);
+  assert.equal(value(isolated, "--hermes-home"), `${homeWin}\\other-user\\.hermes`);
+  for (const option of ["--codex-home", "--claude-home", "--xdg-config-home", "--opencode-root"]) {
+    assert.equal(isolated.includes(option), false, `${option} must not leak from the caller's environment`);
+  }
+  const explicit = parse(invoke(home, ["skills", "verify", "--home", `${home}/other-user`,
+    "--hermes-home", `${home}/explicit-hermes`, "--codex-home", `${home}/explicit-codex`], hostEnvironment));
+  assert.equal(value(explicit, "--hermes-home"), `${homeWin}\\explicit-hermes`);
+  assert.equal(value(explicit, "--codex-home"), `${homeWin}\\explicit-codex`);
   const paths = parse(invoke("/mnt/c", ["put", "--db", "/mnt/c/state/not-created.db", "--file", "request file.json"]));
   assert.equal(value(paths, "--db"), "C:\\state\\not-created.db");
   assert.equal(value(paths, "--file"), "C:\\request file.json");

@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cp, lstat, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { lodestarError } from "./errors.mjs";
-import { directoryFiles, manageSkills, matches, payload } from "./skills.mjs";
+import { directoryFiles, manageSkills, matches, payload, safeRealpath } from "./skills.mjs";
 import { installWindowsPosixShim, installWslShim, pathExists, renderWindowsPosixShim, renderWslShim } from "./windows-install.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
 
@@ -12,12 +12,26 @@ const hash = (value) => createHash("sha256").update(value).digest("hex");
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const readJson = async (file) => JSON.parse(await readFile(file, "utf8"));
 const optionalJson = async (file) => await pathExists(file) ? readJson(file) : null;
-const identity = async (target) => await pathExists(target) ? directoryFiles(target) : null;
+const identity = async (target) => {
+  const entry = await lstat(target).catch((error) => { if (error.code === "ENOENT") return null; throw error; });
+  if (!entry) return null;
+  if (!entry.isDirectory() || entry.isSymbolicLink()) {
+    throw lodestarError("install_layout_conflict", "Managed installation entry must be a regular directory.", { identifiers: { target } });
+  }
+  return directoryFiles(target);
+};
+const fingerprint = (content) => ({ bytes: content.length, sha256: hash(content) });
+const inside = (root, target) => {
+  const relative = path.relative(root, target);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+};
 
 async function save(file, value) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(value, null, 2), { flag: "wx" });
+    const handle = await open(temporary, "wx");
+    try { await handle.writeFile(JSON.stringify(value, null, 2)); await handle.sync(); }
+    finally { await handle.close(); }
     await rename(temporary, file);
   } finally { await rm(temporary, { force: true }); }
 }
@@ -33,7 +47,9 @@ async function lock(directory) {
   await mkdir(directory, { recursive: true });
   const lockDirectory = path.join(directory, "lock");
   const owner = { pid: process.pid, host: os.hostname(), nonce: randomUUID() };
-  const file = path.join(lockDirectory, `${owner.nonce}.json`);
+  // Ownership is complete when this unique directory entry is created. A killed
+  // writer cannot leave a partial JSON body that strands all future attempts.
+  const file = path.join(lockDirectory, `${hash(owner.host)}.${owner.pid}.${owner.nonce}.lock`);
   const removeEmpty = async () => {
     try { await rmdir(lockDirectory); }
     catch (error) { if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error.code)) throw error; }
@@ -41,7 +57,7 @@ async function lock(directory) {
   while (true) {
     try {
       await mkdir(lockDirectory);
-      await writeFile(file, JSON.stringify(owner), { flag: "wx" });
+      await writeFile(file, "", { flag: "wx" });
       const owners = await readdir(lockDirectory);
       if (owners.length !== 1 || owners[0] !== path.basename(file)) {
         await rm(file, { force: true });
@@ -58,16 +74,21 @@ async function lock(directory) {
       try { names = await readdir(lockDirectory); }
       catch (error) { if (error.code === "ENOENT") continue; throw error; }
       if (names.length === 0) { await removeEmpty(); continue; }
-      if (names.length !== 1 || !/^[0-9a-f-]+\.json$/u.test(names[0])) {
+      if (names.length !== 1) {
         throw lodestarError("install_busy", "Installation lock has unresolved owners.", { identifiers: { lockDirectory } });
       }
       const priorFile = path.join(lockDirectory, names[0]);
+      const encoded = /^([0-9a-f]{64})\.([1-9][0-9]*)\.([0-9a-f-]{36})\.lock$/u.exec(names[0]);
       let prior;
-      try { prior = await readJson(priorFile); } catch (error) {
+      try {
+        // Accept intact locks from earlier releases so interrupted upgrades stay retryable.
+        prior = encoded ? { host: encoded[1] === hash(owner.host) ? owner.host : null, pid: Number(encoded[2]) }
+          : /^[0-9a-f-]{36}\.json$/u.test(names[0]) ? await readJson(priorFile) : null;
+      } catch (error) {
         if (error.code === "ENOENT") continue;
         throw lodestarError("install_busy", "Installation lock is being written or needs inspection.", { identifiers: { file: priorFile } });
       }
-      if (prior.host !== owner.host || !Number.isSafeInteger(prior.pid) || prior.pid <= 0) {
+      if (prior?.host !== owner.host || !Number.isSafeInteger(prior.pid) || prior.pid <= 0) {
         throw lodestarError("install_busy", "Another host owns this installation lock.", { identifiers: { file: priorFile } });
       }
       try { process.kill(prior.pid, 0); }
@@ -89,24 +110,47 @@ async function recover(item) {
   const file = path.join(item.state, "pending.json");
   const pending = await optionalJson(file);
   if (!pending) return;
-  if (pending.contract !== 5 || pending.target !== item.target ||
-      path.dirname(pending.stage) !== item.state || path.dirname(pending.backup) !== item.state ||
-      !Array.isArray(pending.files)) {
+  const operation = typeof pending.stage === "string"
+    ? /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.staged$/u.exec(path.basename(pending.stage)) : null;
+  const inventory = (files) => Array.isArray(files) && new Set(files.map((file) => file?.path)).size === files.length &&
+    files.every((file) => typeof file?.path === "string" && file.path.length > 0 && !file.path.includes("\\") &&
+      !path.posix.isAbsolute(file.path) && !path.win32.isAbsolute(file.path) &&
+      file.path.split("/").every((part) => part && part !== "." && part !== "..") &&
+      Number.isSafeInteger(file.bytes) && file.bytes >= 0 && /^[0-9a-f]{64}$/u.test(file.sha256));
+  if (pending.contract !== 5 || pending.target !== item.target || !operation ||
+      path.dirname(pending.stage) !== item.state || pending.backup !== path.join(item.state, `${operation[1]}.previous`) ||
+      typeof pending.version !== "string" || !inventory(pending.files) ||
+      !pending.files.some((entry) => entry.path === "SKILL.md") ||
+      !(pending.before === null || inventory(pending.before))) {
     throw lodestarError("install_recovery_conflict", "Pending installation does not match its destination.", { identifiers: { file } });
   }
+  // Inspect all entries before any recovery mutation. In particular, never let
+  // malformed journal paths turn the cleanup of staging into backup deletion.
+  const staged = await identity(pending.stage);
+  const backup = await identity(pending.backup);
   const current = await identity(item.target);
+  if ((backup !== null && !same(backup, pending.before)) ||
+      (same(current, pending.files) && pending.before !== null && backup === null)) {
+    throw lodestarError("install_recovery_conflict", "Interrupted installation backup is missing or changed; all remaining content was preserved.",
+      { identifiers: { target: item.target, pending: file, backup: pending.backup } });
+  }
   if (same(current, pending.files)) {
     await save(path.join(item.state, "installed.json"), {
       contract: 5, version: pending.version, target: item.target, files: pending.files,
     });
-  } else if (current === null && await pathExists(pending.backup)) {
+  } else if (current === null && backup !== null) {
     await rename(pending.backup, item.target);
   } else if (!same(current, pending.before)) {
     throw lodestarError("install_recovery_conflict", "Destination changed during an interrupted installation; preserve and inspect it.",
       { identifiers: { target: item.target, pending: file } });
   }
-  await rm(pending.stage, { recursive: true, force: true });
+  // A copy may be partial after process death, or may have acquired newer data.
+  // Keep any nonmatching tree outside discovery while allowing recovery to retry.
+  // Only a byte-verified payload is disposable; the unique path is never reused.
+  const retainedStage = staged !== null && !same(staged, pending.files) ? pending.stage : null;
+  if (!retainedStage) await rm(pending.stage, { recursive: true, force: true });
   await rm(file);
+  return { target: item.target, retained_stage: retainedStage };
 }
 
 async function inspect(item, replaceLocal) {
@@ -139,6 +183,10 @@ async function install(item, onProgress) {
     stage, backup, before: item.before, files: item.skill.files });
   await cp(item.skill.root, stage, { recursive: true, force: false, errorOnExist: true });
   if (!await matches(stage, item.skill)) throw lodestarError("install_payload_mismatch", "Staged payload failed byte verification.");
+  for (const entry of item.skill.files) {
+    const handle = await open(path.join(stage, ...entry.path.split("/")), "r+");
+    try { await handle.sync(); } finally { await handle.close(); }
+  }
   if (!same(await identity(item.target), item.before)) {
     throw lodestarError("install_changed", "Native skill changed after preflight; no replacement was performed.",
       { identifiers: { target: item.target } });
@@ -146,6 +194,13 @@ async function install(item, onProgress) {
   await mkdir(path.dirname(item.target), { recursive: true });
   if (item.before !== null) await rename(item.target, backup);
   await onProgress?.({ phase: "displaced", target: item.target });
+  if (item.before !== null && !same(await identity(backup), item.before)) {
+    if (await identity(item.target) === null) await rename(backup, item.target);
+    throw lodestarError("install_changed", "The displaced skill changed after preflight; its newer content was preserved.",
+      { identifiers: { target: item.target, backup } });
+  }
+  if (await identity(item.target) !== null) throw lodestarError("install_changed", "A destination appeared during installation; it was preserved.",
+    { identifiers: { target: item.target, backup } });
   await rename(stage, item.target);
   if (!await matches(item.target, item.skill)) throw lodestarError("install_payload_mismatch", "Published skill failed byte verification.");
   await save(path.join(item.state, "installed.json"), {
@@ -177,13 +232,25 @@ export async function setup({ apply = false, replaceLocal = false, wslShim, posi
   const launchers = [];
   for (const [kind, target] of [["wsl", wslShim], ["posix", posixShim]]) {
     if (!target) continue;
-    const resolved = path.resolve(target);
-    const present = await pathExists(resolved);
-    if (present && !(await lstat(resolved)).isFile()) throw lodestarError("install_layout_conflict", "Launcher must be a regular file.");
-    const expectedContent = present ? await readFile(resolved, "utf8") : undefined;
+    const entry = await lstat(path.resolve(target)).catch((error) => { if (error.code === "ENOENT") return null; throw error; });
+    if (entry && !entry.isFile()) throw lodestarError("install_layout_conflict", "Launcher must be a regular file.");
+    const resolved = await safeRealpath(target);
+    const present = entry !== null;
+    const expectedContent = present ? await readFile(resolved) : undefined;
     const desired = kind === "wsl" ? renderWslShim() : renderWindowsPosixShim();
-    launchers.push({ kind, target: resolved, expectedContent,
-      blocked: present && expectedContent !== desired && !replaceLocal });
+    const prior = await optionalJson(path.join(stateFor(resolved), "installed.json"));
+    const owned = present && prior?.contract === 5 && prior.kind === "launcher" && prior.target === resolved &&
+      same(prior.fingerprint, fingerprint(expectedContent));
+    launchers.push({ kind, target: resolved, expectedContent, desired,
+      blocked: present && !expectedContent.equals(Buffer.from(desired)) && !owned && !replaceLocal });
+  }
+  for (const launcher of launchers) {
+    if (items.some((item) => inside(item.target, launcher.target) || inside(path.dirname(item.state), launcher.target)) ||
+        launchers.some((other) => inside(path.dirname(stateFor(other.target)), launcher.target) ||
+          (other !== launcher && inside(other.target, launcher.target)))) {
+      throw lodestarError("install_layout_conflict", "Launcher destination overlaps a managed skill, installation state, or another launcher.",
+        { identifiers: { target: launcher.target } });
+    }
   }
   // Do not stage under any root that a selected host searches recursively.
   const discoveredRoots = before.results.flatMap((result) => (result.copies ?? [{ path: result.path }])
@@ -196,11 +263,15 @@ export async function setup({ apply = false, replaceLocal = false, wslShim, posi
     }
   }
   const releases = [];
+  const recoveries = [];
   try {
     if (apply) {
       const states = [...new Set([...items.map(({ state }) => state), ...launchers.map(({ target }) => stateFor(target))])].sort();
       for (const state of states) releases.push(await lock(state));
-      for (const item of items) await recover(item);
+      for (const item of items) {
+        const recovered = await recover(item);
+        if (recovered) recoveries.push(recovered);
+      }
     }
     const plans = [];
     for (const item of items) {
@@ -212,7 +283,7 @@ export async function setup({ apply = false, replaceLocal = false, wslShim, posi
     blocked.push(...launchers.filter(({ blocked }) => blocked));
     const summary = { contract: 5, version: LODESTAR_VERSION, applied: false,
       ready: blocked.length === 0 && ambiguities.length === 0, discovery: before.discovery ?? before.scope ?? null,
-      ambiguities,
+      ambiguities, recoveries,
       plans: plans.map(({ target, action, reason, state }) => ({ target, action, reason, state })),
       launchers: launchers.map(({ target, kind, blocked }) => ({ target, kind, blocked })) };
     if (!apply) return summary;
@@ -224,8 +295,12 @@ export async function setup({ apply = false, replaceLocal = false, wslShim, posi
     for (const item of plans) results.push(await install(item, onProgress));
     for (const launcher of launchers) {
       const helper = launcher.kind === "wsl" ? installWslShim : installWindowsPosixShim;
-      // Existing launchers are changed only under explicit local replacement.
-      await helper(launcher.target, replaceLocal ? { expectedContent: launcher.expectedContent } : {});
+      await helper(launcher.target, { expectedContent: launcher.expectedContent });
+      const content = await readFile(launcher.target);
+      if (!content.equals(Buffer.from(launcher.desired))) throw lodestarError("install_changed", "Launcher changed before its receipt could be saved.");
+      await save(path.join(stateFor(launcher.target), "installed.json"), {
+        contract: 5, kind: "launcher", version: LODESTAR_VERSION, target: launcher.target, fingerprint: fingerprint(content),
+      });
     }
     const verification = await manageSkills("verify", options);
     return { ...summary, applied: true, results, verified: verification.verified, verification };

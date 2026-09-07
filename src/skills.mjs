@@ -14,7 +14,7 @@ const MANAGED_MANIFEST = path.join(MANAGED_ASSETS, "manifest.json");
 let payloadPromise;
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
-async function safeRealpath(candidate, seen = new Set()) {
+export async function safeRealpath(candidate, seen = new Set()) {
   const absolute = path.resolve(candidate);
   try { return await realpath(absolute); }
   catch (error) { if (error.code !== "ENOENT") throw error; }
