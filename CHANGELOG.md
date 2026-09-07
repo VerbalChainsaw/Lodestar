@@ -6,6 +6,7 @@
 - Explain the contract-5 upgrade from 1.6, source freshness, guarded corrections, and explicit installation.
 - Use the same current-contract packed executable smoke in CI and release verification.
 - Resolve physical temporary paths in cross-platform test fixtures.
+- Verify exact retries after simultaneous busy refusals without assuming a first-attempt winner.
 - Deploy the landing page only after release success and verify its npm install target.
 - Retain contract 5 and schema 5; no new database migration is required from 2.x.
 
