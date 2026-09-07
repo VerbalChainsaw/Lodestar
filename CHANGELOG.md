@@ -1,6 +1,108 @@
 # Changelog
 
+## 2.1.2 - 2026-09-07
+
+- Publish current product documentation and a static landing page with shared hero artwork.
+- Explain the contract-5 upgrade from 1.6, source freshness, guarded corrections, and explicit installation.
+- Use the same current-contract packed executable smoke in CI and release verification.
+- Resolve physical temporary paths in cross-platform test fixtures.
+- Verify exact retries after simultaneous busy refusals without assuming a first-attempt winner.
+- Preserve typed SQLite busy refusals during pre-transaction preparation and direct missing-store recovery to explicit initialization.
+- Deploy the landing page only after release success and verify its npm install target.
+- Retain contract 5 and schema 5; no new database migration is required from 2.x.
+
+## 2.1.1 - 2026-09-07
+
+- Share the read-operation declaration between CLI dispatch and MCP. Reject the
+  misleading decision.status read route, which could previously reach a mutation.
+- Publish the actual generic record and domain mutation schemas through JSON help
+  and native describe. Keep MCP input schemas valid for object-based tool clients;
+  return core execution failures as tool errors with complete recovery envelopes.
+- Route native domain writes through the checkout in their observed basis. Preserve
+  complete absence/conflict bases, including long valid identifiers.
+- Refresh local source evidence on ordinary get, find, and linked-record reads
+  without rewriting stored observations. Include source-root configuration in the
+  basis, and accept read-only freshness annotations in full-record round trips.
+- Report retired or wrong-checkout required dependencies as incomplete context;
+  filter inapplicable seeds before following their dependencies.
+- Make explicit canonical project mappings usable for fact correction, work, and
+  handoff updates while preserving origin scopes and rejecting unrelated projects.
+- Reject non-string data-removal keys before writes and preserve literal JSON
+  __proto__ keys during shallow data merges. Retain contract 5 and schema 5.
+
+## 2.1.0 - 2026-09-07
+
+- Discover standard Windows/Git Bash and WSL launcher destinations during setup.
+  Return the maintained operating guide and fresh installation health with a scoped
+  repair command at startup, without changing read-only startup semantics.
+- Carry complete command arrays through UTF-8 files or stdin, and support complete
+  output files with byte length and SHA-256 receipts. Native reads use stdin for
+  arguments so Windows command-line limits do not clip long requests.
+- Translate declared Git Bash path arguments and preserve opaque argument values.
+  Keep managed skill bytes stable through Git checkouts regardless of autocrlf.
+- Accept structured JSON with a leading BOM; preserve Unicode and data line endings.
+  Reject duplicate decoded keys, lossy decimal conversion, and malformed UTF-8
+  before mutation. Validate MCP controls while accepting standard request metadata.
+- Retain contract 5, schema 5, one mutation owner, and exact-request receipt replay.
+
+## 2.0.2 - 2026-09-07
+
+- Validate recovery operation paths, inventories, and preserved backup bytes before
+  restoring, settling, or cleaning up interrupted installations.
+- Keep lock ownership readable after abrupt process exit. Flush journal, receipt,
+  staged payload, and launcher backup files before publishing their replacements.
+- Detect changed displaced skills and launcher targets before publication; preserve
+  newer edits and reject launcher destinations overlapping skills or recovery state.
+- Track launcher ownership with the existing installation receipts so unchanged
+  owned launchers upgrade without repeated forced replacement.
+- Make explicit WSL home selection isolate caller host overrides while preserving
+  explicit per-host options. Keep contract 5 and schema 5 unchanged.
+
+## 2.0.1 - 2026-09-06
+
+- Ship explicit native installation planning and application with retained backups,
+  recovery journals, and repeatable upgrades through the same package manifest.
+- Detect divergent discovered skill copies while recognizing physical aliases and
+  identical mirrors; expose the exact verification scope and selected host homes.
+- Repair WSL global-option and filesystem-argument routing and protect custom
+  launchers during replacement. Update the installed WSL acceptance check.
+- Document actual native startup checks separately from file-byte verification.
+
 ## Unreleased
+
+## 2.0.0 - 2026-09-06
+
+- Replace the schema-4 compatibility runtime with one contract-5 read/write model,
+  explicit database instance and recovery epoch, checked target bases, idempotent
+  receipts, retained history, and connection-level writer fences.
+- Make project orientation read-only and fresh. Remove startup-cache, hook,
+  attestation, session-tail, automatic initialization, and private-governance fallback
+  paths.
+- Preserve exact raw records and associations, reject unsafe numeric JSON before
+  rounding, attach explicit semantics and evidence metadata, and retire records without
+  physically deleting their history.
+- Add one explicit, backup-verified schema-4 conversion and forward schema-5 recovery
+  promotion that allocates a new epoch. Historical schema converters no longer ship in
+  production.
+- Route generic, decision, work, handoff, and pending writes through the same admitted
+  mutation owner. Revision and event order, rather than timestamps, determine accepted
+  state.
+- Replace the Codex hook integration with a native automatic skill and three thin MCP
+  tools derived from the installed package's command, request, and mutation schemas.
+- Retain all seven managed skills. Record each maintained source and distribution owner
+  plus exact raw byte membership and SHA-256 in the contract-5 manifest. Remove the
+  bundled private Golden Rules payload.
+- Preserve the Windows-owned one-shot boundary for Windows shells, MSYS/Cygwin, and WSL.
+
+- Single-pass find and links traversal: the selected rows are assembled into
+  the final normalized envelope exactly once instead of being parsed into
+  throwaway summaries and then re-fetched and re-parsed by the caller. On a
+  20,000-record registry, unbounded `find` dropped from ~1.19s to ~0.78s.
+- The find rank and filter use one pass over the aliases table (a
+  grouped CTE) instead of per-row correlated EXISTS subqueries, preserving
+  the exact/prefix/substring rank semantics.
+- Read assembly prepares one statement per batch size instead of one per
+  batch, removing ~70 statement compilations from a 20K-record find.
 
 ## 1.6.0 - 2026-08-28
 

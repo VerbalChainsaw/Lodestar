@@ -1,5 +1,7 @@
 # LodestarLite adversarial hardening audit
 
+> **Historical plan.** This file preserves pre-2.1 design and verification history; it is not current operating guidance. See the [current documentation](../README.md).
+
 Date: 2026-07-30
 
 CENTER follow-up: 2026-07-31

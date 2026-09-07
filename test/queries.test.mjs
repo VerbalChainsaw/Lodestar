@@ -4,13 +4,30 @@ import test from "node:test";
 import {
   initializeConnection,
   openConnection,
+  admittedTransaction,
 } from "../src/database.mjs";
 import {
   exportRegistry,
   findRecords,
   linkedRecords,
 } from "../src/queries.mjs";
-import { putRecord } from "../src/records.mjs";
+import { putRecord as writeCurrentRecord, writeRecordSnapshot, writeBasis } from "../src/records.mjs";
+import { allocateRevision } from "../src/revisions.mjs";
+import { CONTRACT_VERSION } from "../src/schema.mjs";
+
+let requestSequence = 0;
+function putRecord(db, value, options = {}) {
+  if (value.type === "startup-snapshot") return admittedTransaction(db, () => {
+    const revision = allocateRevision(db), timestamp = new Date().toISOString();
+    writeRecordSnapshot(db, value, { revision, createdAt: timestamp, updatedAt: timestamp });
+  }); // A historical fixture, never a production generic write.
+  const exists = db.prepare("SELECT id FROM records WHERE id=?").get(value.id);
+  return writeCurrentRecord(db, { v: CONTRACT_VERSION, request_id: `query-${++requestSequence}`,
+    write_basis: writeBasis(db, { projectScope: value.scope, targets: [{ kind: "record", id: value.id }] }),
+    input: { mode: exists ? "replace" : "create", record: { id: value.id, kind: value.type,
+      name: value.name, scope: value.scope, availability: value.content.state, data: value.content.value,
+      aliases: value.aliases, links: value.links, sources: value.sources } } }, options);
+}
 
 function memoryDatabase() {
   const db = openConnection(":memory:");
@@ -121,8 +138,8 @@ test("summary reads reject invalid record creation timestamps", () => {
     links: [{ relationship: "points_to", to_id: "r:target" }],
   }), { now });
   db.exec("PRAGMA ignore_check_constraints = ON");
-  db.prepare("UPDATE records SET created_at = ? WHERE id = ?")
-    .run("invalid", "r:target");
+  admittedTransaction(db, () => db.prepare("UPDATE records SET created_at = ? WHERE id = ?")
+    .run("invalid", "r:target"));
 
   assert.throws(
     () => findRecords(db, "r:target"),
@@ -145,7 +162,7 @@ test("export is canonical, complete, and free of volatile export metadata", () =
   assert.deepEqual(first, second);
   assert.equal(first.document.exported_at, undefined);
   assert.equal(first.document.database, undefined);
-  assert.deepEqual(first.document.aliases, [{
+  assert.deepEqual(first.document.aliases.map((row) => ({ ...row })), [{
     alias: "one",
     record_id: "r:one",
   }]);

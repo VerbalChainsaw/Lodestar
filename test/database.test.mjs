@@ -20,6 +20,8 @@ import {
   commit,
   openReadDatabase,
   openWriteDatabase,
+  admittedTransaction,
+  normalizeDatabaseBusyError,
   transaction,
 } from "../src/database.mjs";
 import {
@@ -37,6 +39,51 @@ async function temporaryDirectory(t) {
 async function digest(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
+
+test("database busy normalization recognizes only native SQLite busy and locked errors", () => {
+  const file = "test.db";
+  for (const raw of [
+    Object.assign(new Error("busy"), { code: "SQLITE_BUSY" }),
+    Object.assign(new Error("locked"), { code: "SQLITE_LOCKED" }),
+    Object.assign(new Error("busy recovery"), { code: "ERR_SQLITE_ERROR", errcode: 5 | (1 << 8) }),
+    Object.assign(new Error("locked shared cache"), { code: "ERR_SQLITE_ERROR", errcode: 6 | (1 << 8) }),
+  ]) {
+    const normalized = normalizeDatabaseBusyError(raw, file);
+    assert.equal(normalized.code, "database_busy");
+    assert.equal(normalized.identifiers.database, file);
+    assert.equal(normalized.cause, raw);
+  }
+
+  for (const unrelated of [
+    Object.assign(new Error("I/O"), { code: "ERR_SQLITE_ERROR", errcode: 10 }),
+    Object.assign(new Error("not SQLite"), { code: "OTHER_ERROR", errcode: 5 }),
+    new Error("ordinary failure"),
+  ]) {
+    assert.equal(normalizeDatabaseBusyError(unrelated, file), unrelated);
+  }
+});
+
+test("database busy normalization does not invoke hostile getters or propagate descriptor traps", () => {
+  let getterReads = 0;
+  const getters = {};
+  for (const key of ["code", "errcode"]) {
+    Object.defineProperty(getters, key, {
+      get() {
+        getterReads += 1;
+        throw new Error("hostile getter");
+      },
+    });
+  }
+  assert.equal(normalizeDatabaseBusyError(getters, "test.db"), getters);
+  assert.equal(getterReads, 0);
+
+  const descriptorTrap = new Proxy({}, {
+    getOwnPropertyDescriptor() {
+      throw new Error("hostile descriptor trap");
+    },
+  });
+  assert.equal(normalizeDatabaseBusyError(descriptorTrap, "test.db"), descriptorTrap);
+});
 
 test("initializes the universal-record schema and is read-only when repeated", async (t) => {
   const directory = await temporaryDirectory(t);
@@ -80,7 +127,8 @@ test("initializes the universal-record schema and is read-only when repeated", a
       .map(({ key, value }) => [key, value]),
   );
   assert.equal(metadata.created_at, "2026-07-30T10:00:00.000Z");
-  assert.equal(metadata.schema_version, "4");
+  assert.equal(metadata.schema_version, "5");
+  assert.match(metadata.database_epoch, /^[0-9a-f]{64}$/u);
   assert.equal(metadata.database_revision, "0");
   assert.match(metadata.database_instance_id, /^[0-9a-f]{64}$/u);
   db.close();
@@ -157,7 +205,7 @@ test("a failed transaction leaves no partial records", async (t) => {
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
   const db = openConnection(file);
-  assert.throws(() => transaction(db, () => {
+  assert.throws(() => admittedTransaction(db, () => {
     db.prepare(
       "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(
@@ -207,7 +255,7 @@ test("commit ambiguity is explicit and preserves a possibly committed init", asy
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
 });
@@ -241,7 +289,7 @@ test("definite init commit failure preserves a resumable reservation", async (t)
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
 });
@@ -252,14 +300,14 @@ test("SQLite rolls back an interrupted uncommitted transaction", async (t) => {
   await initializeDatabase(file);
   const databaseModule = new URL("../src/database.mjs", import.meta.url).href;
   const script = [
-    `import { openConnection } from ${JSON.stringify(databaseModule)};`,
+    `import { admittedTransaction, openConnection } from ${JSON.stringify(databaseModule)};`,
     `const db = openConnection(${JSON.stringify(file)});`,
-    "db.exec('BEGIN IMMEDIATE');",
+    "admittedTransaction(db, () => {",
     "db.prepare('INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)').run(",
     "'record:interrupted','note','Interrupted','global',",
     "'{\"state\":\"known\",\"value\":true}',",
     "'2026-07-30T10:00:00.000Z','2026-07-30T10:00:00.000Z');",
-    "process.exit(0);",
+    "process.exit(0); });",
   ].join("\n");
   const child = spawnSync(
     process.execPath,
@@ -304,7 +352,7 @@ test("initialization resumes an interrupted zero-byte reservation", async (t) =>
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
 });
@@ -340,27 +388,21 @@ test("schema constraints allow complete content and enforce exact timestamps", a
   const file = path.join(directory, "lodestar.db");
   await initializeDatabase(file);
   const db = openConnection(file);
-  const insert = db.prepare(
-    "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
-  assert.doesNotThrow(() => insert.run(
-    "😀".repeat(256),
-    "note",
-    "Too many bytes",
-    "global",
-    '{"state":"known"}',
-    "2026-07-30T10:00:00.000Z",
-    "2026-07-30T10:00:00.000Z",
-  ));
-  assert.throws(() => insert.run(
-    "record:bad-time",
-    "note",
-    "Bad time",
-    "global",
-    '{"state":"known"}',
-    "2026-02-30T10:00:00.000Z",
-    "2026-07-30T10:00:00.000Z",
-  ));
+  admittedTransaction(db, () => {
+    const insert = db.prepare(
+      "INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    assert.doesNotThrow(() => insert.run(
+      "😀".repeat(256), "note", "Too many bytes", "global",
+      '{"state":"known"}', "2026-07-30T10:00:00.000Z",
+      "2026-07-30T10:00:00.000Z",
+    ));
+    assert.throws(() => insert.run(
+      "record:bad-time", "note", "Bad time", "global",
+      '{"state":"known"}', "2026-02-30T10:00:00.000Z",
+      "2026-07-30T10:00:00.000Z",
+    ));
+  });
   db.close();
 });
 
@@ -382,7 +424,7 @@ test("concurrent initialization never overwrites another creator", async (t) => 
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "4",
+    "5",
   );
   db.close();
   if (process.platform !== "win32") {

@@ -42,6 +42,29 @@ export function resolveInputPath(value, { cwd = process.cwd(), platform = proces
   return pathApi.resolve(cwd, selected);
 }
 
+export function resolveSourceLocator(locator, { project = {}, sourceRoots = {} } = {}) {
+  if (!locator || typeof locator !== "object" || !["project_root", "checkout_root", "source_root", "absolute"].includes(locator.base)) {
+    throw lodestarError("invalid_path", "A source locator needs an explicit base and path.");
+  }
+  assertPath(locator.path, "source locator");
+  if (locator.base === "absolute") {
+    const selected = translateWindowsDialectPath(locator.path, { includeMsys: process.platform === "win32" });
+    if (!path.isAbsolute(selected)) throw lodestarError("invalid_path", "An absolute source locator must be absolute.");
+    return { path: resolveInputPath(selected), root: null };
+  }
+  const root = locator.base === "project_root" ? project.root
+    : locator.base === "checkout_root" ? project.checkout_root : sourceRoots[locator.source_id];
+  if (!root) throw lodestarError("invalid_path", "The declared source root is unavailable.",
+    { identifiers: { base: locator.base, source_id: locator.source_id ?? null } });
+  if (path.isAbsolute(locator.path)) throw lodestarError("invalid_path", "A relative source locator cannot contain an absolute path.");
+  const absoluteRoot = resolveInputPath(root), resolved = path.resolve(absoluteRoot, locator.path);
+  const relative = path.relative(absoluteRoot, resolved);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw lodestarError("invalid_path", "The source locator escapes its declared root.", { identifiers: { locator } });
+  }
+  return { path: resolved, root: absoluteRoot };
+}
+
 export function defaultDatabasePath({
   platform = process.platform,
   env = process.env,

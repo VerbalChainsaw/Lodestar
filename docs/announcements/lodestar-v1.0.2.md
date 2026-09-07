@@ -1,5 +1,7 @@
 # Announcing Lodestar 1.0
 
+> **Historical announcement.** This page describes the 1.0 release line and is not current operating guidance. See the [current documentation](../README.md) and [2.1.2 release notes](../releases/v2.1.2.md).
+
 Current release: **Lodestar 1.0.2**
 
 ![Lodestar 1.0.2 launch card](../assets/lodestar-v1.0.2-social.png)

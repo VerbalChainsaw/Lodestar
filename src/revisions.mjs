@@ -1,4 +1,8 @@
 import { lodestarError } from "./errors.mjs";
+import {
+  setTransactionRevision,
+  transactionRevision,
+} from "./database.mjs";
 
 export function currentRevision(db) {
   const value = db.prepare(
@@ -21,6 +25,8 @@ export function currentRevision(db) {
 }
 
 export function allocateRevision(db) {
+  const allocated = transactionRevision(db);
+  if (allocated !== null) return allocated;
   const next = currentRevision(db) + 1;
   if (!Number.isSafeInteger(next)) {
     throw lodestarError(
@@ -31,5 +37,6 @@ export function allocateRevision(db) {
   db.prepare(
     "UPDATE metadata SET value = ? WHERE key = 'database_revision'",
   ).run(String(next));
+  setTransactionRevision(db, next);
   return next;
 }

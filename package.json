@@ -1,7 +1,7 @@
 {
   "name": "lodestar-agent-context",
-  "version": "1.6.0",
-  "description": "One local state suite for agent startup, knowledge, work presence, continuity, and decisions",
+  "version": "2.1.2",
+  "description": "Local contract-5 project context, evidence, decisions, work, and continuity",
   "type": "module",
   "bin": {
     "lodestar": "lodestar.mjs"
@@ -9,12 +9,20 @@
   "files": [
     "lodestar.mjs",
     "src/",
+    "!src/continuity-schema.mjs",
+    "!src/markers.mjs",
     "managed-assets/",
     "codex-plugin/",
     "docs/agent-bootstrap.json",
-    "docs/GOLDEN-RULES.md",
     "docs/limitations.md",
     "docs/schema.md",
+    "docs/releases/v2.0.0.md",
+    "docs/releases/v2.0.1.md",
+    "docs/releases/v2.0.2.md",
+    "docs/releases/v2.1.0.md",
+    "docs/releases/v2.1.1.md",
+    "docs/releases/v2.1.2.md",
+    "docs/installation.md",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",
@@ -51,7 +59,7 @@
     "type": "git",
     "url": "git+https://github.com/VerbalChainsaw/Lodestar.git"
   },
-  "homepage": "https://github.com/VerbalChainsaw/Lodestar#readme",
+  "homepage": "https://verbalchainsaw.github.io/Lodestar/",
   "bugs": {
     "url": "https://github.com/VerbalChainsaw/Lodestar/issues"
   }

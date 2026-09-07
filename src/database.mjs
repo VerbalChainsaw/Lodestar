@@ -5,7 +5,6 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { lodestarError, wrapError } from "./errors.mjs";
 import {
@@ -19,18 +18,52 @@ import {
 } from "./schema.mjs";
 import { validateTimestamp } from "./validate.mjs";
 
-export const DATABASE_BUSY_TIMEOUT_MS = 5_000;
+export const DATABASE_BUSY_TIMEOUT_MS = 0;
 
-function sqliteError(error, file) {
-  const code = String(error?.code ?? "");
-  const primaryCode = Number.isInteger(error?.errcode)
-    ? error.errcode & 0xff
+const connectionState = new WeakMap();
+
+function stateFor(db) {
+  const state = connectionState.get(db);
+  if (!state) {
+    throw lodestarError(
+      "invalid_transaction",
+      "The SQLite connection is not owned by Lodestar.",
+    );
+  }
+  return state;
+}
+
+function ownDataProperty(value, key) {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
+    return undefined;
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && Object.hasOwn(descriptor, "value")
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function normalizeDatabaseBusyError(error, file = null) {
+  const rawCode = ownDataProperty(error, "code");
+  const code = typeof rawCode === "string" ? rawCode : "";
+  const rawErrorCode = ownDataProperty(error, "errcode");
+  const primaryCode = Number.isInteger(rawErrorCode)
+    ? rawErrorCode & 0xff
     : null;
+  const nativeSqliteError = code === "ERR_SQLITE_ERROR"
+    || code.startsWith("SQLITE_");
   if (
-    code.includes("SQLITE_BUSY")
-    || code.includes("SQLITE_LOCKED")
-    || primaryCode === 5
-    || primaryCode === 6
+    nativeSqliteError
+    && (
+      code.includes("SQLITE_BUSY")
+      || code.includes("SQLITE_LOCKED")
+      || primaryCode === 5
+      || primaryCode === 6
+    )
   ) {
     return lodestarError(
       "database_busy",
@@ -42,6 +75,16 @@ function sqliteError(error, file) {
       },
     );
   }
+  return error;
+}
+
+function sqliteError(error, file) {
+  const busyError = normalizeDatabaseBusyError(error, file);
+  if (busyError !== error) return busyError;
+  const code = String(error?.code ?? "");
+  const primaryCode = Number.isInteger(error?.errcode)
+    ? error.errcode & 0xff
+    : null;
   if (
     code.includes("SQLITE_CORRUPT")
     || code.includes("SQLITE_NOTADB")
@@ -115,6 +158,12 @@ export function openConnection(
       enableDoubleQuotedStringLiterals: false,
       allowExtension: false,
     });
+    const state = { admission: 0, revision: null };
+    connectionState.set(db, state);
+    if (!readOnly) {
+      db.function("lodestar_write_contract", {}, () =>
+        state.admission > 0 ? SCHEMA_VERSION : 0);
+    }
     if (typeof db.enableDefensive === "function") {
       db.enableDefensive(true);
     }
@@ -169,6 +218,16 @@ export function transaction(db, operation, file = null) {
       "SQLite transactions require a synchronous callback.",
     );
   }
+  if (db.isTransaction === true) {
+    const nested = operation();
+    if (nested && typeof nested.then === "function") {
+      throw lodestarError(
+        "invalid_transaction",
+        "Synchronous SQLite transactions cannot accept an async callback.",
+      );
+    }
+    return nested;
+  }
   beginImmediate(db, file);
   let result;
   try {
@@ -204,7 +263,51 @@ export function transaction(db, operation, file = null) {
       },
     );
   }
+  stateFor(db).revision = null;
   return result;
+}
+
+export function admittedTransaction(db, operation, file = null) {
+  const state = stateFor(db);
+  if (db.isTransaction === true && state.admission < 1) {
+    throw lodestarError(
+      "invalid_transaction",
+      "A write admission cannot begin inside an unadmitted transaction.",
+    );
+  }
+  const outerAdmission = state.admission === 0;
+  if (outerAdmission) db.exec("PRAGMA trusted_schema = ON");
+  state.admission += 1;
+  try {
+    return transaction(db, operation, file);
+  } finally {
+    state.admission -= 1;
+    if (outerAdmission) {
+      state.revision = null;
+      db.exec("PRAGMA trusted_schema = OFF");
+    }
+  }
+}
+
+export function transactionRevision(db) {
+  return stateFor(db).revision;
+}
+
+export function setTransactionRevision(db, revision) {
+  const state = stateFor(db);
+  if (db.isTransaction !== true || state.admission < 1) {
+    throw lodestarError(
+      "invalid_transaction",
+      "Database revisions can be allocated only by an admitted transaction.",
+    );
+  }
+  if (state.revision !== null && state.revision !== revision) {
+    throw lodestarError(
+      "invalid_transaction",
+      "An accepted mutation can allocate only one database revision.",
+    );
+  }
+  state.revision = revision;
 }
 
 export { readMetadata } from "./database-schema.mjs";
@@ -227,7 +330,7 @@ export async function openReadDatabase(file) {
       {
         identifiers: { database: file },
         action:
-          "Write the first record with lodestar put or import a legacy store.",
+          "Run lodestar init to create a new store, or select an existing database with --db.",
       },
     );
   }
@@ -243,11 +346,6 @@ export async function openReadDatabase(file) {
   }
 }
 
-export async function openOrMigrateReadDatabase(file, options = {}) {
-  await migrateDatabase(file, options);
-  return await openReadDatabase(file);
-}
-
 export async function openDiagnosticDatabase(file) {
   if (!await existingFile(file)) {
     throw lodestarError(
@@ -256,7 +354,7 @@ export async function openDiagnosticDatabase(file) {
       {
         identifiers: { database: file },
         action:
-          "Write the first record with lodestar put before running diagnostics.",
+          "Run lodestar init to create a new store, or select an existing database with --db.",
       },
     );
   }
@@ -278,7 +376,7 @@ export async function openWriteDatabase(file) {
       {
         identifiers: { database: file },
         action:
-          "Write the first record with lodestar put or import a legacy store.",
+          "Run lodestar init to create a new store, or select an existing database with --db.",
       },
     );
   }
@@ -292,24 +390,6 @@ export async function openWriteDatabase(file) {
     throw error?.name === "LodestarError"
       ? error
       : sqliteError(error, file);
-  }
-}
-
-export async function openOrMigrateWriteDatabase(file, options = {}) {
-  await migrateDatabase(file, options);
-  return await openWriteDatabase(file);
-}
-
-async function waitForInitializedWriteDatabase(file) {
-  const deadline = Date.now() + DATABASE_BUSY_TIMEOUT_MS;
-  while (true) {
-    try {
-      return await openOrMigrateWriteDatabase(file);
-    } catch (error) {
-      if (!["database_busy", "invalid_database"].includes(error?.code)
-        || Date.now() >= deadline) throw error;
-    }
-    await delay(10);
   }
 }
 
@@ -353,7 +433,7 @@ export function initializeConnection(
   },
 ) {
   validateTimestamp(createdAt, "created_at");
-  return transaction(
+  return admittedTransaction(
     db,
     () => createSchema(db, { createdAt, databaseInstanceId }),
     database,
@@ -368,23 +448,23 @@ export async function initializeDatabase(
 ) {
   let resumableEmptyFile = false;
   if (await existingFile(file)) {
+    let existing;
     try {
-      const migration = await migrateDatabase(file, { now });
-      const db = openConnection(file, { readOnly: true });
-      assertSupportedSchema(db, file);
-      const metadata = readMetadata(db, file);
-      db.close();
+      existing = openConnection(file, { readOnly: true });
+      assertSupportedSchema(existing, file);
+      const metadata = readMetadata(existing, file);
       return {
         database: file,
         schema_version: SCHEMA_VERSION,
         created: false,
         created_at: metadata.created_at,
         database_instance_id: metadata.database_instance_id,
-        migration,
       };
     } catch (error) {
       if (!await databaseFileIsEmpty(file)) throw error;
       resumableEmptyFile = true;
+    } finally {
+      existing?.close();
     }
   }
 
@@ -448,16 +528,4 @@ export async function initializeDatabase(
         },
       );
   }
-}
-
-export async function openOrInitializeWriteDatabase(file) {
-  if (!await existingFile(file) || await databaseFileIsEmpty(file)) {
-    try {
-      await initializeDatabase(file);
-    } catch (error) {
-      if (!["database_busy", "database_conflict", "invalid_database"]
-        .includes(error?.code)) throw error;
-    }
-  }
-  return await waitForInitializedWriteDatabase(file);
 }

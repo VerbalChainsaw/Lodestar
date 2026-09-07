@@ -1,28 +1,18 @@
-# Advisory work presence
+# Advisory work and outcomes
 
-Work reports describe what peers say they are doing. They are never assignments,
-ownership, locks, permission to edit, or proof that an area is free.
+Work records describe observed activity and outcomes. They do not assign ownership,
+lock files, authorize edits, or prove an area is free.
 
-- Inspect active reports: `lodestar work status`.
-- Start or update this actor's report: `lodestar work start "<current work>"`.
-- Close it idempotently: `lodestar work done "<completion>"`.
+- Read current and historical reports with `lodestar work status|history`.
+- Record activity with `lodestar work start --file <request.json>`.
+- Record a checkpoint or outcome with `lodestar work report|done --file <request.json>`.
+- Correct obsolete open reports with `lodestar work expire --file <request.json>`.
 
-Identity comes from the host, not the shell. In a host running the Lodestar plugin
-(Codex Desktop), call the bundled tools — `lodestar_work_start`, `lodestar_work_done`,
-`lodestar_work_status` — which carry the exact session id the host already knows.
-A plain shell has no session id, so `lodestar work start` there requires an explicit
-`--session <id>`. Lodestar refuses rather than guessing: work records are keyed by
-actor, so a guessed session would capture and then overwrite a concurrent peer's
-marker.
+All writes use the shared contract-5 request and returned basis. Work identity comes
+from actual host context. A native tool or shell that lacks actor/session identity
+must not guess it; current work mutations return `identity_required` when it is absent.
 
-- Review deterministic history: `lodestar work history`; add `--limit` only for a caller-selected page.
-- Explicitly expire old open reports: `lodestar work expire --older-than-hours <n>`.
-
-Lodestar derives project/worktree identity canonically and actor identity from the
-exact session, agent, and host harness. Each actor has at most one open report;
-repeated start updates it instead of creating a duplicate. Repeated done is a
-safe no-op. Status and history use deterministic ordering.
-
-`STALE?` means only that a report is old. It is not evidence of abandonment and
-must not be used to take over files or discard work. Expiration is explicit, auditable, and changes only qualifying advisory reports. Use
-`lodestar doctor` for stored-state checks; do not edit work rows directly.
+Record what actually happened: attempted, interrupted, failed, completed, verified, or
+unknown. A historical passing test remains historical after code changes. Keep external
+action success distinct from ledger persistence failure, and retry only the unchanged
+logical ledger request after a lost response.

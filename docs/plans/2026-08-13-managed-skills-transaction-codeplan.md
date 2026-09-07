@@ -1,5 +1,7 @@
 [codeplan · managed-skills-transaction · IN · mode: full · confidence: high · candidates: V1 sequential compensation+list-compensate, V2 two-phase batch+two-phase-stage, V3 durable recovery+external-journal, V4 root generations+root-swap · lean: V2 · baseline: V1]
 
+> **Historical plan.** This file preserves a retired pre-2.1 design and is not current operating guidance. See the [current documentation](../README.md).
+
 # Managed skills transaction decision
 
 ## Evidence and contract
