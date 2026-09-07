@@ -4,10 +4,12 @@ import { chmod, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } f
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { COMMANDS } from "./cli-commands.mjs";
+import { COMMANDS, PATH_OPTIONS } from "./cli-commands.mjs";
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_ENTRY = fileURLToPath(new URL("../lodestar.mjs", import.meta.url));
+const pathOptionPattern = PATH_OPTIONS.join("|");
+const valueOptions = [...new Set(Object.values(COMMANDS).flatMap(({ values }) => values))].join("|");
 const bashLiteral = (value) => `'${String(value).replaceAll("'", `'"'"'`)}'`;
 
 export async function pathExists(candidate) {
@@ -49,14 +51,52 @@ if [ ! -x "$NODE_BIN" ] || [ ! -f "$LODESTAR_ENTRY" ]; then
   echo "LODESTAR ERROR: selected Windows Lodestar installation is unavailable; reinstall its launcher." >&2
   exit 1
 fi
-MSYS2_ARG_CONV_EXCL='*' exec "$NODE_BIN_WIN" "$LODESTAR_ENTRY_WIN" "$@"
+arguments=("$@")
+command_name=""
+saw_home=false
+saw_launcher=false
+option_end=\${#arguments[@]}
+windows_path() {
+  # Automatic MSYS conversion is deliberately disabled below so payload arguments
+  # never change. Convert only declared path values before crossing to Windows Node.
+  case "$1" in
+    [a-zA-Z]:[\\/]*|\\\\*) printf '%s' "$1" ;;
+    *) cygpath -aw "$1" ;;
+  esac
+}
+for ((index=0; index<\${#arguments[@]}; index++)); do
+  option="\${arguments[$index]}"
+  case "$option" in
+    --) option_end=$index; break ;;
+    ${pathOptionPattern})
+      if ((index + 1 >= \${#arguments[@]})) || [[ "\${arguments[$((index + 1))]}" = --* ]]; then
+        echo "LODESTAR ERROR: $option requires a path" >&2
+        exit 1
+      fi
+      arguments[$((index + 1))]="$(windows_path "\${arguments[$((index + 1))]}")"
+      case "$option" in
+        --home) saw_home=true ;;
+        --wsl-shim|--posix-shim) saw_launcher=true ;;
+      esac
+      ((index += 1)) ;;
+    ${valueOptions}) ((index += 1)) ;;
+    -*) ;;
+    *) [ -n "$command_name" ] || command_name="$option" ;;
+  esac
+done
+case "$command_name" in
+  start|setup)
+    if [ "$saw_home" = false ] && [ "$saw_launcher" = false ] && [ -f "$0" ]; then
+      arguments=("\${arguments[@]:0:$option_end}" --posix-shim "$(windows_path "$0")" "\${arguments[@]:$option_end}")
+    fi ;;
+esac
+MSYS2_ARG_CONV_EXCL='*' exec "$NODE_BIN_WIN" "$LODESTAR_ENTRY_WIN" "\${arguments[@]}"
 `;
 }
 
 export function renderWslShim({ node = process.execPath, entry = PACKAGE_ENTRY } = {}) {
   const cwdCommands = Object.entries(COMMANDS).filter(([, command]) => command.values.includes("--cwd"))
     .map(([name]) => name).join("|");
-  const valueOptions = [...new Set(Object.values(COMMANDS).flatMap(({ values }) => values))].join("|");
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -81,6 +121,7 @@ saw_claude_home=false
 saw_opencode_root=false
 saw_xdg_config_home=false
 saw_database=false
+saw_launcher=false
 option_end=\${#arguments[@]}
 windows_path() {
   # Keep already-qualified Windows paths; resolve every Linux path, including
@@ -102,7 +143,7 @@ for ((index=0; index<\${#arguments[@]}; index++)); do
   option="\${arguments[$index]}"
   case "$option" in
     --) option_end=$index; break ;;
-    --cwd|--home|--codex-home|--claude-home|--hermes-home|--opencode-root|--xdg-config-home|--file|--db|--source|--wsl-shim|--posix-shim)
+    ${pathOptionPattern})
       if ((index + 1 >= \${#arguments[@]})) || [[ "\${arguments[$((index + 1))]}" = --* ]]; then
         echo "LODESTAR ERROR: $option requires a path" >&2
         exit 1
@@ -111,6 +152,7 @@ for ((index=0; index<\${#arguments[@]}; index++)); do
       case "$option" in
         --db) check_database_path "\${arguments[$((index + 1))]}"; saw_database=true ;;
         --source) check_database_path "\${arguments[$((index + 1))]}" ;;
+        --wsl-shim|--posix-shim) saw_launcher=true ;;
         --cwd) saw_cwd=true ;;
         --home) saw_home=true; selected_home="\${arguments[$((index + 1))]}" ;;
         --hermes-home) saw_hermes_home=true ;;
@@ -127,10 +169,16 @@ for ((index=0; index<\${#arguments[@]}; index++)); do
 done
 defaults=()
 case "$command_name" in
+  start|setup)
+    if [ "$saw_home" = false ] && [ "$saw_launcher" = false ] && [ -f "$0" ]; then
+      defaults+=(--wsl-shim "$(windows_path "$0")")
+    fi ;;
+esac
+case "$command_name" in
   ${cwdCommands}) [ "$saw_cwd" = true ] || defaults+=(--cwd "$(windows_path "$PWD")") ;;
 esac
 case "$command_name" in
-  skills|setup)
+  start|skills|setup)
     [ "$saw_home" = true ] || defaults+=(--home "$(windows_path "$HOME")")
     if [ "$saw_hermes_home" = false ]; then
       if [ "$saw_home" = true ]; then

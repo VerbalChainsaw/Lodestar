@@ -43,6 +43,7 @@ test("the Windows POSIX shim converts paths explicitly", () => {
   assert.match(shim, /LODESTAR_ENTRY_WIN='C:\\selected\\node_modules/u);
   assert.doesNotMatch(shim, /node-\*/u);
   assert.match(shim, /MSYS2_ARG_CONV_EXCL='\*'/u);
+  assert.match(shim, /cygpath -aw/u);
 });
 
 test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
@@ -54,7 +55,7 @@ test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
   assert.match(shim, /defaults\+=\(--home/u);
   assert.match(shim, /defaults\+=\(--hermes-home/u);
   assert.doesNotMatch(shim, /--codex-bootstrap|--claude-bootstrap|--hermes-bootstrap|--opencode-bootstrap/u);
-  assert.match(shim, /--cwd\|--home\|--codex-home\|--claude-home/u);
+  assert.match(shim, /--cwd\|--file\|--db\|--source/u);
   assert.match(shim,
     /exec \/init "\$\(wslpath -u "\$NODE_BIN"\)" -- "\$LODESTAR_ENTRY_WIN" "\$\{arguments\[@\]\}"/u);
   assert.doesNotMatch(shim, /exec "\$NODE_BIN"/u);
@@ -103,6 +104,50 @@ test("the shim syntax check rejects a parse error", () => {
   });
   if (syntax.error?.code === "ENOENT") return;
   assert.notEqual(syntax.status, 0);
+});
+
+test("the Windows POSIX shim converts declared Git Bash paths and preserves its literal tail", async (t) => {
+  if (process.platform !== "win32") return t.skip("Requires Windows Git Bash");
+  const git = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git");
+  const bash = path.join(git, "bin", "bash.exe");
+  const cygpath = path.join(git, "usr", "bin", "cygpath.exe");
+  const available = spawnSync(bash, ["-lc", "command -v cygpath"], { encoding: "utf8", windowsHide: true });
+  if (available.error?.code === "ENOENT" || available.status !== 0) return t.skip("Git Bash is unavailable");
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-posix-transport-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const entry = path.join(directory, "capture.mjs");
+  await writeFile(entry, "process.stdout.write(JSON.stringify(process.argv.slice(2)));", "utf8");
+  const posix = (candidate) => {
+    const converted = spawnSync(cygpath, ["-u", candidate], { encoding: "utf8", windowsHide: true });
+    assert.equal(converted.status, 0, converted.stderr);
+    return converted.stdout.trim();
+  };
+  const invoke = (args) => spawnSync(bash, ["-s", "--", ...args], {
+    input: renderWindowsPosixShim({ entry }), encoding: "utf8", windowsHide: true,
+  });
+  const parse = (result) => { assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout); };
+  const value = (args, name) => args[args.indexOf(name) + 1];
+  const cwd = path.join(directory, "project");
+  const file = path.join(directory, "request.json");
+  const database = path.join(directory, "lodestar.db");
+  const argsFile = path.join(directory, "arguments.json");
+  const output = path.join(directory, "result.json");
+  const start = parse(invoke(["start", "--cwd", posix(cwd), "--home", posix(path.join(directory, "home")),
+    "--codex-root", "agents", "--db", posix(database), "--args-file", posix(argsFile),
+    "--output", posix(output), "--", "--file", posix(file)]));
+  assert.equal(value(start, "--cwd"), cwd);
+  assert.equal(value(start, "--home"), path.join(directory, "home"));
+  assert.equal(value(start, "--codex-root"), "agents");
+  assert.equal(value(start, "--db"), database);
+  assert.equal(value(start, "--args-file"), argsFile);
+  assert.equal(value(start, "--output"), output);
+  assert.deepEqual(start.slice(start.indexOf("--")), ["--", "--file", posix(file)]);
+  const put = parse(invoke(["put", "--file", posix(file)]));
+  assert.equal(value(put, "--file"), file);
+  const custom = path.join(directory, "custom-launcher");
+  await writeFile(custom, renderWindowsPosixShim({ entry }));
+  const fromFile = parse(spawnSync(bash, [posix(custom), "start"], { encoding: "utf8", windowsHide: true }));
+  assert.equal(value(fromFile, "--posix-shim"), custom);
 });
 
 test("launcher updates preserve custom bytes and repeated concurrent installs converge", async (t) => {
@@ -156,6 +201,13 @@ test("WSL transports actual arguments and working directory across the Windows b
   const entry = path.join(directory, "capture.mjs");
   await writeFile(entry, "process.stdout.write(JSON.stringify({argv:process.argv.slice(2),db:process.env.LODESTAR_DB}));");
   const shim = renderWslShim({ entry });
+  const custom = path.join(directory, "custom-launcher");
+  await writeFile(custom, shim);
+  const customLinux = spawnSync("wsl.exe", ["--exec", "wslpath", "-u", custom], { encoding: "utf8", windowsHide: true }).stdout.trim();
+  const fileResult = spawnSync("wsl.exe", ["--", "bash", customLinux, "start"], { encoding: "utf8", windowsHide: true });
+  assert.equal(fileResult.status, 0, fileResult.stderr);
+  const fileArgs = JSON.parse(fileResult.stdout).argv;
+  assert.equal(fileArgs[fileArgs.indexOf("--wsl-shim") + 1], custom);
   const invoke = (cwd, args, prefix = "") => spawnSync("wsl.exe",
     ["--cd", cwd, "--", "bash", "-s", "--", ...args],
     { input: `${prefix}${shim}`, encoding: "utf8", windowsHide: true });
@@ -173,6 +225,11 @@ test("WSL transports actual arguments and working directory across the Windows b
     "export HERMES_HOME=\"$HOME/custom-hermes\"\n"));
   assert.equal(value(skills, "--home"), homeWin);
   assert.equal(value(skills, "--hermes-home"), `${homeWin}\\custom-hermes`);
+  const startHomes = parse(invoke(home, ["start"],
+    "export HERMES_HOME=\"$HOME/custom-hermes\" CODEX_HOME=\"$HOME/custom-codex\"\n"));
+  assert.equal(value(startHomes, "--home"), homeWin);
+  assert.equal(value(startHomes, "--hermes-home"), `${homeWin}\\custom-hermes`);
+  assert.equal(value(startHomes, "--codex-home"), `${homeWin}\\custom-codex`);
   const customHomes = parse(invoke(home, ["--human", "setup"],
     "export CODEX_HOME=\"$HOME/custom-codex\" CLAUDE_CONFIG_DIR=\"$HOME/custom-claude\" XDG_CONFIG_HOME=\"$HOME/custom-xdg\" OPENCODE_CONFIG_DIR=\"$HOME/custom-opencode\"\n"));
   assert.equal(value(customHomes, "--codex-home"), `${homeWin}\\custom-codex`);
@@ -185,6 +242,12 @@ test("WSL transports actual arguments and working directory across the Windows b
   assert.equal(value(isolated, "--hermes-home"), `${homeWin}\\other-user\\.hermes`);
   for (const option of ["--codex-home", "--claude-home", "--xdg-config-home", "--opencode-root"]) {
     assert.equal(isolated.includes(option), false, `${option} must not leak from the caller's environment`);
+  }
+  const isolatedStart = parse(invoke(home, ["start", "--home", `${home}/other-user`], hostEnvironment));
+  assert.equal(value(isolatedStart, "--home"), `${homeWin}\\other-user`);
+  assert.equal(value(isolatedStart, "--hermes-home"), `${homeWin}\\other-user\\.hermes`);
+  for (const option of ["--codex-home", "--claude-home", "--xdg-config-home", "--opencode-root"]) {
+    assert.equal(isolatedStart.includes(option), false, `${option} must not leak into isolated start`);
   }
   const explicit = parse(invoke(home, ["skills", "verify", "--home", `${home}/other-user`,
     "--hermes-home", `${home}/explicit-hermes`, "--codex-home", `${home}/explicit-codex`], hostEnvironment));

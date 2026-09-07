@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.0 - 2026-09-07
+
+- Discover standard Windows/Git Bash and WSL launcher destinations during setup.
+  Return the maintained operating guide and fresh installation health with a scoped
+  repair command at startup, without changing read-only startup semantics.
+- Carry complete command arrays through UTF-8 files or stdin, and support complete
+  output files with byte length and SHA-256 receipts. Native reads use stdin for
+  arguments so Windows command-line limits do not clip long requests.
+- Translate declared Git Bash path arguments and preserve opaque argument values.
+  Keep managed skill bytes stable through Git checkouts regardless of autocrlf.
+- Accept structured JSON with a leading BOM; preserve Unicode and data line endings.
+  Reject duplicate decoded keys, lossy decimal conversion, and malformed UTF-8
+  before mutation. Validate MCP controls while accepting standard request metadata.
+- Retain contract 5, schema 5, one mutation owner, and exact-request receipt replay.
+
 ## 2.0.2 - 2026-09-07
 
 - Validate recovery operation paths, inventories, and preserved backup bytes before

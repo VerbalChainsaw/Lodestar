@@ -236,6 +236,9 @@ export function parseJsonText(
     identifiers = {},
   } = {},
 ) {
+  // A transport BOM is not JSON data. Preserve raw source decoding elsewhere;
+  // consume only the optional initial marker at the structured JSON boundary.
+  if (text.startsWith("\uFEFF")) text = text.slice(1);
   if (maximum !== undefined) {
     assertTextBytes(text, maximum, resource, identifiers);
   }
@@ -255,6 +258,25 @@ export function parseJsonText(
 
 export function assertJsonNumericDomain(text) {
   let offset = 0;
+  const decimalMeaning = (token) => {
+    const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/u.exec(token);
+    const fraction = match[3] ?? "";
+    let digits = `${match[2]}${fraction}`.replace(/^0+/u, "");
+    if (!digits) return { negative: false, digits: "0", exponent: 0n };
+    let exponent = BigInt(match[4] ?? "0") - BigInt(fraction.length);
+    while (digits.endsWith("0")) {
+      digits = digits.slice(0, -1);
+      exponent += 1n;
+    }
+    return { negative: match[1] === "-", digits, exponent };
+  };
+  const preservesDecimalMeaning = (token, numeric) => {
+    const source = decimalMeaning(token);
+    const canonical = decimalMeaning(JSON.stringify(numeric));
+    return source.negative === canonical.negative
+      && source.digits === canonical.digits
+      && source.exponent === canonical.exponent;
+  };
   const whitespace = () => {
     while (/\s/u.test(text[offset] ?? "")) offset += 1;
   };
@@ -274,14 +296,24 @@ export function assertJsonNumericDomain(text) {
     }
     if (text[offset] === "{") {
       offset += 1;
+      const keys = new Set();
       whitespace();
       if (text[offset] === "}") { offset += 1; return; }
       while (offset < text.length) {
         whitespace();
         const key = stringToken();
+        const keyPointer = `${pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+        if (keys.has(key)) {
+          throw lodestarError(
+            "invalid_json",
+            "JSON objects cannot contain duplicate member names.",
+            { identifiers: { pointer: keyPointer, key } },
+          );
+        }
+        keys.add(key);
         whitespace();
         offset += 1;
-        inspectValue(`${pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`);
+        inspectValue(keyPointer);
         whitespace();
         if (text[offset++] === "}") return;
       }
@@ -306,7 +338,8 @@ export function assertJsonNumericDomain(text) {
       offset = token.lastIndex;
       const numeric = Number(match[0]);
       if (!Number.isFinite(numeric)
-        || (Number.isInteger(numeric) && !Number.isSafeInteger(numeric))) {
+        || (Number.isInteger(numeric) && !Number.isSafeInteger(numeric))
+        || !preservesDecimalMeaning(match[0], numeric)) {
         throw lodestarError(
           "unsupported_numeric_value",
           "A JSON number is outside the supported numeric domain.",

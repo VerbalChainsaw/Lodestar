@@ -1,11 +1,11 @@
 # Lodestar
 
-Lodestar is a local, JSON-first project context registry for agents. Version 2.0
+Lodestar is a local, JSON-first project context registry for agents. Version 2.1
 ships one executable, one contract-5 envelope, one current SQLite schema, and one
 guarded mutation path for facts, decisions, work outcomes, and continuity.
 
 ```text
-npm install --global .\lodestar-agent-context-2.0.2.tgz
+npm install --global .\lodestar-agent-context-2.1.0.tgz
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -13,7 +13,7 @@ lodestar start --cwd .
 ```
 
 The local tarball is the supplied release artifact. Use the registry package name
-only after version 2.0.2 has been published. Review the setup plan; existing locally
+only after version 2.1.0 has been published. Review the setup plan; existing locally
 changed or unowned skills require `--replace-local`, which preserves backups.
 Choose an individual `--target` to install only one host. See
 [installation and startup checks](docs/installation.md). `init` is explicit and idempotent for a
@@ -21,7 +21,9 @@ new current store; `start` never creates one.
 
 `start` resolves the current project and checkout, reads applicable configured
 sources, and returns relevant records, conflicts, source status, and a usable
-`write_basis`. It does not initialize or mutate a database. Missing optional
+`write_basis`. It also returns the maintained operating guide and a fresh, read-only
+installation check with an actionable setup command when needed. It does not
+initialize or mutate a database. Missing optional
 Lodestar context does not prevent ordinary work from native files and tools.
 
 ## Normal use
@@ -108,7 +110,8 @@ to stderr using the same contract-5 envelope.
 The optional [Codex plugin bundle](codex-plugin/.codex-plugin/plugin.json) provides the automatic
 Lodestar skill and three MCP tools:
 
-- `lodestar_describe` returns the installed command and mutation declarations.
+- `lodestar_describe` returns the maintained operating guide and installed command
+  and mutation declarations.
 - `lodestar_read` invokes a declared read through the installed one-shot package.
 - `lodestar_mutate` accepts the same short request and operation-specific input
   schema used by the CLI.

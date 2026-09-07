@@ -211,7 +211,7 @@
       "source_entrypoint": "skills/lodestar/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "fc54bd4bc4a46beda8e28448362ec4de2d2883e86fcfdfa403ac5a0a49e2dae4"
+        "value": "d18f2df47c5d58cc66d8ced4e0a4b8b6f69819a6670f42996a6fae7f0c4b32e0"
       },
       "payload_root": "skills/lodestar",
       "files": [
@@ -222,8 +222,8 @@
         },
         {
           "path": "assets/templates/_stub-pattern.AGENTS.md",
-          "bytes": 907,
-          "sha256": "122823673fba520e97bd942e054f71dead24d208ab27108015c310196420beed"
+          "bytes": 1659,
+          "sha256": "805b34f4aa542045c07fdc80bec6f4a46763042098a30b493f57e2d8e5bc64d2"
         },
         {
           "path": "assets/templates/AGENTS.template.md",
@@ -242,8 +242,8 @@
         },
         {
           "path": "references/bootstrap-and-failures.md",
-          "bytes": 1478,
-          "sha256": "2443c94d52a522424c62acc4278c3312213c65e8a28c72e36cbe0abe9418e816"
+          "bytes": 3296,
+          "sha256": "2c229f95dec145a8917b1e0fcbd8b593830872f1ebb8329c3a49b7ec0e18b137"
         },
         {
           "path": "references/continuity.md",
@@ -277,8 +277,8 @@
         },
         {
           "path": "SKILL.md",
-          "bytes": 3642,
-          "sha256": "b2003e4dcc730bc69bde1ca3488793261fe2d1362308dda081395c705fb862b4"
+          "bytes": 5223,
+          "sha256": "95b4593cf6eaebebb45cc83897dbaad56c3d3cbdf92597ee96175a8844057d51"
         }
       ],
       "distribution_owner": "npm:lodestar-agent-context"

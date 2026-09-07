@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONTRACT_VERSION } from "../../src/schema.mjs";
+import { canonicalStringify, decodeUtf8, parseJsonText } from "../../src/json.mjs";
 
 const PACKAGE_ENTRY = fileURLToPath(new URL("../../lodestar.mjs", import.meta.url));
 
@@ -24,7 +25,7 @@ export function packageVersion() {
 }
 
 export function parseEnvelope(text) {
-  const value = JSON.parse(String(text).trim());
+  const value = parseJsonText(typeof text === "string" ? text : decodeUtf8(text), { resource: "command_response" });
   if (!value || value.v !== CONTRACT_VERSION || typeof value.ok !== "boolean") {
     throw new Error(`One-shot Lodestar returned a non-contract-${CONTRACT_VERSION} envelope.`);
   }
@@ -33,18 +34,24 @@ export function parseEnvelope(text) {
 
 export async function runInstalledLodestar(args, { input = "", env = process.env } = {}) {
   const launch = resolveLaunch(env);
+  // Read arguments can exceed CreateProcess's command line. Pass the existing
+  // command array through complete stdin; mutations already use stdin for their
+  // guarded body and have only short fixed command selectors in argv.
+  const commandArgs = input === "" ? ["--args-stdin"] : args;
+  const stdin = input === "" ? canonicalStringify(args) : input;
   return await new Promise((resolve, reject) => {
-    const child = spawn(launch.command, [...launch.args, ...args], {
+    const child = spawn(launch.command, [...launch.args, ...commandArgs], {
       cwd: process.cwd(), env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
-    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+    const stdout = [], stderr = [];
+    child.stdout.on("data", (chunk) => { stdout.push(chunk); });
+    child.stderr.on("data", (chunk) => { stderr.push(chunk); });
+    child.stdin.on("error", reject);
     child.once("error", reject);
     child.once("close", (status) => {
       try {
-        const envelope = parseEnvelope(status === 0 || stdout.trim() ? stdout : stderr);
+        const output = Buffer.concat(stdout), errors = Buffer.concat(stderr);
+        const envelope = parseEnvelope(status === 0 || output.length ? output : errors);
         if (envelope.ok !== true) {
           const error = new Error(envelope.error?.message ?? "Lodestar operation failed.");
           error.envelope = envelope;
@@ -52,7 +59,7 @@ export async function runInstalledLodestar(args, { input = "", env = process.env
         } else resolve(envelope);
       } catch (error) { reject(error); }
     });
-    child.stdin.end(input);
+    child.stdin.end(stdin);
   });
 }
 
