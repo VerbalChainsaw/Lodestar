@@ -5,6 +5,8 @@
 - Publish current product documentation and a static landing page with shared hero artwork.
 - Explain the contract-5 upgrade from 1.6, source freshness, guarded corrections, and explicit installation.
 - Use the same current-contract packed executable smoke in CI and release verification.
+- Resolve physical temporary paths in cross-platform test fixtures.
+- Deploy the landing page only after release success and verify its npm install target.
 - Retain contract 5 and schema 5; no new database migration is required from 2.x.
 
 ## 2.1.1 - 2026-09-07

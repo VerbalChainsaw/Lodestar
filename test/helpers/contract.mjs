@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -9,9 +9,14 @@ import { openReadDatabase } from "../../src/database.mjs";
 import { normalizeMutationRequest, writeBasis } from "../../src/records.mjs";
 import { CONTRACT_VERSION } from "../../src/schema.mjs";
 
-export async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "lodestar-current-"));
+export async function temporaryDirectory(t, prefix) {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), prefix)));
   t.after(() => rm(root, { recursive: true, force: true }));
+  return root;
+}
+
+export async function fixture(t) {
+  const root = await temporaryDirectory(t, "lodestar-current-");
   const database = path.join(root, "lodestar.db");
   let sequence = 0;
   async function cli(args, body = null) {
@@ -40,4 +45,3 @@ export async function fixture(t) {
   }
   return { root, database, cli, request, create };
 }
-

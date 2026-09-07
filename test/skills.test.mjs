@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { cp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
@@ -9,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.mjs";
 import { manageSkills } from "../src/skills.mjs";
+import { temporaryDirectory } from "./helpers/contract.mjs";
 
 const MANAGED_ROOT = fileURLToPath(new URL("../managed-assets/skills", import.meta.url));
 const APPROVED = JSON.parse(
@@ -16,9 +16,7 @@ const APPROVED = JSON.parse(
 ).skills.map(({ name }) => name);
 
 async function temporaryHome(t) {
-  const home = await mkdtemp(path.join(os.tmpdir(), "lodestar-skills-readonly-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
-  return home;
+  return temporaryDirectory(t, "lodestar-skills-readonly-");
 }
 
 const skillPath = (home, target, skill, codexRoot = "agents") => {

@@ -1,18 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { setup } from "../src/setup.mjs";
 import { manageSkills } from "../src/skills.mjs";
 import { renderWindowsPosixShim } from "../src/windows-install.mjs";
+import { temporaryDirectory } from "./helpers/contract.mjs";
 
 async function homeFor(t) {
-  const home = await mkdtemp(path.join(os.tmpdir(), "lodestar-setup-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
-  return home;
+  return temporaryDirectory(t, "lodestar-setup-");
 }
 
 test("packaged setup plans read-only, installs, and repeats without creating conflicting copies", async (t) => {
