@@ -164,6 +164,25 @@ function cliPutChild({ t, database, record }) {
   return completed;
 }
 
+function boundedOutcomeDiagnostics(outcomes) {
+  const bounded = (value) => value.length > 2_048
+    ? `${value.slice(0, 2_048)}...[truncated]`
+    : value;
+  return JSON.stringify(outcomes.map(({ status, stdout, stderr }) => ({
+    status,
+    stdout: bounded(stdout),
+    stderr: bounded(stderr),
+  })));
+}
+
+function parseChildEnvelope(text, diagnostics) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    assert.fail(`Child output was not a JSON envelope: ${diagnostics}`);
+  }
+}
+
 test("a losing initializer cannot delete a concurrent winner", async (t) => {
   const directory = await temporaryDirectory(t);
   const database = path.join(directory, "lodestar.db");
@@ -203,16 +222,56 @@ test('competing processes either commit the same request once or return retryabl
   const request = await f.request({ mode: 'create', record: { id: 'fact:race', kind: 'fact', name: 'Race', scope: 'global',
     data: { value: 'once' }, aliases: [], links: [], sources: [] } }, [{ kind: 'record', id: 'fact:race' }]);
   const outcomes = await Promise.all([cliPutChild({ t, database: f.database, record: request }), cliPutChild({ t, database: f.database, record: request })]);
-  assert.ok(outcomes.some(({ status }) => status === 0));
+  const diagnostics = boundedOutcomeDiagnostics(outcomes);
+  const accepted = [];
   for (const outcome of outcomes) {
-    if (outcome.status !== 0) assert.equal(JSON.parse(outcome.stderr).error.code, 'database_busy');
+    if (outcome.status === 0) {
+      assert.equal(outcome.stderr, '', diagnostics);
+      const envelope = parseChildEnvelope(outcome.stdout, diagnostics);
+      assert.equal(envelope.ok, true, diagnostics);
+      assert.equal(envelope.request.id, request.request_id, diagnostics);
+      assert.equal(typeof envelope.request.replayed, 'boolean', diagnostics);
+      accepted.push(envelope);
+    } else {
+      assert.equal(outcome.status, 5, diagnostics);
+      assert.equal(outcome.stdout, '', diagnostics);
+      const envelope = parseChildEnvelope(outcome.stderr, diagnostics);
+      assert.equal(envelope.ok, false, diagnostics);
+      assert.equal(envelope.error.code, 'database_busy', diagnostics);
+    }
   }
+  const initialCommits = accepted.filter(({ request: result }) => result.replayed === false);
+  assert.equal(initialCommits.length, accepted.length > 0 ? 1 : 0, diagnostics);
+  const initiallyCommitted = initialCommits.length === 1;
+
+  const retry = await f.cli(['put'], request);
+  assert.equal(retry.code, 0, JSON.stringify(retry.value));
+  assert.equal(retry.value.ok, true, JSON.stringify(retry.value));
+  assert.equal(retry.value.request.id, request.request_id, JSON.stringify(retry.value));
+  assert.equal(retry.value.request.replayed, initiallyCommitted, JSON.stringify(retry.value));
+  for (const envelope of accepted) {
+    assert.equal(envelope.receipt_id, retry.value.receipt_id, diagnostics);
+    assert.equal(envelope.revision, retry.value.revision, diagnostics);
+  }
+
   const replay = await f.cli(['put'], request);
   assert.equal(replay.code, 0, JSON.stringify(replay.value));
-  assert.equal(replay.value.request.replayed, true);
+  assert.equal(replay.value.ok, true, JSON.stringify(replay.value));
+  assert.equal(replay.value.request.id, request.request_id, JSON.stringify(replay.value));
+  assert.equal(replay.value.request.replayed, true, JSON.stringify(replay.value));
+  assert.equal(replay.value.receipt_id, retry.value.receipt_id);
+  assert.equal(replay.value.revision, retry.value.revision);
+
   const db = await openReadDatabase(f.database);
   try {
-    assert.equal(db.prepare("SELECT COUNT(*) n FROM records WHERE type='mutation-receipt'").get().n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM records WHERE id='fact:race' AND type='fact'").get().n, 1);
+    const receipts = db.prepare("SELECT id, content_json FROM records WHERE type='mutation-receipt'").all();
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].id, retry.value.receipt_id);
+    const receipt = JSON.parse(receipts[0].content_json).value;
+    assert.equal(receipt.request_id, request.request_id);
+    assert.equal(receipt.committed_revision, 1);
+    assert.deepEqual(receipt.changed_ids, ['fact:race']);
     assert.equal(db.prepare("SELECT value FROM metadata WHERE key='database_revision'").get().value, '1');
   } finally { db.close(); }
 });
