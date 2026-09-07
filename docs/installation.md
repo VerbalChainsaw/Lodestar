@@ -3,7 +3,7 @@
 Install the supplied package with Node.js 24.15.0 or newer:
 
 ```text
-npm install --global ./lodestar-agent-context-2.0.2.tgz
+npm install --global ./lodestar-agent-context-2.1.0.tgz
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar skills verify --target all
@@ -82,7 +82,11 @@ Do not enable an old Lodestar plugin alongside the current native skill.
 
 ## Windows and WSL
 
-The package manager installs the Windows CLI. Explicit launcher options are:
+The package manager installs the Windows CLI. Setup discovers the standard launcher
+from the selected home: `<home>/.local/bin/lodestar` for Windows Git Bash, or the
+same location in a Windows-visible WSL home. No hand-written launcher is needed.
+Native Unix package-manager installation continues to own its executable. Explicit
+launcher options select a custom destination:
 
 ```text
 lodestar setup --target codex --posix-shim <Git-Bash-launcher-path> --apply
@@ -106,3 +110,66 @@ run `lodestar start --cwd <the-same-project>` from different launch directories.
 The reported home and project identity must remain correct. A successful JSON
 envelope means the operation ran; inspect `verified`, `healthy`, source completeness,
 and the returned scope before claiming successful installation or startup.
+
+## Startup self-check and operating guidance
+
+`start` includes `operating_guide` from the maintained package bootstrap and
+`installation` from the same resolver and plan used by setup. The MCP description
+also exposes that guide. A missing or outdated owned asset yields a repair command
+as an argument array; an agent already authorized to configure Lodestar can run it.
+Local edits and ambiguous copies require review. Startup does not perform writes
+or convert an installation warning into a failure of otherwise complete context.
+
+The check reports its selected homes, skills, and launcher paths. It does not
+certify additional project/plugin roots or the host's model, authentication, or
+skill-selection settings. Host options supported by setup also scope the startup
+check. Inspect the returned scope when a host has multiple homes.
+Packaged Git Bash and WSL launchers forward their actual path on ordinary startup
+and setup. Explicit `--home` selects another layout; pass `--wsl-shim` or
+`--posix-shim` as well when that layout uses a custom launcher. Those selections
+remain in the returned repair command.
+
+## Complete input and output
+
+Use UTF-8 files or stdin for mutation documents. A leading UTF-8 BOM and CRLF JSON
+formatting are accepted; Unicode and line endings inside data strings retain their
+meaning. Malformed UTF-8, duplicate decoded keys, unsafe integers, and decimal tokens
+that would change meaning during numeric conversion fail before mutation. Store
+arbitrary-precision numeric values as strings when exact JSON numbers cannot carry
+them through the runtime.
+
+For argument values too large or awkward for shell quoting, put the complete
+argument array in a UTF-8 JSON file:
+
+```json
+["start", "--cwd", "C:/Projects/example", "--target", "codex"]
+```
+
+```text
+lodestar --args-file arguments.json
+```
+
+`--args-stdin` reads the same array from stdin. These transport switches must be
+the entire outer invocation; put all command, database, host, and output options
+inside the array. Expansion happens once. If stdin carries the argument array,
+provide a mutation body using `--file`. The native MCP read adapter uses this same
+stdin transport, avoiding Windows command-line size limits.
+
+The array is consumed by the Windows core when using WSL or Git Bash launchers.
+Paths inside it must therefore be Windows-visible paths, including WSL UNC paths.
+Include the intended `--cwd` and host options explicitly: the launcher translates
+the outer argument-file path but does not inspect or rewrite its JSON contents.
+
+If a host clips tool output, request a complete response file:
+
+```text
+lodestar start --cwd . --output complete-context.json
+```
+
+The destination must not already exist. It is reserved before dispatch and receives
+the full UTF-8 success envelope. Stdout returns a compact descriptor with its path,
+byte length, and SHA-256. Read the file completely and verify the descriptor; do not
+infer missing context from a clipped display. A failed operation can leave an empty
+or partial output file; without the success descriptor it is not verified output.
+If a mutation's response is lost after commit, retry the exact saved request to
+recover its receipt without duplicating the effect.

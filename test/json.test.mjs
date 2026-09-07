@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   canonicalStringify,
+  parseJsonText,
   readStreamComplete,
 } from "../src/json.mjs";
 import { resolveInputPath } from "../src/paths.mjs";
@@ -34,6 +35,35 @@ test("canonical JSON accepts deep and wide valid values but still rejects sparse
     () => canonicalStringify(sparse),
     ({ code }) => code === "invalid_json",
   );
+});
+
+test("JSON parsing rejects duplicate decoded object member names", () => {
+  for (const text of [
+    '{"v":4,"v":5}',
+    '{"input":{"name":1,"\\u006eame":2}}',
+  ]) {
+    assert.throws(
+      () => parseJsonText(text),
+      ({ code }) => code === "invalid_json",
+    );
+  }
+});
+
+test("JSON parsing accepts equivalent decimal spellings and rejects lossy conversion", () => {
+  assert.deepEqual(
+    parseJsonText('{"values":[0.1,1e0,1.2300,-0,1e-7]}'),
+    { values: [0.1, 1, 1.23, -0, 1e-7] },
+  );
+  for (const text of [
+    '{"value":1.0000000000000001}',
+    '{"value":1e-400}',
+    '{"value":9007199254740991.1}',
+  ]) {
+    assert.throws(
+      () => parseJsonText(text),
+      ({ code }) => code === "unsupported_numeric_value",
+    );
+  }
 });
 
 test("streamed string input rejects unpaired Unicode surrogates", async () => {

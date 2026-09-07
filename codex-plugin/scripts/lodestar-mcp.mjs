@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { Buffer } from "node:buffer";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import { AGENT_BOOTSTRAP } from "../../src/bootstrap.mjs";
 import { COMMANDS, MUTATION_INPUTS } from "../../src/cli-commands.mjs";
+import { decodeUtf8, parseJsonText } from "../../src/json.mjs";
 import { MUTATION_REQUEST_SCHEMA } from "../../src/records.mjs";
 import { CONTRACT_VERSION } from "../../src/schema.mjs";
 import {
@@ -78,12 +80,92 @@ function reply(id, result, error) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
+function plainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function exactFields(value, allowed, resource) {
+  if (!plainObject(value)) throw new Error(`${resource} must be a JSON object.`);
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length) throw new Error(`${resource} contains undeclared fields: ${unknown.sort().join(", ")}.`);
+}
+
+function validateToolInput(name, input) {
+  if (name === "lodestar_describe") {
+    exactFields(input, [], "lodestar_describe input");
+    return;
+  }
+  if (name === "lodestar_read") {
+    exactFields(input, ["operation", "arguments"], "lodestar_read input");
+    if (typeof input.operation !== "string") throw new Error("lodestar_read requires an operation.");
+    if (input.arguments !== undefined
+      && (!Array.isArray(input.arguments) || input.arguments.some((value) => typeof value !== "string"))) {
+      throw new Error("lodestar_read arguments must be an array of strings.");
+    }
+    return;
+  }
+  if (name === "lodestar_mutate") {
+    exactFields(input, ["operation", "request"], "lodestar_mutate input");
+    if (typeof input.operation !== "string" || !Object.hasOwn(input, "request")) {
+      throw new Error("lodestar_mutate requires operation and request.");
+    }
+  }
+}
+
+function validateMessage(message) {
+  exactFields(message, ["jsonrpc", "id", "method", "params"], "MCP message");
+  if (message.jsonrpc !== "2.0" || typeof message.method !== "string") {
+    throw new Error("MCP messages require jsonrpc 2.0 and a method.");
+  }
+  if (Object.hasOwn(message, "id") && typeof message.id !== "string" && typeof message.id !== "number") {
+    throw new Error("MCP request IDs must be strings or numbers.");
+  }
+  if (message.params !== undefined && !plainObject(message.params)) {
+    throw new Error("MCP params must be a JSON object.");
+  }
+  if (message.method === "tools/call") {
+    // _meta is standard MCP request metadata (including progressToken), not a
+    // Lodestar mutation control. Accept it without treating it as actor authority.
+    exactFields(message.params, ["name", "arguments", "_meta"], "tools/call params");
+    if (message.params._meta !== undefined && !plainObject(message.params._meta)) {
+      throw new Error("MCP request metadata must be a JSON object.");
+    }
+    if (typeof message.params.name !== "string") throw new Error("tools/call requires a tool name.");
+    if (message.params.arguments !== undefined && !plainObject(message.params.arguments)) {
+      throw new Error("tools/call arguments must be a JSON object.");
+    }
+  }
+}
+
+async function* messageFrames(stream) {
+  let parts = [], length = 0;
+  for await (const chunk of stream) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    let start = 0, newline;
+    while ((newline = bytes.indexOf(0x0a, start)) !== -1) {
+      const tail = bytes.subarray(start, newline);
+      if (tail.length) { parts.push(tail); length += tail.length; }
+      let frame = Buffer.concat(parts, length);
+      parts = []; length = 0;
+      if (frame.at(-1) === 0x0d) frame = frame.subarray(0, -1);
+      if (frame.length) yield frame;
+      start = newline + 1;
+    }
+    const tail = bytes.subarray(start);
+    if (tail.length) { parts.push(tail); length += tail.length; }
+  }
+  if (length) yield Buffer.concat(parts, length);
+}
+
 export async function callNativeTool(name, input = {}) {
+  validateToolInput(name, input);
   if (name === "lodestar_describe") return {
     contract: CONTRACT_VERSION,
     package_version: packageVersion(),
     commands: COMMANDS,
     mutation_inputs: MUTATION_OPERATIONS,
+    operating_guide: AGENT_BOOTSTRAP,
   };
   if (name === "lodestar_read") {
     const command = READ_COMMANDS[input.operation];
@@ -102,11 +184,19 @@ export async function callNativeTool(name, input = {}) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  for await (const line of createInterface({ input: process.stdin })) {
+  for await (const frame of messageFrames(process.stdin)) {
     let message;
-    try { message = JSON.parse(line); } catch { continue; }
-    if (message.id === undefined) continue;
     try {
+      message = parseJsonText(decodeUtf8(frame, { resource: "mcp_message" }), {
+        resource: "mcp_message",
+      });
+    } catch (error) {
+      reply(null, null, error);
+      continue;
+    }
+    try {
+      validateMessage(message);
+      if (message.id === undefined) continue;
       if (message.method === "initialize") reply(message.id, {
         protocolVersion: message.params?.protocolVersion ?? "2025-03-26",
         capabilities: { tools: {} },
@@ -119,6 +209,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         reply(message.id, { content: [{ type: "text", text: JSON.stringify(result) }],
           structuredContent: result, isError: false });
       } else reply(message.id, null, new Error(`Method not found: ${message.method}`));
-    } catch (error) { reply(message.id, null, error); }
+    } catch (error) {
+      const id = typeof message?.id === "string" || typeof message?.id === "number" ? message.id : null;
+      reply(id, null, error);
+    }
   }
 }

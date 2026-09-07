@@ -62,16 +62,29 @@ export function validateDomainInput(operation, input) {
 }
 
 const identity = ["--cwd", "--session", "--agent", "--harness"];
+export const HOST_OPTIONS = Object.freeze({
+  "--target": "target", "--home": "home", "--codex-root": "codexRoot",
+  "--codex-home": "codexHome", "--claude-home": "claudeHome",
+  "--xdg-config-home": "xdgConfigHome", "--hermes-home": "hermesHome", "--opencode-root": "opencodeRoot",
+});
+export const hostOptions = (options) => Object.fromEntries(Object.entries(HOST_OPTIONS)
+  .filter(([flag]) => options[flag] !== undefined).map(([flag, field]) => [field, options[flag]]));
+export const INSTALLATION_OPTIONS = Object.freeze({ ...HOST_OPTIONS,
+  "--wsl-shim": "wslShim", "--posix-shim": "posixShim" });
+export const installationOptions = (options) => Object.fromEntries(Object.entries(INSTALLATION_OPTIONS)
+  .filter(([flag]) => options[flag] !== undefined).map(([flag, field]) => [field, options[flag]]));
+export const PATH_OPTIONS = Object.freeze(["--cwd", "--file", "--db", "--source", "--wsl-shim", "--posix-shim",
+  "--args-file", "--output", ...Object.keys(HOST_OPTIONS).filter((flag) => !["--target", "--codex-root"].includes(flag))]);
 const domain = (usage, summary, positionals) => ({ usage, summary,
   values: [...identity, "--file", "--limit", "--at-revision"], booleans: [], positionals });
 export const COMMANDS = Object.freeze({
   setup: { usage: "lodestar setup [--target <codex|claude|hermes|opencode|all>] [--apply] [--replace-local]",
     summary: "Plan or explicitly apply native skill installation with backups and interrupted-install recovery.",
-    values: ["--target", "--home", "--codex-root", "--codex-home", "--claude-home", "--xdg-config-home", "--hermes-home", "--opencode-root", "--wsl-shim", "--posix-shim"],
+    values: Object.keys(INSTALLATION_OPTIONS),
     booleans: ["--apply", "--replace-local"], positionals: 0 },
   start: { usage: "lodestar start [--cwd <path>] [--topic <text>] [identity options]",
     summary: "Read fresh relevant project context without changing state.",
-    values: [...identity, "--topic"], booleans: [], positionals: 0 },
+    values: [...identity, "--topic", ...Object.keys(INSTALLATION_OPTIONS)], booleans: [], positionals: 0 },
   init: { usage: "lodestar init [--migrate|--promote-recovery --file <request.json>] [--db <path>]",
     summary: "Explicitly create a current store or apply a preserving conversion.",
     values: ["--file"], booleans: ["--migrate", "--promote-recovery"], positionals: 0 },
@@ -103,5 +116,5 @@ export const COMMANDS = Object.freeze({
     summary: "Inspect native instruction routing or print its template.", values: ["--cwd", "--mode"], booleans: [], positionals: { min: 0, max: 1 } },
   skills: { usage: "lodestar skills [verify] [--target <codex|claude|hermes|opencode|all>] [--home <path>]",
     summary: "Compare complete maintained/package/installed skill payloads.",
-    values: ["--target", "--codex-root", "--codex-home", "--claude-home", "--xdg-config-home", "--hermes-home", "--opencode-root", "--home"], booleans: [], positionals: { min: 0, max: 1 } },
+    values: Object.keys(HOST_OPTIONS), booleans: [], positionals: { min: 0, max: 1 } },
 });

@@ -4,8 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { lodestarError } from "./errors.mjs";
+import { AGENT_BOOTSTRAP } from "./bootstrap.mjs";
+import { INSTALLATION_OPTIONS } from "./cli-commands.mjs";
 import { directoryFiles, manageSkills, matches, payload, safeRealpath } from "./skills.mjs";
-import { installWindowsPosixShim, installWslShim, pathExists, renderWindowsPosixShim, renderWslShim } from "./windows-install.mjs";
+import { installWindowsPosixShim, installWslShim, parseWslUncTarget, pathExists, renderWindowsPosixShim, renderWslShim } from "./windows-install.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -213,6 +215,11 @@ async function install(item, onProgress) {
 /** Explicit deployment only. Never called by start, skills verify, or the MCP adapter. */
 export async function setup({ apply = false, replaceLocal = false, wslShim, posixShim,
   onProgress, ...options } = {}) {
+  if (wslShim === undefined && posixShim === undefined) {
+    const home = path.resolve(options.home ?? os.homedir());
+    if (parseWslUncTarget(home)) wslShim = path.join(home, ".local", "bin", "lodestar");
+    else if (process.platform === "win32") posixShim = path.join(home, ".local", "bin", "lodestar");
+  }
   const before = await manageSkills("verify", options);
   const managed = await payload();
   const skills = new Map(managed.skills.map((skill) => [skill.name, skill]));
@@ -242,6 +249,7 @@ export async function setup({ apply = false, replaceLocal = false, wslShim, posi
     const owned = present && prior?.contract === 5 && prior.kind === "launcher" && prior.target === resolved &&
       same(prior.fingerprint, fingerprint(expectedContent));
     launchers.push({ kind, target: resolved, expectedContent, desired,
+      current: present && expectedContent.equals(Buffer.from(desired)),
       blocked: present && !expectedContent.equals(Buffer.from(desired)) && !owned && !replaceLocal });
   }
   for (const launcher of launchers) {
@@ -283,9 +291,11 @@ export async function setup({ apply = false, replaceLocal = false, wslShim, posi
     blocked.push(...launchers.filter(({ blocked }) => blocked));
     const summary = { contract: 5, version: LODESTAR_VERSION, applied: false,
       ready: blocked.length === 0 && ambiguities.length === 0, discovery: before.discovery ?? before.scope ?? null,
+      verified: ambiguities.length === 0 && plans.every(({ action }) => action === "current") && launchers.every(({ current }) => current),
+      operating_guide: AGENT_BOOTSTRAP,
       ambiguities, recoveries,
       plans: plans.map(({ target, action, reason, state }) => ({ target, action, reason, state })),
-      launchers: launchers.map(({ target, kind, blocked }) => ({ target, kind, blocked })) };
+      launchers: launchers.map(({ target, kind, blocked, current }) => ({ target, kind, blocked, current })) };
     if (!apply) return summary;
     if (ambiguities.length) throw lodestarError("install_discovery_conflict", "Native skill names are ambiguous; preserve and remove unintended copies from host discovery before applying.",
       { identifiers: { conflicts: ambiguities }, action: "Review the reported native paths. Do not replace project-specific skills with global skills." });
@@ -303,8 +313,30 @@ export async function setup({ apply = false, replaceLocal = false, wslShim, posi
       });
     }
     const verification = await manageSkills("verify", options);
-    return { ...summary, applied: true, results, verified: verification.verified, verification };
+    return { ...summary, applied: true, results,
+      launchers: summary.launchers.map((launcher) => ({ ...launcher, current: true })),
+      verified: verification.verified, verification };
   } finally {
     for (const release of releases.reverse()) await release();
+  }
+}
+
+/** Fresh advisory installation check, using the deployment owner's exact plan. */
+export async function installationStatus(options = {}) {
+  const arguments_ = ["setup", ...Object.entries(INSTALLATION_OPTIONS)
+    .filter(([, field]) => options[field] !== undefined).flatMap(([flag, field]) => [flag, options[field]]), "--apply"];
+  try {
+    const plan = await setup(options);
+    return { version: plan.version, verified: plan.verified, ready: plan.ready,
+      read_only: true, scope: plan.discovery, checked_skills: plan.plans.length,
+      issues: plan.plans.filter(({ action }) => action !== "current"),
+      ambiguities: plan.ambiguities, launchers: plan.launchers,
+      repair: plan.verified ? null : { command: "lodestar", arguments: arguments_,
+        review_required: !plan.ready, reason: plan.ready ? "Install missing or upgrade unchanged owned assets."
+          : "Review local changes or ambiguous destinations; never force replacement implicitly." } };
+  } catch (error) {
+    return { version: LODESTAR_VERSION, verified: false, ready: false, read_only: true,
+      error: { code: error.code ?? "installation_check_failed", message: error.message },
+      repair: { command: "lodestar", arguments: arguments_.slice(0, -1), review_required: true } };
   }
 }

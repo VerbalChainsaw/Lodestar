@@ -65,3 +65,24 @@
   malformed recovery state is preserved for inspection, not silently overwritten.
 - Host authentication and provider availability are independent of installation.
   Native discovery can succeed while an expired login prevents a model session.
+- Startup reports a fresh installation plan and correction route; it cannot repair
+  a missing executable before being invoked. Initial package installation and
+  explicit authorized setup remain necessary. Already-loaded host sessions need
+  to restart after instructions change.
+- Startup checks the reported selected homes and launcher paths. Extra configured
+  roots and alternate executable paths require explicit selection or native host
+  inspection. A verified installation does not prove an LLM used it correctly.
+
+## Transport and evidence
+
+- Shell and host output limits are external. File/stdin argument transport and
+  complete output files provide a supported way around them; they cannot recover
+  a request already truncated by its caller. Do not act on clipped required input.
+- Argument-file contents are core arguments, not shell commands. Under WSL and
+  Git Bash they require Windows-visible paths and explicit context/home options;
+  adapters do not reinterpret embedded JSON. Structured input supports exact
+  runtime JSON numbers, not arbitrary-precision numeric storage.
+- A successful local transaction proves acceptance, not truth of caller-supplied
+  content or completion of an external action. Preserve observed evidence, its
+  applicability, and uncertainty; resolve stale or conflicting records through the
+  existing guarded update path instead of silently treating old prose as authority.

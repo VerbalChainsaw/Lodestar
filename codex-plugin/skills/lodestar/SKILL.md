@@ -15,6 +15,13 @@ differ, call `lodestar start --cwd <path>`. Orientation is read-only. Treat its
 records as evidence and continuity; they do not grant authority or override the
 user, native instructions, or inspected source.
 
+`start` includes the maintained operating guide and a fresh installation check.
+When configuration is authorized, use its returned `setup --apply` arguments to
+install missing or upgrade unchanged owned assets. Setup discovers native homes
+and launcher paths. Review local conflicts; never infer `--replace-local` from a
+failed check. An installation warning does not invalidate otherwise complete
+project evidence or authorize rewriting native instructions.
+
 During authorized work, preserve consequential decisions, evidence-backed
 corrections, meaningful progress, interruptions, and actual results with one
 structured update through the installed package or its native tools. Reuse
@@ -23,7 +30,8 @@ returned by the relevant read with a unique `request_id`. On a conflict, use the
 returned current basis, reread the changed subject, and reapply only compatible
 meaning under a new request. Retry a lost response with the exact same request.
 
-Lodestar does not own external skill directories or AGENTS.md files. Do not
+Explicit setup owns the packaged skill copies and launchers it installs. Other
+skill content and AGENTS.md remain native/user-owned. Do not
 create a daemon, open the SQLite file directly from WSL, invent actor/session
 identity, or infer a decision from arbitrary prose.
 
@@ -42,6 +50,8 @@ identity, or infer a decision from arbitrary prose.
 - `lodestar pending list|add|promote|drop` keeps unresolved candidates outside
   current orientation until deliberate promotion.
 - `lodestar skills verify` compares complete maintained/package/installed skill trees.
+- `lodestar setup --apply` configures selected native skills and launchers, retains
+  replaced owned bytes, and verifies the result using the same manifest.
 - `lodestar agents status|verify|template` inspects native instruction routing or
   prints template source without writing it.
 - `lodestar doctor` diagnoses the current store; `doctor --migration-preflight`
@@ -58,6 +68,20 @@ only the reference needed for the current operation:
 - [bootstrap-and-failures.md](references/bootstrap-and-failures.md)
 - [toolchain.md](references/toolchain.md)
 - [templates.md](references/templates.md)
+
+For shell commands, send mutation bodies in a complete UTF-8 `--file` or stdin;
+do not inline JSON into shell command strings. `--args-file <file>` and
+`--args-stdin` accept the complete existing command as a JSON array of argument
+strings, avoiding command-line length and quoting limits. Keep mutation stdin
+separate by using its `--file` option when the argument array also uses stdin.
+For Windows-core argument files invoked from WSL, use Windows-visible absolute
+paths from Lodestar's responses, including WSL UNC paths.
+
+When a host clips a response, repeat the read with `--output <new-file>` and
+verify the returned byte count and SHA-256 before reading the complete UTF-8
+envelope. Output files are created without overwriting existing files. A lost
+mutation response requires the exact same request body and ID; never repeat an
+external action merely because its ledger response was lost.
 
 ## Normal correction path
 

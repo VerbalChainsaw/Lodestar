@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { COMMANDS, MUTATION_INPUTS } from "../src/cli-commands.mjs";
+import { AGENT_BOOTSTRAP } from "../src/bootstrap.mjs";
 import { MUTATION_REQUEST_SCHEMA } from "../src/records.mjs";
 import { CONTRACT_VERSION } from "../src/schema.mjs";
 import { LODESTAR_VERSION } from "../src/version.mjs";
@@ -22,6 +23,7 @@ test("native tools derive the installed command and mutation contract", async ()
   const described = await callNativeTool("lodestar_describe");
   assert.equal(described.contract, CONTRACT_VERSION);
   assert.equal(described.package_version, LODESTAR_VERSION);
+  assert.deepEqual(described.operating_guide, AGENT_BOOTSTRAP);
   assert.deepEqual(described.commands, COMMANDS);
   for (const operation of ["put", "delete", ...Object.keys(MUTATION_INPUTS)]) {
     const branch = NATIVE_TOOLS[2].inputSchema.oneOf.find(

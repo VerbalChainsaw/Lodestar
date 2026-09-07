@@ -1,13 +1,15 @@
-import { COMMANDS } from "./cli-commands.mjs";
+import { COMMANDS, hostOptions, installationOptions } from "./cli-commands.mjs";
+import { createHash } from "node:crypto";
+import { open } from "node:fs/promises";
 import { manageAgents } from "./agents.mjs";
 import {
   errorResult,
   internalErrorResult,
   lodestarError,
 } from "./errors.mjs";
-import { canonicalStringify } from "./json.mjs";
+import { canonicalStringify, parseJsonText, readStreamComplete, readTextFileComplete } from "./json.mjs";
 import { dispatch, operationResult } from "./agent-state.mjs";
-import { resolveDatabasePath } from "./paths.mjs";
+import { resolveDatabasePath, resolveInputPath } from "./paths.mjs";
 import { manageSkills } from "./skills.mjs";
 import { setup } from "./setup.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
@@ -31,6 +33,7 @@ function helpData(command = null) {
       usage: definition.usage,
       summary: definition.summary,
       output: "JSON is the default; --human requests formatted output.",
+      transport: "Use --args-file <JSON-array-file> or --args-stdin for complete command arguments; --output <new-file> saves the complete response with a hash receipt.",
     };
   }
   return {
@@ -42,6 +45,7 @@ function helpData(command = null) {
       summary: definition.summary,
     })),
     output: "JSON is the default; --human requests formatted output.",
+    transport: "Use --args-file <JSON-array-file> or --args-stdin for complete command arguments; --output <new-file> saves the complete response with a hash receipt.",
   };
 }
 function humanHelp(data) {
@@ -52,6 +56,7 @@ function humanHelp(data) {
       `Usage: ${data.usage}`,
       "",
       data.summary,
+      "", data.transport,
     ].join("\n");
   }
   return [
@@ -61,6 +66,7 @@ function humanHelp(data) {
     "",
     "Commands:",
     ...data.commands.map(({ name, summary }) => `  ${name.padEnd(7)} ${summary}`),
+    "", data.transport,
   ].join("\n");
 }
 function extractGlobals(args) {
@@ -80,23 +86,24 @@ function extractGlobals(args) {
     if (token === "--human") global.human = true;
     else if (token === "--help" || token === "-h") global.help = true;
     else if (token === "--version" || token === "-v") global.version = true;
-    else if (token === "--db") {
-      if (global.database !== undefined) {
+    else if (token === "--db" || token === "--output") {
+      const field = token === "--db" ? "database" : "output";
+      if (global[field] !== undefined) {
         throw lodestarError(
           "invalid_input",
-          "--db was provided more than once.",
-          { identifiers: { option: "--db" } },
+          `${token} was provided more than once.`,
+          { identifiers: { option: token } },
         );
       }
       const value = args[index + 1];
       if (value === undefined || value.startsWith("--")) {
         throw lodestarError(
           "missing_argument",
-          "--db requires a path.",
-          { identifiers: { option: "--db" } },
+          `${token} requires a path.`,
+          { identifiers: { option: token } },
         );
       }
-      global.database = value;
+      global[field] = value;
       index += 1;
     } else {
       rest.push(token);
@@ -178,7 +185,7 @@ function parseCommand(command, args) {
   }
   return { options, positionals };
 }
-function writeSuccess(io, operation, result, human) {
+async function writeSuccess(io, operation, result, human) {
   const envelope = {
     v: CONTRACT_VERSION,
     ok: true,
@@ -196,7 +203,16 @@ function writeSuccess(io, operation, result, human) {
   const text = human
     ? JSON.stringify(envelope, null, 2)
     : canonicalStringify(envelope);
-  io.stdout.write(`${text}\n`);
+  if (io.outputFile) {
+    const content = Buffer.from(`${text}\n`, "utf8");
+    await io.outputFile.handle.writeFile(content);
+    await io.outputFile.handle.sync();
+    await io.outputFile.handle.close();
+    io.stdout.write(`${canonicalStringify({ ...envelope, data: { output_file: {
+      path: io.outputFile.path, bytes: content.length,
+      sha256: createHash("sha256").update(content).digest("hex"), encoding: "utf-8",
+    } }, next: ["Read the complete output file and verify its byte count and SHA-256 before using its contents."] })}\n`);
+  } else io.stdout.write(`${text}\n`);
 }
 function validateArguments(args) {
   for (const [index, argument] of args.entries()) {
@@ -225,6 +241,7 @@ export async function runCli(
   },
 ) {
   let attemptedOperation = "cli";
+  let outputHandle;
   try {
     if (!Array.isArray(args)) {
       throw lodestarError(
@@ -234,7 +251,24 @@ export async function runCli(
       );
     }
     validateArguments(args);
+    if (args[0] === "--args-file" || args[0] === "--args-stdin") {
+      const fromFile = args[0] === "--args-file";
+      if (args.length !== (fromFile ? 2 : 1)) throw lodestarError("invalid_input",
+        "Use --args-file <file> or --args-stdin alone; place the complete command arguments in its JSON array.");
+      const text = fromFile ? await readTextFileComplete(resolveInputPath(args[1]), { resource: "command_arguments" })
+        : await readStreamComplete(io.stdin, { resource: "command_arguments" });
+      args = parseJsonText(text, { resource: "command_arguments" });
+      if (!Array.isArray(args)) throw lodestarError("invalid_input", "Command arguments must be a JSON array of strings.");
+      validateArguments(args);
+    }
     const { global, rest } = extractGlobals(args);
+    if (global.output !== undefined) {
+      const destination = resolveInputPath(global.output);
+      // Reserve before dispatch: an unavailable/existing output must never hide
+      // an already committed mutation. A completed response carries its hash.
+      outputHandle = await open(destination, "wx");
+      io = { ...io, outputFile: { path: destination, handle: outputHandle } };
+    }
     const command = rest[0] ?? null;
     attemptedOperation = command ?? "help";
     // `help` and `version` are the first things anyone types, and rejecting them as
@@ -244,13 +278,13 @@ export async function runCli(
       version: global.version || command === "version" };
     if (asked.version) {
       const data = { name: "lodestar", version: LODESTAR_VERSION };
-      writeSuccess(io, "version", operationResult(data), global.human);
+      await writeSuccess(io, "version", operationResult(data), global.human);
       return 0;
     }
     if (asked.help || command === null) {
       const data = helpData(command === "help" ? rest[1] ?? null : command);
-      if (global.human) io.stdout.write(`${humanHelp(data)}\n`);
-      else writeSuccess(io, "help", operationResult(data), false);
+      if (global.human && !io.outputFile) io.stdout.write(`${humanHelp(data)}\n`);
+      else await writeSuccess(io, "help", operationResult(data), global.human);
       return 0;
     }
     if (!Object.hasOwn(COMMANDS, command)) {
@@ -269,33 +303,22 @@ export async function runCli(
         cwd: parsed.options["--cwd"],
         mode: parsed.options["--mode"] ?? "stub",
       }));
-      writeSuccess(io, attemptedOperation, result, global.human);
+      await writeSuccess(io, attemptedOperation, result, global.human);
       return result.data.verified === false && parsed.positionals[0] === "verify" ? 4 : 0;
     }
     if (command === "setup") {
       const result = operationResult(await setup({
-        target: parsed.options["--target"], home: parsed.options["--home"],
-        codexRoot: parsed.options["--codex-root"], hermesHome: parsed.options["--hermes-home"],
-        codexHome: parsed.options["--codex-home"], claudeHome: parsed.options["--claude-home"],
-        xdgConfigHome: parsed.options["--xdg-config-home"],
-        opencodeRoot: parsed.options["--opencode-root"],
+        ...installationOptions(parsed.options),
         apply: parsed.options["--apply"], replaceLocal: parsed.options["--replace-local"],
-        wslShim: parsed.options["--wsl-shim"], posixShim: parsed.options["--posix-shim"],
       }));
-      writeSuccess(io, attemptedOperation, result, global.human);
-      return result.data.ready === false || result.data.verified === false ? 4 : 0;
+      await writeSuccess(io, attemptedOperation, result, global.human);
+      return result.data.ready === false || (parsed.options["--apply"] && result.data.verified === false) ? 4 : 0;
     }
     if (command === "skills") {
       const result = operationResult(await manageSkills(parsed.positionals[0] ?? "verify", {
-        target: parsed.options["--target"],
-        home: parsed.options["--home"],
-        codexRoot: parsed.options["--codex-root"],
-        codexHome: parsed.options["--codex-home"], claudeHome: parsed.options["--claude-home"],
-        xdgConfigHome: parsed.options["--xdg-config-home"],
-        hermesHome: parsed.options["--hermes-home"],
-        opencodeRoot: parsed.options["--opencode-root"],
+        ...hostOptions(parsed.options),
       }));
-      writeSuccess(io, attemptedOperation, result, global.human);
+      await writeSuccess(io, attemptedOperation, result, global.human);
       return result.data.verified === false ? 4 : 0;
     }
     const database = resolveDatabasePath({ explicit: global.database });
@@ -303,7 +326,7 @@ export async function runCli(
     const operation = ["work", "handoff", "decision", "pending"].includes(command)
       ? `${command}.${parsed.positionals[0] ?? "status"}`
       : command;
-    writeSuccess(io, operation, result, global.human);
+    await writeSuccess(io, operation, result, global.human);
     return command === "doctor" && result.data.healthy === false ? 4 : 0;
   } catch (error) {
     let normalized;
@@ -355,5 +378,7 @@ export async function runCli(
     }
     io.stderr.write(`${text}\n`);
     return normalized.exitCode;
+  } finally {
+    await outputHandle?.close();
   }
 }

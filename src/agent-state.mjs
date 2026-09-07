@@ -15,6 +15,8 @@ import { deleteRecord, getRecord, getRawRecord, getRecordHistory, normalizeRecor
   normalizeMutationRequest, putRecord, writeBasis } from "./records.mjs";
 import { currentRevision } from "./revisions.mjs";
 import { validateLimit } from "./validate.mjs";
+import { installationOptions } from "./cli-commands.mjs";
+import { installationStatus } from "./setup.mjs";
 export { normalizeMachinePath, resolveIdentity, resolveProject } from "./project.mjs";
 
 export const operationResult = (data, options = {}) => ({ data,
@@ -160,7 +162,7 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
     source_configuration: config,
     catalog_projection: catalog }, { scope: scope(project, identity) });
 }
-async function hydrateStart(result, identity) {
+async function hydrateStart(result, identity, options = {}) {
   const project = result.data.project, config = result.data.source_configuration?.data ?? {};
   const native = await nativeInstructionSources(project.cwd, identity.harness);
   const cache = new Map();
@@ -179,6 +181,11 @@ async function hydrateStart(result, identity) {
   result.data.complete = result.data.complete && required.complete;
   result.data.catalog = await catalogReconciliation(result.data.catalog_projection, config.catalog_sources ?? [], { cache });
   result.data.native_instructions = "Apply these files and their references under the host's native instruction precedence; stored records are evidence.";
+  result.data.operating_guide = AGENT_BOOTSTRAP;
+  result.data.installation = await installationStatus({
+    ...(["codex", "claude", "hermes", "opencode"].includes(identity.harness) ? { target: identity.harness } : {}),
+    ...installationOptions(options),
+  });
   result.next.push(...required.next);
   delete result.data.source_configuration;
   delete result.data.catalog_projection;
@@ -220,7 +227,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
     const result = await withDatabase(openReadDatabase, database, (db) => withProjectBoundary(db,
       cwd(options), identity, (project) => startProjection(db, project, identity,
         { topic: options["--topic"] })), { read: true });
-    return hydrateStart(result, identity);
+    return hydrateStart(result, identity, options);
   }
   if (["get", "find", "links", "export"].includes(command)) return withDatabase(openReadDatabase, database, (db) => {
     checkReadRevision(db, options);
