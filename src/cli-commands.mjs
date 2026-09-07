@@ -65,6 +65,10 @@ const identity = ["--cwd", "--session", "--agent", "--harness"];
 const domain = (usage, summary, positionals) => ({ usage, summary,
   values: [...identity, "--file", "--limit", "--at-revision"], booleans: [], positionals });
 export const COMMANDS = Object.freeze({
+  setup: { usage: "lodestar setup [--target <codex|claude|hermes|opencode|all>] [--apply] [--replace-local]",
+    summary: "Plan or explicitly apply native skill installation with backups and interrupted-install recovery.",
+    values: ["--target", "--home", "--codex-root", "--codex-home", "--claude-home", "--xdg-config-home", "--hermes-home", "--opencode-root", "--wsl-shim", "--posix-shim"],
+    booleans: ["--apply", "--replace-local"], positionals: 0 },
   start: { usage: "lodestar start [--cwd <path>] [--topic <text>] [identity options]",
     summary: "Read fresh relevant project context without changing state.",
     values: [...identity, "--topic"], booleans: [], positionals: 0 },
@@ -99,5 +103,5 @@ export const COMMANDS = Object.freeze({
     summary: "Inspect native instruction routing or print its template.", values: ["--cwd", "--mode"], booleans: [], positionals: { min: 0, max: 1 } },
   skills: { usage: "lodestar skills [verify] [--target <codex|claude|hermes|opencode|all>] [--home <path>]",
     summary: "Compare complete maintained/package/installed skill payloads.",
-    values: ["--target", "--codex-root", "--hermes-home", "--opencode-root", "--home"], booleans: [], positionals: { min: 0, max: 1 } },
+    values: ["--target", "--codex-root", "--codex-home", "--claude-home", "--xdg-config-home", "--hermes-home", "--opencode-root", "--home"], booleans: [], positionals: { min: 0, max: 1 } },
 });

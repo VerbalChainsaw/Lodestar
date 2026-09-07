@@ -2,9 +2,9 @@
 
 Lodestar documents this small toolchain rather than treating it as one giant rules file. Each part closes a specific failure mode without granting Lodestar ownership over another tool's files.
 
-Lodestar ships canonical reference content in its package. It owns its database and
-package bytes only. External skill directories and agent-instruction files remain
-owned by their native environments.
+Lodestar ships canonical reference content in its package. Its explicit setup
+operation deploys owned skill payloads with backups; ordinary startup and verification
+are read-only. Native environments retain ownership of their settings and instructions.
 
 ---
 
@@ -13,17 +13,21 @@ owned by their native environments.
 `lodestar-agent-context` · [github.com/VerbalChainsaw/Lodestar](https://github.com/VerbalChainsaw/Lodestar) · MIT · Node 24.15+
 
 ```bash
-npm install --global ./lodestar-agent-context-2.0.0.tgz
+npm install --global ./lodestar-agent-context-2.0.1.tgz
+lodestar setup --target all
+lodestar setup --target all --apply
 lodestar init
 lodestar skills verify --target all
 ```
 
-This release uses the supplied local tarball until 2.0.0 is published to the package
+This release uses the supplied local tarball until 2.0.1 is published to the package
 registry.
 
-Lodestar does not install or synchronize external skill directories. Place skills
-through the native environment or a deliberate user-owned distribution step, then use
-read-only verification when comparison is useful.
+Review the setup plan before applying it. Existing locally changed or unowned
+content requires explicit `--replace-local`, which retains backups. Setup and
+verification share the same payload manifest and host resolver. Host settings,
+project-specific instructions, plugins, and actual native loading require their
+own checks; matching files alone do not prove complete startup readiness.
 
 A local context registry. Project knowledge, decisions, work outcomes, and continuity live in one universal-record SQLite database and come back through stable IDs, exact aliases, deterministic search, and explicit links. Fresh orientation is read-only and is never persisted as a startup snapshot. No background service or runtime network dependency.
 

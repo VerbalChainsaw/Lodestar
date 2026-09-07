@@ -13,6 +13,10 @@ Lodestar may own only:
 - one contract-5 JSON success/error envelope; and
 - migration and doctor support required by that persisted state.
 
+The explicit `setup` deployment command may install the packaged native skill
+payloads and selected launchers with ownership checks, retained backups, and
+interruption recovery. It does not run during startup or write host governance.
+
 Unless the Director explicitly reauthorizes them, Lodestar must not own or implement:
 
 - a persistent HTTP/loopback daemon, service discovery, health endpoint, idle service lifecycle, or any background server;

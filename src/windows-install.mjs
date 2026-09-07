@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { COMMANDS } from "./cli-commands.mjs";
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_ENTRY = fileURLToPath(new URL("../lodestar.mjs", import.meta.url));
@@ -52,6 +54,9 @@ MSYS2_ARG_CONV_EXCL='*' exec "$NODE_BIN_WIN" "$LODESTAR_ENTRY_WIN" "$@"
 }
 
 export function renderWslShim({ node = process.execPath, entry = PACKAGE_ENTRY } = {}) {
+  const cwdCommands = Object.entries(COMMANDS).filter(([, command]) => command.values.includes("--cwd"))
+    .map(([name]) => name).join("|");
+  const valueOptions = [...new Set(Object.values(COMMANDS).flatMap(({ values }) => values))].join("|");
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -67,47 +72,123 @@ if [ ! -f "$(wslpath -u "$NODE_BIN")" ] || [ ! -f "$(wslpath -u "$LODESTAR_ENTRY
   exit 1
 fi
 arguments=("$@")
-if [ "\${1:-}" = "skills" ] || [ "\${1:-}" = "agents" ]; then
-  command_name="\${1:-}"
-  saw_home=false
-  saw_hermes_home=false
-  for ((index=0; index<\${#arguments[@]}; index++)); do
-    case "\${arguments[$index]}" in
-      --cwd|--home|--hermes-home|--opencode-root)
-        if ((index + 1 >= \${#arguments[@]})); then
-          echo "LODESTAR ERROR: \${arguments[$index]} requires a path" >&2
-          exit 1
-        fi
-        if [[ "\${arguments[$((index + 1))]}" = /* ]]; then
-          arguments[$((index + 1))]="$(wslpath -w "\${arguments[$((index + 1))]}")"
-        fi
-        [ "\${arguments[$index]}" = "--home" ] && saw_home=true
-        [ "\${arguments[$index]}" = "--hermes-home" ] && saw_hermes_home=true
-        ((index += 1))
-        ;;
-    esac
-  done
-  if [ "$command_name" = "skills" ]; then
-    [ "$saw_home" = true ] || arguments+=(--home "$(wslpath -w "$HOME")")
-    [ "$saw_hermes_home" = true ] || arguments+=(--hermes-home "$(wslpath -w "$HOME/.hermes")")
-  fi
+command_name=""
+saw_cwd=false
+saw_home=false
+saw_hermes_home=false
+saw_codex_home=false
+saw_claude_home=false
+saw_opencode_root=false
+saw_xdg_config_home=false
+saw_database=false
+option_end=\${#arguments[@]}
+windows_path() {
+  # Keep already-qualified Windows paths; resolve every Linux path, including
+  # relative and not-yet-created files, against the actual WSL working directory.
+  case "$1" in
+    [a-zA-Z]:[\\\\/]*|\\\\\\\\*) printf '%s' "$1" ;;
+    /*) wslpath -w "$1" ;;
+    *) wslpath -w "$PWD/$1" ;;
+  esac
+}
+check_database_path() {
+  case "\${1,,}" in
+    \\\\\\\\wsl.localhost\\\\*|\\\\\\\\wsl\$\\\\*|//wsl.localhost/*|//wsl\$/*)
+      echo "LODESTAR ERROR: SQLite must remain on a Windows filesystem; use a Windows drive or /mnt/<drive> path." >&2
+      exit 1 ;;
+  esac
+}
+for ((index=0; index<\${#arguments[@]}; index++)); do
+  option="\${arguments[$index]}"
+  case "$option" in
+    --) option_end=$index; break ;;
+    --cwd|--home|--codex-home|--claude-home|--hermes-home|--opencode-root|--xdg-config-home|--file|--db|--source|--wsl-shim|--posix-shim)
+      if ((index + 1 >= \${#arguments[@]})) || [[ "\${arguments[$((index + 1))]}" = --* ]]; then
+        echo "LODESTAR ERROR: $option requires a path" >&2
+        exit 1
+      fi
+      arguments[$((index + 1))]="$(windows_path "\${arguments[$((index + 1))]}")"
+      case "$option" in
+        --db) check_database_path "\${arguments[$((index + 1))]}"; saw_database=true ;;
+        --source) check_database_path "\${arguments[$((index + 1))]}" ;;
+        --cwd) saw_cwd=true ;;
+        --home) saw_home=true ;;
+        --hermes-home) saw_hermes_home=true ;;
+        --codex-home) saw_codex_home=true ;;
+        --claude-home) saw_claude_home=true ;;
+        --opencode-root) saw_opencode_root=true ;;
+        --xdg-config-home) saw_xdg_config_home=true ;;
+      esac
+      ((index += 1)) ;;
+    ${valueOptions}) ((index += 1)) ;;
+    -*) ;;
+    *) [ -n "$command_name" ] || command_name="$option" ;;
+  esac
+done
+defaults=()
+case "$command_name" in
+  ${cwdCommands}) [ "$saw_cwd" = true ] || defaults+=(--cwd "$(windows_path "$PWD")") ;;
+esac
+case "$command_name" in
+  skills|setup)
+    [ "$saw_home" = true ] || defaults+=(--home "$(windows_path "$HOME")")
+    [ "$saw_hermes_home" = true ] || defaults+=(--hermes-home "$(windows_path "\${HERMES_HOME:-$HOME/.hermes}")")
+    if [ "$saw_codex_home" = false ] && [ -n "\${CODEX_HOME:-}" ]; then
+      defaults+=(--codex-home "$(windows_path "$CODEX_HOME")")
+    fi
+    if [ "$saw_claude_home" = false ] && [ -n "\${CLAUDE_CONFIG_DIR:-}" ]; then
+      defaults+=(--claude-home "$(windows_path "$CLAUDE_CONFIG_DIR")")
+    fi
+    if [ "$saw_xdg_config_home" = false ] && [ -n "\${XDG_CONFIG_HOME:-}" ]; then
+      defaults+=(--xdg-config-home "$(windows_path "$XDG_CONFIG_HOME")")
+    fi
+    if [ "$saw_opencode_root" = false ] && [ -n "\${OPENCODE_CONFIG_DIR:-}" ]; then
+      defaults+=(--opencode-root "$(windows_path "$OPENCODE_CONFIG_DIR/skills")")
+    fi ;;
+esac
+# Put synthesized options before -- so positional data stays byte-for-byte intact.
+arguments=("\${arguments[@]:0:$option_end}" "\${defaults[@]}" "\${arguments[@]:$option_end}")
+if [ "$saw_database" = false ] && [ -n "\${LODESTAR_DB:-}" ]; then
+  LODESTAR_DB="$(windows_path "$LODESTAR_DB")"
+  check_database_path "$LODESTAR_DB"
+  export LODESTAR_DB
+  export WSLENV="\${WSLENV:+$WSLENV:}LODESTAR_DB/w"
 fi
 exec /init "$(wslpath -u "$NODE_BIN")" -- "$LODESTAR_ENTRY_WIN" "\${arguments[@]}"
 `;
 }
 
-async function installFileAtomically(target, text, mode) {
-  const directory = path.dirname(target);
-  const temporary = `${target}.${process.pid}.tmp`;
-  await mkdir(directory, { recursive: true });
-  await writeFile(temporary, text, {
-    encoding: "utf8",
-    flag: "wx",
-    mode,
+const installations = new Map();
+async function installFileAtomically(target, text, mode, { expectedContent } = {}) {
+  const key = path.resolve(target);
+  const previous = installations.get(key) ?? Promise.resolve();
+  const operation = previous.catch(() => {}).then(async () => {
+    const directory = path.dirname(target);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await mkdir(directory, { recursive: true });
+    const existing = await readFile(target).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (existing?.equals(Buffer.from(text))) { await chmod(target, mode); return target; }
+    if (existing !== null && (expectedContent === undefined || !existing.equals(Buffer.from(expectedContent)))) {
+      throw Object.assign(new Error("Launcher differs from the accepted installation baseline; preserve and review it before replacement."),
+        { code: "launcher_conflict", path: target });
+    }
+    try {
+      await writeFile(temporary, text, { encoding: "utf8", flag: "wx", mode });
+      await chmod(temporary, mode);
+      await ensureWslExecutable(temporary);
+      // The distribution owner supplies the exact inspected bytes. Keep a recovery
+      // copy before publishing a replacement; an upgrade never discards local bytes.
+      if (existing !== null) await writeFile(`${target}.${randomUUID()}.bak`, existing, { flag: "wx", mode });
+      await rename(temporary, target);
+    } finally { await rm(temporary, { force: true }); }
+    return target;
   });
-  await rename(temporary, target);
-  await chmod(target, mode);
-  return target;
+  installations.set(key, operation);
+  try { return await operation; }
+  finally { if (installations.get(key) === operation) installations.delete(key); }
 }
 
 export function parseWslUncTarget(target) {
@@ -122,7 +203,7 @@ export function parseWslUncTarget(target) {
 async function ensureWslExecutable(target) {
   const wslTarget = parseWslUncTarget(target);
   if (!wslTarget) return;
-  const common = ["-d", wslTarget.distribution, "--"];
+  const common = ["-d", wslTarget.distribution, "--exec"];
   await execFileAsync("wsl.exe", [...common, "chmod", "755", wslTarget.linuxPath], {
     windowsHide: true,
   });
@@ -131,12 +212,12 @@ async function ensureWslExecutable(target) {
   });
 }
 
-export async function installWindowsPosixShim(target) {
-  return await installFileAtomically(target, renderWindowsPosixShim(), 0o755);
+export async function installWindowsPosixShim(target, options = {}) {
+  return await installFileAtomically(target, renderWindowsPosixShim(options), 0o755, options);
 }
 
-export async function installWslShim(target) {
-  const installed = await installFileAtomically(target, renderWslShim(), 0o755);
+export async function installWslShim(target, options = {}) {
+  const installed = await installFileAtomically(target, renderWslShim(options), 0o755, options);
   await ensureWslExecutable(installed);
   return installed;
 }

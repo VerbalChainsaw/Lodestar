@@ -109,6 +109,19 @@ test("the staged package installs and exercises the current one-shot contract", 
   assert.equal(skills.value.data.contract, 5);
   assert.equal(await access(clientHome).then(() => true, () => false), false);
 
+  const setupArgs = ["setup", "--target", "all", "--home", clientHome,
+    "--hermes-home", path.join(clientHome, ".hermes")];
+  const plan = invoke(entry, setupArgs);
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.equal(plan.value.data.applied, false);
+  assert.equal(await access(clientHome).then(() => true, () => false), false);
+  const installedSkills = invoke(entry, [...setupArgs, "--apply"]);
+  assert.equal(installedSkills.status, 0, installedSkills.stderr);
+  assert.equal(installedSkills.value.data.verified, true);
+  const repeatedSetup = invoke(entry, [...setupArgs, "--apply"]);
+  assert.equal(repeatedSetup.status, 0, repeatedSetup.stderr);
+  assert.ok(repeatedSetup.value.data.results.every(({ action, backup }) => action === "current" && backup === null));
+
   const mcp = path.join(packageRoot, "codex-plugin", "scripts", "lodestar-mcp.mjs");
   const nativeRequest = { ...request, request_id: "installed-native-create",
     write_basis: { ...basis, targets: [

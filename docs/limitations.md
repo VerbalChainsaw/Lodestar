@@ -46,10 +46,16 @@
 
 ## Distribution
 
-- Lodestar verifies skill trees read-only. It does not install, merge, replace, or
-  remove native skill or AGENTS.md files.
+- Ordinary startup and skill verification are read-only. The explicit `setup`
+  command installs native skill trees with retained backups; it does not rewrite
+  AGENTS.md, host configuration, provider settings, or Golden Rules.
 - A stale or divergent copy is reported with source and destination identity. A hash
   mismatch does not authorize overwrite.
 - Windows owns the SQLite process boundary. WSL uses the Windows one-shot shim and must
   not open the database directly.
 - Node.js 24.15.0 or newer is required for the built-in SQLite API used by this release.
+- File verification covers the reported user skill roots, not arbitrary project,
+  plugin, or additional configured roots, host enablement, or model invocation.
+- Installation replacement is recoverable per skill tree, not an atomic switch
+  across every host. Restart host sessions after an upgrade; retry interrupted
+  setup to settle pending replacements. Retained backups live outside skill discovery.
