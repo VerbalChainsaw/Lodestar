@@ -21,6 +21,20 @@ export const INSPECTION_STATES = Object.freeze([
   "inspected_no_value",
   "unknown",
 ]);
+export const SEMANTIC_LIFECYCLES = Object.freeze([
+  "current", "unresolved", "historical", "superseded",
+]);
+export const SEMANTIC_BASES = Object.freeze([
+  "asserted", "observed", "user_direction", "legacy_unverified",
+]);
+export const CONTEXT_ROLES = Object.freeze(["orientation", "on_demand"]);
+export const SOURCE_KINDS = Object.freeze([
+  "local_file", "package_manifest", "runtime_observation",
+  "external_observation", "user_direction",
+]);
+export const SOURCE_RELATIONS = Object.freeze([
+  "content_owner", "derived_from", "verification_input", "supporting_evidence",
+]);
 
 const CONTROL = /[\u0000-\u001f\u007f]/u;
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
@@ -146,10 +160,51 @@ export function validateContent(value) {
       value: value.state ?? null,
     });
   }
+  if (value._lodestar !== undefined) {
+    plainObject(value._lodestar, "content._lodestar");
+    exactKeys(value._lodestar, new Set(["priority", "revision", "semantics"]),
+      "content._lodestar");
+    if (!Number.isSafeInteger(value._lodestar.priority)
+      || !Number.isSafeInteger(value._lodestar.revision)
+      || value._lodestar.revision < 1) {
+      invalid("content._lodestar", "using invalid core revision metadata");
+    }
+    if (value._lodestar.semantics !== undefined) {
+      validateSemantics(value._lodestar.semantics);
+    }
+  }
   return canonicalStringify(value);
 }
 
-export function validateSourceMetadata(value, field = "source.metadata") {
+export function validateSemantics(value, field = "semantics") {
+  const semantics = plainObject(value, field);
+  exactKeys(semantics, new Set(["subject", "lifecycle", "context_role", "basis",
+    "applicability", "provenance", "reason", "supersedes", "conditions",
+    "retirement_reason"]), field);
+  if (semantics.subject !== undefined) validateIdentifier(semantics.subject, `${field}.subject`);
+  if (!SEMANTIC_LIFECYCLES.includes(semantics.lifecycle)) {
+    invalid(`${field}.lifecycle`, "not a supported lifecycle", { value: semantics.lifecycle ?? null });
+  }
+  if (!CONTEXT_ROLES.includes(semantics.context_role)) {
+    invalid(`${field}.context_role`, "not a supported context role", { value: semantics.context_role ?? null });
+  }
+  if (!SEMANTIC_BASES.includes(semantics.basis)) {
+    invalid(`${field}.basis`, "not a supported semantic basis", { value: semantics.basis ?? null });
+  }
+  if (!plainObject(semantics.applicability, `${field}.applicability`)) return semantics;
+  exactKeys(semantics.applicability, new Set(["project", "checkout"]), `${field}.applicability`);
+  if (semantics.applicability.project !== null) {
+    validateScope(semantics.applicability.project, `${field}.applicability.project`);
+  }
+  if (semantics.applicability.checkout !== null) {
+    validateIdentifier(semantics.applicability.checkout, `${field}.applicability.checkout`);
+  }
+  return semantics;
+}
+
+export function validateSourceMetadata(value, field = "source.metadata", {
+  allowLegacy = false,
+} = {}) {
   const metadata = plainObject(value, field);
   if (
     !Object.hasOwn(metadata, "inspection")
@@ -160,6 +215,45 @@ export function validateSourceMetadata(value, field = "source.metadata") {
       "not a supported inspection state",
       { value: metadata.inspection ?? null },
     );
+  }
+  if (allowLegacy && metadata.kind === undefined) return canonicalStringify(metadata);
+  exactKeys(metadata, new Set(["inspection", "kind", "relation", "locator",
+    "observed_at", "fingerprint", "claim", "evidence_ref"]), field);
+  if (!SOURCE_KINDS.includes(metadata.kind)) {
+    invalid(`${field}.kind`, "not a supported source kind", { value: metadata.kind ?? null });
+  }
+  if (!SOURCE_RELATIONS.includes(metadata.relation)) {
+    invalid(`${field}.relation`, "not a supported source relation", { value: metadata.relation ?? null });
+  }
+  if (metadata.observed_at !== undefined) validateTimestamp(metadata.observed_at,
+    `${field}.observed_at`);
+  if (["local_file", "package_manifest"].includes(metadata.kind)) {
+    plainObject(metadata.locator, `${field}.locator`);
+    exactKeys(metadata.locator, new Set(["base", "path", "source_id"]), `${field}.locator`);
+    if (!["project_root", "checkout_root", "source_root", "absolute"]
+      .includes(metadata.locator.base)) invalid(`${field}.locator.base`, "not supported");
+    validString(metadata.locator.path, `${field}.locator.path`, { requireNfc: false });
+    if (metadata.locator.base === "source_root") {
+      validString(metadata.locator.source_id, `${field}.locator.source_id`);
+    } else if (metadata.locator.source_id !== undefined) {
+      invalid(`${field}.locator.source_id`, "allowed only with source_root");
+    }
+    const fingerprint = plainObject(metadata.fingerprint, `${field}.fingerprint`);
+    exactKeys(fingerprint, new Set(["algorithm", "value", "bytes"]), `${field}.fingerprint`);
+    if (fingerprint.algorithm !== "sha256" || !/^[0-9a-f]{64}$/u.test(fingerprint.value ?? "")
+      || !Number.isSafeInteger(fingerprint.bytes) || fingerprint.bytes < 0) {
+      invalid(`${field}.fingerprint`, "not a complete SHA-256 byte fingerprint");
+    }
+    validateTimestamp(metadata.observed_at, `${field}.observed_at`);
+  } else if (["runtime_observation", "external_observation"].includes(metadata.kind)) {
+    validateTimestamp(metadata.observed_at, `${field}.observed_at`);
+    if (metadata.evidence_ref === undefined || metadata.evidence_ref === null) {
+      invalid(`${field}.evidence_ref`, "required for runtime or external observations");
+    }
+    validString(metadata.evidence_ref, `${field}.evidence_ref`, { requireNfc: false });
+  } else if (metadata.kind === "user_direction"
+    && metadata.evidence_ref !== null && metadata.evidence_ref !== undefined) {
+    validString(metadata.evidence_ref, `${field}.evidence_ref`, { requireNfc: false });
   }
   return canonicalStringify(metadata);
 }
@@ -328,4 +422,3 @@ export function validateOffset(value, { field = "offset" } = {}) {
   }
   return parsed;
 }
-

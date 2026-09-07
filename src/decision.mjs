@@ -1,256 +1,200 @@
-import { transaction } from "./database.mjs";
 import { lodestarError } from "./errors.mjs";
-import { formatMarker } from "./markers.mjs";
-import { hash, normalizedRows, recordInput } from "./project.mjs";
-import { getRecordById, normalizeRecord, writeRecordSnapshot } from "./records.mjs";
-import { allocateRevision } from "./revisions.mjs";
+import { canonicalStringify } from "./json.mjs";
+import { normalizedRowsResult, recordInput } from "./project.mjs";
+import { getRecordById, mutate, normalizeRecord, writeBasis, writeRecordSnapshot } from "./records.mjs";
+import { validateDomainInput } from "./cli-commands.mjs";
 
-const KEY = /^[a-z0-9][a-z0-9./-]*$/u;
-const FORBIDDEN = [/-----BEGIN/iu,
-  /\b(?:password|secret|access[-_ ]?token|refresh[-_ ]?token)\b/iu,
-  /\bgh[opusr]_[A-Za-z0-9]{20,}\b/u, /\bsk-(?:proj-)?[A-Za-z0-9_-]{12,}\b/u];
-// Shared so every capture path rejects control characters and obvious secret material
-// on the same terms, rather than each surface inventing its own guard.
-export const safeText = (value, label) => oneLine(value, label);
-
-function oneLine(value, label, required = true) {
-  if (typeof value !== "string") throw lodestarError("invalid_input", `${label} must be text.`);
-  const text = value.replace(/\s+/gu, " ").trim();
-  const control = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text);
-  if ((required && !text) || control) {
-    throw lodestarError("invalid_input", `${label} is empty or unsafe.`);
+export function safeText(value, label) {
+  if (typeof value !== "string" || !value.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
+    throw lodestarError("invalid_input", `${label} must be nonempty text without control characters.`);
   }
-  if (FORBIDDEN.some((pattern) => pattern.test(text))) throw lodestarError("invalid_input",
-    `${label} appears to contain secret material.`);
-  return text;
+  return value;
 }
 export function normalizeDecisionKey(value) {
-  const key = oneLine(value, "Decision key").toLowerCase().replace(/_/gu, "-")
-    .replace(/[^a-z0-9./-]+/gu, "-").replace(/^[./-]+|[./-]+$/gu, "");
-  if (!KEY.test(key)) throw lodestarError("invalid_input",
-    "Decision key is not stable or narrow.");
-  return key;
+  safeText(value, "Decision key");
+  if (value !== value.trim() || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw lodestarError("invalid_input", "Decision keys preserve exact case and punctuation; remove boundary whitespace/control characters.");
+  }
+  return value;
 }
-function normalizeValue(value) {
-  const text = oneLine(value, "Decision value");
-  if (/[()={}\[\];]/u.test(text)) throw lodestarError("invalid_input",
-    "Decision value must be a bare canonical value; put qualifiers in --reason.");
-  return text;
-}
-const normalizeReason = (value) => value === undefined ? ""
-  : oneLine(value, "Decision reason", false);
-const DECISION_STATUSES = Object.freeze(["accepted", "blocked"]);
-function normalizeStatus(value) {
-  if (value === undefined) return "accepted";
-  const status = oneLine(value, "Decision status").toLowerCase();
-  if (!DECISION_STATUSES.includes(status)) throw lodestarError("invalid_input",
-    "Decision status must be accepted or blocked.");
-  return status;
-}
-// A direct CLI write is the Director acting; a hook-captured marker is the agent.
-// Director-issued kills stay closed unless that same session revives them;
-// agent-issued kills reopen by evidence (any later set).
-const DECISION_AUTHORITIES = Object.freeze(["director", "agent"]);
-function normalizeAuthority(value) {
-  if (value === undefined) return "director";
-  const authority = oneLine(value, "Decision authority").toLowerCase();
-  if (!DECISION_AUTHORITIES.includes(authority)) throw lodestarError("invalid_input",
-    "Decision authority must be director or agent.");
-  return authority;
-}
-function events(db, project) {
-  return normalizedRows(db, "SELECT id FROM records WHERE type='decision-event' AND scope=? "
-    + "ORDER BY json_extract(content_json,'$._lodestar.revision'),id", project.scope)
-    .map(({ data }) => data);
+function events(db, projectScope) {
+  const result = normalizedRowsResult(db, "SELECT id FROM records WHERE type='decision-event' AND scope=? "
+    + "ORDER BY json_extract(content_json,'$._lodestar.revision'),id", projectScope);
+  return { history: result.records.map((record) => ({ ...record.data, event_id: record.id, revision: record.revision,
+      origin_scope: record.scope, provenance_status: record.data.direction ? "attributed" :
+        record.data.authority === "director" ? "legacy_unverified" : "agent_assertion" })),
+    record_errors: result.record_errors };
 }
 export function replayDecisions(history) {
-  const current = new Map(), dead = [];
+  const current = new Map(), heads = new Map(), dead = [];
   let enabled = true;
   for (const event of history) {
     if (event.event === "injection") {
-      enabled = event.enabled;
-      continue;
-    }
-    if (event.event === "status") {
-      const prior = current.get(event.key);
-      if (prior) current.set(event.key, { ...prior, status: normalizeStatus(event.status),
-        reason: event.reason ?? prior.reason, event_id: event.event_id });
+      enabled = event.include_agent_decisions ?? event.enabled;
+      if (event.key) heads.set(event.key, event);
       continue;
     }
     const prior = current.get(event.key);
-    if (event.event === "set") {
-      if (prior && prior.value !== event.value) dead.push({ key: event.key,
-        value: prior.value, replacement: event.value, reason: event.reason,
-        event_id: event.event_id, date: String(event.recorded_at ?? "").slice(0, 10),
-        authority: event.authority ?? "agent", killed_by_session: event.session ?? null });
-      current.set(event.key, { key: event.key, value: event.value,
-        reason: event.reason, event_id: event.event_id,
-        status: normalizeStatus(event.status),
-        date: String(event.recorded_at ?? "").slice(0, 10) });
-    } else if (event.event === "drop" && prior) {
+    heads.set(event.key, event);
+    if (event.event === "set" || event.event === "status") {
+      if (event.event === "status" && !prior) continue;
+      if (prior && event.event === "set" && prior.value !== event.value) {
+        dead.push({ ...prior, status: "superseded", replacement: event.value,
+          superseded_by: event.event_id, replacement_reason: event.reason });
+      }
+      current.set(event.key, { ...prior, ...event,
+        value: event.event === "status" ? prior.value : event.value,
+        status: event.status ?? "accepted" });
+    } else if (event.event === "drop") {
+      if (prior) dead.push({ ...prior, ...event, value: prior.value,
+        status: event.status ?? "dead" });
       current.delete(event.key);
-      dead.push({ key: event.key, value: prior.value, replacement: null,
-        successor: event.successor ?? null, reason: event.reason,
-        event_id: event.event_id, date: String(event.recorded_at ?? "").slice(0, 10),
-        authority: event.authority ?? "agent", killed_by_session: event.session ?? null });
     }
   }
-  const facts = [...current.values()].filter(({ status }) => status !== "blocked")
-    .sort((left, right) => left.key.localeCompare(right.key));
-  const blocked = [...current.values()].filter(({ status }) => status === "blocked")
-    .sort((left, right) => left.key.localeCompare(right.key));
-  const live = new Set([...facts, ...blocked].map(({ key, value }) => `${key}\0${value}`)),
-    seen = new Set();
-  const kept = dead.reverse().filter((item) => {
-    const pair = `${item.key}\0${item.value}`, retain = !live.has(pair) && !seen.has(pair);
-    if (retain) seen.add(pair);
-    return retain;
-  }).reverse();
-  return { enabled, facts, blocked, dead: kept };
+  const all = [...current.values()];
+  return { enabled, facts: all.filter(({ status }) => status === "accepted"),
+    blocked: all.filter(({ status }) => status === "blocked"), dead,
+    heads: Object.fromEntries(heads) };
 }
 export function renderDecisions(state) {
-  if (!state.enabled || (!state.facts.length && !state.blocked.length && !state.dead.length))
-    return "";
-  const lines = ["## FACTS"];
-  for (const fact of state.facts) lines.push(formatMarker("DECISION",
-    { key: fact.key, status: (fact.status ?? "accepted").toUpperCase(), value: fact.value,
-      date: fact.date, reason: fact.reason }));
-  if (state.blocked.length) {
-    lines.push("", "## BLOCKED");
-    for (const item of state.blocked) lines.push(formatMarker("DECISION",
-      { key: item.key, status: "BLOCKED", value: item.value, date: item.date,
-        reason: item.reason }));
+  const lines = [];
+  for (const item of [...state.facts, ...state.blocked]) {
+    lines.push(`${item.key}: ${JSON.stringify(item.value)} (${item.status}). ${item.reason ?? ""}`);
   }
-  if (state.dead.length) {
-    lines.push("", "## DEAD — DO NOT USE");
-    for (const item of state.dead) {
-      // The marker is the machine form; the negation sentence is the product. DEAD is
-      // the power-word: name the old value, prohibit its reuse, name the replacement
-      // (or state there is none), and keep the reason that closes the record. A
-      // Director-issued kill carries reopen=director: only that session may revive it.
-      const reopen = item.authority === "director" ? { reopen: "director" } : {};
-      // A kill names its successor when it has one: a replaced value (by=key) or a
-      // captured SUPERSEDED marker's by= key. Only a kill with no successor is a DEAD.
-      const successor = item.replacement ? item.key : item.successor ?? null;
-      if (successor) {
-        lines.push(formatMarker("SUPERSEDED",
-          { key: item.key, by: successor, value: item.value, date: item.date,
-            reason: item.reason, ...reopen }));
-        let sentence = `${item.value} is DEAD; do not propose, use, or restore it.`;
-        // A replaced value names its replacement value; a captured SUPERSEDED kill
-        // names its successor key.
-        sentence += item.replacement
-          ? ` Use ${item.replacement}.`
-          : ` Use ${item.successor}.`;
-        if (item.reason) sentence += ` Reason: ${item.reason}.`;
-        lines.push(sentence);
-      } else {
-        lines.push(formatMarker("DEAD", { key: item.key, value: item.value,
-          date: item.date, reason: item.reason, ...reopen }));
-        let sentence = `${item.value} is DEAD; do not propose, use, or restore it.`;
-        sentence += " It has no replacement.";
-        if (item.reason) sentence += ` Reason: ${item.reason}.`;
-        lines.push(sentence);
-      }
-    }
+  for (const item of state.dead) {
+    lines.push(`Historical ${item.key}: ${JSON.stringify(item.value)} (${item.status}). ${item.reason ?? ""}`);
   }
   return lines.join("\n");
 }
-export function decisionProjection(db, project) {
-  const state = replayDecisions(events(db, project));
-  return { ...state, projection: renderDecisions(state) };
-}
-function append(db, project, identity, data, options) {
-  const now = (options.now ?? (() => new Date()))().toISOString();
-  return transaction(db, () => {
-    const revision = allocateRevision(db);
-    const id = `decision:${hash(project.scope, 16)}:${revision}`;
-    writeRecordSnapshot(db, recordInput(id, "decision-event", `Decision event ${revision}`,
-      project.scope, 900, { v: 1, event_id: id, actor: identity.actor,
-        session: identity.session, recorded_at: now, ...data }),
-    { createdAt: now, updatedAt: now, revision });
-    return normalizeRecord(getRecordById(db, id));
-  }, options.database);
-}
-// The current value of a key may be an accepted fact or a blocked one; a status,
-// replacement, or drop must see both or a blocked decision becomes unreachable.
-function decisionState(db, project) {
-  const state = replayDecisions(events(db, project));
-  return { prior: [...state.facts, ...state.blocked], dead: state.dead };
-}
-export function decisionSet(db, project, identity, rawKey, rawValue, options = {}) {
-  const key = normalizeDecisionKey(rawKey), value = normalizeValue(rawValue);
-  const status = normalizeStatus(options.status);
-  const state = decisionState(db, project);
-  const prior = state.prior.find((item) => item.key === key) ?? null;
-  if (prior?.value === value && (prior.status ?? "accepted") === status)
-    return { changed: false, current: prior };
-  // DEAD is the power-word: a Director-issued kill stays closed. Only the session
-  // that issued the kill may revive the same value; agent-issued kills reopen by
-  // evidence, and old kills without authority replay as agent-issued.
-  const deadMatch = state.dead.find((item) => item.key === key && item.value === value);
-  if (deadMatch?.authority === "director"
-      && deadMatch.killed_by_session !== identity.session) {
-    throw lodestarError("dead_decision_revival",
-      `Decision "${key}" value "${value}" was killed by the Director and is closed to revival.`,
-      {
-        identifiers: { key, value, killer_session: deadMatch.killed_by_session },
-        action: "Only the session that issued the kill may revive it. Use decision set "
-          + "from that session, or choose a replacement value.",
-      },
-    );
+export function decisionProjection(db, project, key = null) {
+  if (key !== null) normalizeDecisionKey(key);
+  const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
+  const streams = scopes.map((origin) => { const result = events(db, origin); return {
+    scope: origin, record_errors: result.record_errors, ...replayDecisions(result.history) }; });
+  const canonical = streams.find((stream) => stream.scope === project.scope);
+  const candidates = new Map();
+  for (const stream of streams) for (const item of [...stream.facts, ...stream.blocked]) {
+    if (key !== null && item.key !== key) continue;
+    const entries = candidates.get(item.key) ?? [];
+    entries.push(item); candidates.set(item.key, entries);
   }
-  return { changed: true, record: append(db, project, identity,
-    { event: "set", key, value, reason: normalizeReason(options.reason),
-      authority: normalizeAuthority(options.authority),
-      ...(status !== "accepted" ? { status } : {}) }, options) };
+  const facts = [], blocked = [], conflicts = [];
+  for (const [subject, choices] of candidates) {
+    const selected = choices.find(({ origin_scope }) => origin_scope === project.scope);
+    const resolved = selected && choices.every((choice) => choice === selected ||
+      selected.resolved_heads?.includes(choice.event_id));
+    if (choices.length > 1 && !resolved) { conflicts.push({ key: subject, candidates: choices }); continue; }
+    const item = selected ?? choices[0];
+    if (!canonical.enabled && !item.direction && item.provenance_status !== "legacy_unverified") continue;
+    (item.status === "blocked" ? blocked : facts).push(item);
+  }
+  const targets = key === null ? Object.keys(canonical.heads).map((subject) =>
+    ({ kind: "decision", scope: project.scope, key: subject }))
+    : [{ kind: "decision", scope: project.scope, key }];
+  const state = { enabled: canonical.enabled, facts, blocked, conflicts,
+    dead: streams.flatMap((stream) => stream.dead).filter((item) => key === null || item.key === key),
+    heads: canonical.heads };
+  const recordErrors = streams.flatMap((stream) => stream.record_errors);
+  const complete = recordErrors.length === 0;
+  return { ...state, projection: renderDecisions(state),
+    record_errors: recordErrors, complete,
+    write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
+      targets: [...(complete ? targets : []),
+        ...(project.binding_preconditions ?? []).map(({ target }) => target)] }),
+    next: complete ? [] : ["Correct the named decision records before preparing a decision mutation."] };
 }
-export function decisionStatus(db, project, identity, rawKey, rawState, options = {}) {
-  const key = normalizeDecisionKey(rawKey), status = normalizeStatus(rawState);
-  const prior = decisionState(db, project).prior.find((item) => item.key === key) ?? null;
-  if (!prior) return { changed: false, current: null };
-  if ((prior.status ?? "accepted") === status) return { changed: false, current: prior };
-  return { changed: true, record: append(db, project, identity,
-    { event: "status", key, value: null, status,
-      reason: normalizeReason(options.reason) }, options) };
+function direction(value) {
+  if (value === undefined || value === null) return null;
+  if (value.kind !== "user" || !["asserted", "host_observed"].includes(value.attribution)) {
+    throw lodestarError("invalid_input", "Direction must identify user attribution and evidence.");
+  }
+  safeText(value.reference, "Direction reference");
+  safeText(value.instruction, "Direction instruction");
+  return value;
 }
-export function decisionDrop(db, project, identity, rawKey, options = {}) {
-  const key = normalizeDecisionKey(rawKey);
-  const prior = decisionState(db, project).prior.find((item) => item.key === key) ?? null;
-  if (!prior) return { changed: false, current: null };
-  const successor = options.successor === undefined || options.successor === null
-    || options.successor === "" ? null : normalizeDecisionKey(options.successor);
-  return { changed: true, record: append(db, project, identity,
-    { event: "drop", key, value: null, reason: normalizeReason(options.reason),
-      authority: normalizeAuthority(options.authority),
-      ...(successor ? { successor } : {}) }, options) };
+export function decisionMutation(db, project, identity, action, request, options = {}) {
+  const input = validateDomainInput(`decision.${action}`, request?.input);
+  const key = action === "inject" ? "lodestar:agent-decision-presentation" : normalizeDecisionKey(input.key);
+  const targets = [{ kind: "decision", scope: project.scope, key },
+    ...(project.binding_preconditions ?? []).map(({ target }) => target)];
+  return mutate(db, `decision.${action}`, request,
+    (context) => applyDecision(db, project, identity, action, input, context),
+    { ...options, requiredTargets: [...targets,
+      ...(input.resolved_heads ?? []).map((id) => ({ kind: "record", id }))] });
 }
-export function decisionInjection(db, project, identity, enabled, options = {}) {
-  if (typeof enabled !== "boolean") throw lodestarError("invalid_input",
-    "Injection state is invalid.");
-  if (replayDecisions(events(db, project)).enabled === enabled) return { changed: false, enabled };
-  return { changed: true, record: append(db, project, identity,
-    { event: "injection", enabled, reason: normalizeReason(options.reason) }, options) };
+
+export function applyDecision(db, project, identity, action, input, { revision, timestamp }) {
+  validateDomainInput(`decision.${action}`, input);
+  const key = action === "inject" ? "lodestar:agent-decision-presentation" : normalizeDecisionKey(input.key);
+    const currentEvents = events(db, project.scope);
+    if (currentEvents.record_errors.length) throw lodestarError("record_requires_source_correction",
+      "The current decision stream contains records that cannot be safely replayed.",
+      { identifiers: { key, record_errors: currentEvents.record_errors },
+        action: "Correct the named decision records before changing this decision stream." });
+    const state = replayDecisions(currentEvents.history);
+    const head = state.heads[key] ?? null;
+    const prior = [...state.facts, ...state.blocked].find((item) => item.key === key);
+    const suppliedDirection = direction(input.direction);
+    const priorBoundary = head?.direction ?? (head?.authority === "director" ? { legacy: true } : null);
+    if (priorBoundary && !suppliedDirection && action !== "inject") {
+      throw lodestarError("direction_required", "Changing this user-attributed decision needs current user direction.",
+        { identifiers: { key, previous_event_id: head.event_id },
+          action: "Use the actual current user instruction and reference; session identity is not authority." });
+    }
+    if (input.supersedes_event_id !== undefined && input.supersedes_event_id !== head?.event_id) {
+      throw lodestarError("decision_conflict", "The supplied predecessor is not the current decision head.",
+        { identifiers: { key, current_event_id: head?.event_id ?? null } });
+    }
+    if (action !== "inject") safeText(input.reason, "Decision reason");
+    if (action === "set") {
+      safeText(input.value, "Decision value");
+      if (!["accepted", "blocked"].includes(input.status)) throw lodestarError("invalid_input", "Invalid decision status.");
+    }
+    if (action === "status" && !["accepted", "blocked"].includes(input.status)) throw lodestarError("invalid_input", "Invalid decision status.");
+    if (action === "drop" && !["dead", "superseded"].includes(input.status)) throw lodestarError("invalid_input", "Drop status must be dead or superseded.");
+    if (action === "drop" && input.status === "superseded" && !input.successor) throw lodestarError("invalid_input", "Supersession requires its successor.");
+    if (["drop", "status"].includes(action) && !prior) throw lodestarError("decision_not_found", "No current decision exists for this key.", { identifiers: { key } });
+    if (input.resolved_heads) {
+      const actual = new Set((project.historical_scopes ?? []).filter((item) => item !== project.scope)
+        .flatMap((origin) => { const result = events(db, origin);
+          if (result.record_errors.length) throw lodestarError("record_requires_source_correction",
+            "A historical decision stream contains records that cannot be safely replayed.",
+            { identifiers: { key, scope: origin, record_errors: result.record_errors },
+              action: "Correct the named decision records before resolving this stream." });
+          const event = replayDecisions(result.history).heads[key]; return event ? [event.event_id] : []; }));
+      if (input.resolved_heads.some((id) => !actual.has(id)) || input.resolved_heads.length !== actual.size) {
+        throw lodestarError("decision_conflict", "Resolution must identify every current historical stream head.",
+          { identifiers: { key, heads: [...actual] } });
+      }
+    }
+    const data = action === "inject" ? { event: "injection", key,
+      include_agent_decisions: input.include_agent_decisions } : {
+      event: action === "status" ? "status" : action === "drop" ? "drop" : "set", key,
+      value: action === "set" ? input.value : prior.value, status: input.status,
+      reason: input.reason, direction: suppliedDirection ?? head?.direction ?? null,
+      evidence: input.evidence ?? head?.evidence ?? [], conditions: input.conditions ?? head?.conditions ?? [],
+      rejected_alternative: input.rejected_alternative ?? (action === "set" && prior && prior.value !== input.value ? prior.value : head?.rejected_alternative ?? null),
+      successor: input.successor ?? null, resolved_heads: input.resolved_heads ?? head?.resolved_heads ?? [] };
+    const comparable = (event) => Object.fromEntries(Object.keys(data).map((field) => [field, event?.[field] ?? null]));
+    if (head && canonicalStringify(comparable(head)) === canonicalStringify(comparable(data))) {
+      return { data: { changed: false, current: head }, changed_ids: [] };
+    }
+    const id = `decision:${revision}`;
+    writeRecordSnapshot(db, recordInput(id, "decision-event", `Decision: ${key}`, project.scope, 0,
+      { ...data, event_id: id, previous_event_id: head?.event_id ?? null,
+        actor: identity.actor, session: identity.session, recorded_at: timestamp }),
+    { createdAt: timestamp, updatedAt: timestamp, revision });
+    return { data: { changed: true, record: normalizeRecord(getRecordById(db, id)) }, changed_ids: [id] };
+
 }
 export function diagnoseDecisions(db) {
-  const records = db.prepare("SELECT id,content_json FROM records "
-    + "WHERE type='decision-event' ORDER BY id").all(), invalid = [];
-  for (const row of records) try {
+  const rows = db.prepare("SELECT id,content_json FROM records WHERE type='decision-event'").all();
+  const invalid = [], legacy = [];
+  for (const row of rows) try {
     const data = JSON.parse(row.content_json).value;
-    if (data.event === "set") normalizeValue(data.value);
-    if (["set", "drop"].includes(data.event)) normalizeDecisionKey(data.key);
-    else if (data.event === "status") {
-      normalizeDecisionKey(data.key);
-      normalizeStatus(data.status);
-    } else if (data.event !== "injection" || typeof data.enabled !== "boolean") {
-      throw new Error();
-    }
-    if (data.status !== undefined) normalizeStatus(data.status);
-    if (data.authority !== undefined) normalizeAuthority(data.authority);
-    if (data.successor !== undefined && data.successor !== null) {
-      normalizeDecisionKey(data.successor);
-    }
-    normalizeReason(data.reason);
+    if (!data || !["set", "status", "drop", "injection"].includes(data.event)) throw new Error();
+    if (data.event !== "injection") normalizeDecisionKey(data.key);
+    if (data.authority !== undefined) legacy.push(row.id);
   } catch { invalid.push(row.id); }
-  return { events: records.length, invalid, healthy: invalid.length === 0 };
+  return { events: rows.length, invalid, legacy_unverified: legacy, healthy: invalid.length === 0 };
 }

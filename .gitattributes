@@ -4,3 +4,9 @@
 *.ps1 text eol=crlf
 *.sh text eol=lf
 *.yml text eol=lf
+*.yaml text eol=lf
+
+# Managed payloads are byte contracts, including canonical source line endings.
+# Git checkout must not rewrite their manifest hashes under core.autocrlf.
+managed-assets/skills/** -text
+codex-plugin/skills/** -text

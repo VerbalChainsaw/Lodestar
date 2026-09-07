@@ -1,258 +1,241 @@
 # Lodestar
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-launch-hero.png" alt="Lodestar: one CLI for agent project state" width="100%">
-</p>
+**Give your next session a head start.**
 
-<p align="center"><strong>One local CLI for agent project state.</strong></p>
+![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/lodestar-agent-context"><img alt="npm version" src="https://img.shields.io/npm/v/lodestar-agent-context?style=flat-square"></a>
-  <a href="https://github.com/VerbalChainsaw/Lodestar/actions/workflows/ci.yml"><img alt="Windows, Linux, and macOS checks" src="https://img.shields.io/github/actions/workflow/status/VerbalChainsaw/Lodestar/ci.yml?branch=main&style=flat-square&label=checks"></a>
-  <a href="https://github.com/VerbalChainsaw/Lodestar/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/VerbalChainsaw/Lodestar?style=flat-square"></a>
-  <a href="https://github.com/VerbalChainsaw/Lodestar/blob/main/LICENSE"><img alt="MIT license" src="https://img.shields.io/npm/l/lodestar-agent-context?style=flat-square"></a>
-</p>
+[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.1.2.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
 
-An agent starting work on a repository rebuilds the same context every time: read
-the instruction file, read the README, chase what those reference, guess at what
-was already decided. It is slow, it differs between sessions, and decisions that
-were reversed months ago quietly come back.
+Lodestar keeps useful project context, decisions, and unfinished work in one local
+registry. Your coding agent can get its bearings, check what changed, and leave a
+clear continuation for the next session.
 
-Lodestar answers all of it in one call.
+Use it when new sessions keep rediscovering project facts, revisiting settled
+decisions, or losing the thread of unfinished work. It provides a current starting
+point and a checked correction path. You and your native project instructions
+keep authority over the work.
+
+## What is better in 2.1
+
+The 2.1.2 public release replaces the older 1.6 workflow with one contract for CLI
+and native tools, explicit installation ownership, and read-only startup.
+
+| Everyday problem | What Lodestar does |
+| --- | --- |
+| A new session starts from scratch. | Returns relevant saved context, decisions, and work for the current project and checkout. |
+| A saved claim outlives its source. | Checks local file and package evidence during ordinary reads and flags claims needing reinspection. |
+| An agent guesses how to update a record. | Exposes complete mutation inputs through JSON help and native describe, with a usable write basis from reads. |
+| Two updates collide, or a response is lost. | Checks observed revisions, preserves history, and makes exact request retries safe for database effects. |
+| Native skill copies drift. | Plans owned updates, preserves displaced bytes, verifies installed files, and reports local conflicts. |
+| Project identity changes. | Keeps explicitly mapped member records usable while retaining their origin and history. |
+
+The 2.1.1 repairs also close a native read/write routing error, incomplete dependency
+reporting, clipped recovery bases, and JSON data-key handling defects. Version 2.1.2
+brings those changes into a public release with current documentation, artwork, and
+shared package-smoke checks in CI and release workflows. It also preserves typed
+busy recovery when contention occurs before a write transaction starts. See the
+[release notes](docs/releases/v2.1.2.md) for upgrade details.
+
+There is no daemon, telemetry, background indexer, or startup write. Missing optional
+context does not stop work whose required inputs are otherwise available. A source
+check is evidence at read time; it does not prove the truth of a saved claim.
+
+## Install
+
+Requires **Node.js 24.15.0 or newer**. For a new installation:
 
 ```text
-npm install --global lodestar-agent-context
+npm install --global lodestar-agent-context@2.1.2
+lodestar setup --target all
+lodestar setup --target all --apply
+lodestar init
 lodestar start --cwd .
 ```
 
-That returns the project identity, its governing rules, current and superseded
-decisions, relevant knowledge, who else is working, and any handoff waiting for
-this session as one complete JSON snapshot. A caller may explicitly request a smaller
-optional-context projection, but required governance and continuity stay atomic.
+Inspect the setup plan before applying it. Choose an individual target if you only
+use one host. Independently edited skill files are reported for review; they are
+not silently overwritten. Start fresh host sessions after installing updated skills.
 
-## Why
+**Upgrading an existing registry:** follow [storage and recovery](#storage-and-recovery)
+before converting an older store. The current runtime uses schema 5. Schema-4
+conversion is explicit and requires inspected preservation evidence and a backup.
 
-Measured on this repository with a populated registry:
+Native skill targets are Codex, Claude Code, OpenCode, and Hermes. Other agents and
+scripts can use the CLI. The optional Codex plugin exposes structured MCP tools.
+Windows and WSL use the same Windows-owned database through the one-shot launcher.
+Host discovery, authentication, and actual model use remain separate from package
+compatibility; see [installation checks](docs/installation.md) and
+[limitations](docs/limitations.md).
 
-| | Lodestar | Reading the docs |
-| --- | --- | --- |
-| Calls | 1 | one per file |
-| Bytes returned | **5,872** | 28,456 |
-| Wall clock | **155 ms** | file reads + model time |
-
-- **Zero dependencies.** Node's built-in SQLite, nothing else. 66 files installed.
-- **One registry.** Windows and WSL reach the same database through a one-shot
-  shim. No second engine, no daemon, no background indexer.
-- **JSON by default.** `--human` when a person is reading. Errors use the same
-  envelope on stderr, so failures parse as reliably as successes.
-- **Local only.** No network dependency, no telemetry, no service to run.
-- **Checked on three platforms.** Every release runs the full suite on Linux,
-  macOS, and Windows against Node 24.15.0, plus CodeQL and packed-artifact smokes.
-
-```mermaid
-flowchart LR
-  A[Codex / Claude / OpenCode / Hermes] --> L[lodestar]
-  L --> S[startup projection]
-  L --> K[knowledge + decisions]
-  L --> W[work presence]
-  L --> H[continuity baton]
-  L --> M[managed skills]
-  S --> D[(one SQLite registry)]
-  K --> D
-  W --> D
-  H --> D
-```
-
-## The normal loop
+## Normal use
 
 ```text
-lodestar start --cwd .                      # obtain one validated startup snapshot
-lodestar find "release process"             # search before reading the repo
-lodestar get project:example                # exact record or alias
-lodestar links project:example              # one hop of related records
-lodestar put --file record.json             # save durable context
+lodestar start --cwd .
+lodestar get project:example:commands
+lodestar find "release process" --scope project:example
+lodestar links project:example:commands
 ```
 
-A missing record means Lodestar does not know that yet — inspect the repository
-normally. It is never proof of absence.
+Reads return the database instance, recovery epoch, accepted revision, and target
+revisions needed for a safe update. A short mutation request has one shape:
 
-## Work presence
-
-Advisory only. It tells other agents what area is busy; it takes no locks.
-
-Identity comes from the host. Under the Lodestar plugin, call the bundled
-`lodestar_work_start` / `lodestar_work_done` / `lodestar_work_status` tools, which
-carry the session the host already knows. A plain shell has no session id, so the
-CLI requires an explicit `--session` — Lodestar refuses rather than guessing,
-because work records are keyed by actor and a wrong guess overwrites a peer.
+```json
+{
+  "v": 5,
+  "request_id": "018f-example-unique-request",
+  "write_basis": {
+    "database_instance_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "database_epoch": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "project_scope": "project:example",
+    "checkout": null,
+    "targets": [
+      { "kind": "record", "id": "project:example", "expected_revision": 4 },
+      { "kind": "record", "id": "project:example:commands", "expected_revision": null }
+    ]
+  },
+  "input": {
+    "mode": "create",
+    "record": {
+      "id": "project:example:commands",
+      "kind": "command",
+      "name": "Example commands",
+      "scope": "project:example",
+      "availability": "known",
+      "data": { "test": "npm test" },
+      "aliases": [],
+      "links": [],
+      "sources": [],
+      "semantics": {
+        "basis": "asserted",
+        "lifecycle": "current",
+        "context_role": "orientation",
+        "applicability": { "project": "project:example", "checkout": null }
+      }
+    }
+  }
+}
+```
 
 ```text
-lodestar work                               # who is working, on what
-lodestar work start "Repairing the release pipeline"
-lodestar work done "Release repair complete"   # shell: add --session <id>
-lodestar work history --limit 20
+lodestar put --file request.json
 ```
 
-## Decisions
-
-Append-only events with a deterministic projection, so a reversal stays visible
-instead of silently resurfacing.
-
-```text
-lodestar decision set database SQLite --reason "local-first, no service"
-lodestar decision status database blocked --reason "waiting on vendor"
-lodestar decision show                      # FACTS, BLOCKED, and DEAD
-lodestar decision drop database
-```
-
-Current decisions render as `[DECISION key=... status=ACCEPTED ...]` markers,
-paused decisions as `status=BLOCKED`, replaced values as
-`[SUPERSEDED key=... by=... ...]`, and dropped values as `[DEAD key=... ...]`.
-The Stop hook captures the same bracketed markers from an agent's final message
-into the ledger, so a decision an agent records is a decision a later session
-inherits.
-
-`lodestar start` returns the same projection, so a new session inherits both what
-is true and what was explicitly ruled out.
-
-
-## Continuity
-
-One baton per project, claimed atomically by exactly one successor at startup.
-
-```text
-lodestar handoff arm --cwd .
-lodestar handoff checkpoint --file packet.json --cwd .
-lodestar handoff status --cwd .
-lodestar handoff disarm --cwd .
-```
-
-## Read-only skill verification
-
-Lodestar carries canonical skill source but does not own external skill directories.
-It can compare existing copies without creating, replacing, synchronizing, migrating,
-backing up, or removing anything.
-
-```text
-lodestar skills verify --target all
-```
-
-## Read-only AGENTS.md inspection
-
-Lodestar never writes repository or global agent files. It can inspect an existing
-repository AGENTS.md or print canonical template source for deliberate use elsewhere.
-
-```text
-lodestar agents status --cwd .
-lodestar agents verify --cwd .
-lodestar agents template --mode full --cwd .
-```
-
-## Keeping it current
-
-Startup keeps pending capture separate from injected context. A
-`[NOTE text="..."]` marker in an agent's final message is captured into a quarantine
-scope that `start` never reads (the historical `LODESTAR NOTE: <text>` line is still
-accepted).
-
-```text
-lodestar pending                 # review candidates
-lodestar pending promote <id>    # keep one; findable by get and find
-lodestar pending drop <id>       # discard
-```
-
-Promotion never marks a record required. `lodestar doctor` checks the schema, SQLite
-integrity, foreign keys, and stored-record semantics; it does not own startup sizing
-policy.
-
-## Complete startup
-
-`start` returns all optional context. Required governance, decisions, and eligible
-handoff content are always complete and atomic. There is no startup budget and no
-truncation surface: the envelope either fits or the caller retrieves by exact ID,
-and Lodestar never silently sheds a record it was asked to return.
+Repeating the exact request replays its receipt without another effect. Reusing a
+request ID with changed input fails. A stale target, project binding, database
+instance, or recovery epoch changes nothing and returns a usable refreshed basis.
+`delete` retires a record from current orientation while preserving its content,
+associations, and history.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `start` | Resolve one project and return complete startup state; claim a pending handoff when eligible. |
-| `get` | Retrieve one exact ID or alias. |
-| `find` | Search stored context by query, scope, and kind; `--limit` requests a page, `--offset` continues one. |
-| `links` | Deterministic one-hop incoming and outgoing links. |
-| `put` | Insert or replace one complete record snapshot. |
-| `work status\|start\|done\|history` | Read or update advisory work records. |
-| `handoff arm\|status\|checkpoint\|now\|disarm` | Session lane and next-session recovery. |
-| `decision set\|drop\|show\|inject` | Append decision events; project current and dead values. |
-| `skills verify` | Read-only comparison of existing skill copies with package source. |
-| `agents status\|verify\|template` | Read-only AGENTS.md inspection and template output. |
-| `pending list\|add\|promote\|drop` | Queue captured candidates outside startup. |
-| `doctor` | Diagnose schema, integrity, foreign keys, and stored semantics. |
-| `export` | Emit a deterministic registry export. |
-| `delete` | Delete one record and dependent rows transactionally. |
-| `init` | Explicitly initialize an empty registry; normally unnecessary. |
+| `start` | Read fresh project orientation without writing. |
+| `get`, `find`, `links` | Retrieve current, raw, historical, or related records. |
+| `put`, `delete` | Apply a checked record update or retirement. |
+| `work` | Read work state or record actual progress and outcomes. |
+| `decision` | Read and update reasoned decision streams. |
+| `handoff` | Preserve and explicitly claim continuity without creating sessions. |
+| `pending` | Keep unresolved candidates outside orientation until promotion. |
+| `doctor`, `export` | Inspect integrity, produce conversion/recovery preflight evidence, or export exact private recovery evidence. |
+| `skills`, `agents` | Verify skill copies or inspect/print agent templates read-only. |
+| `init` | Explicitly create, migrate, or promote a recovered store. |
+| `setup` | Plan or explicitly install native skills, preserving replaced content and recovering interrupted installs. |
 
-Run `lodestar --help` or `lodestar <command> --help`. JSON is the default;
-`--human` formats help and responses for reading.
+Ordinary `get`, `find`, and linked-peer reads compare local source evidence without
+rewriting the saved observation. Inspect claims marked `needs_reinspection` before
+depending on them. Invalid required dependencies identify incomplete context.
 
-## The JSON contract
+JSON help and native `lodestar_describe` include complete operation input schemas.
+Run `lodestar --help` or `lodestar <command> --help` for the declarations used by
+the CLI and native adapter. JSON is the default. Success goes to stdout and failure
+to stderr using the same contract-5 envelope.
 
-Every command returns the same envelope on stdout, and every failure returns the
-same shape on stderr:
+## Native integration
 
-```json
-{
-  "v": 1,
-  "ok": true,
-  "operation": "start",
-  "revision": 1336,
-  "scope": { "project": "project:git:…", "cwd": "…", "session": null, "actor": null },
-  "data": {},
-  "more": false,
-  "next": []
-}
+The optional [Codex plugin bundle](codex-plugin/.codex-plugin/plugin.json) provides the automatic
+Lodestar skill and three MCP tools:
+
+- `lodestar_describe` returns the maintained operating guide and installed command
+  and mutation declarations.
+- `lodestar_read` invokes a declared read through the installed one-shot package.
+- `lodestar_mutate` accepts the same short request and operation-specific input
+  schema used by the CLI.
+
+The adapter does not maintain hooks, a session cache, a receipt store, or its own
+authority rules. It passes actor identity only when an actual host invocation can
+supply it; ordinary MCP transport cannot manufacture an authenticated user or
+session. Windows and WSL callers still cross the Windows-owned one-shot shim and
+never open SQLite from WSL.
+
+## Skills and package integrity
+
+The package retains seven complete skills: `director-protocol`, `codeplan`,
+`center-multigeometry`, `center-audit`, `ladder-audit`, `lodestar`, and `adderall`.
+[`managed-assets/manifest.json`](managed-assets/manifest.json) names each maintained
+source, entrypoint, distribution owner, source identity, and every payload file's raw
+byte length and SHA-256. It is tied directly to contract 5; there is no second
+manifest protocol. Private Golden Rules content is not bundled.
+
+`lodestar skills verify` is read-only. `lodestar setup` plans native installation;
+`--apply` performs it. Both share the package manifest and host discovery resolver.
+Verification checks known user skill roots, deduplicates physical aliases, and
+reports divergent copies. Exact mirrored copies are identified without treating
+them as content conflicts. Custom project/plugin roots, permissions, and actual
+model selection require native host checks; file verification does not certify them.
+
+## Storage and recovery
+
+Current runtime supports schema 5 only. Ordinary reads and writes refuse absent or
+older stores without creating or converting them. The lifecycle owner can preflight,
+back up, and explicitly convert the inspected schema-4 store. After current-contract
+writes, recovery proceeds forward. Promoting a fully accounted recovered schema-5
+image retains its database instance ID and allocates a new epoch so every old basis
+fails before replay or mutation.
+
+For an existing schema-4 store, pause every writer and use a distinct backup path:
+
+```powershell
+$db = "$env:LOCALAPPDATA\Lodestar\lodestar.db"
+$backup = ".\lodestar-schema4.backup.db"
+lodestar doctor --migration-preflight --db $db | Set-Content .\preflight.json -Encoding utf8NoBOM
+node -e "const {DatabaseSync,backup}=require('node:sqlite');const source=new DatabaseSync(process.argv[1],{readOnly:true});backup(source,process.argv[2]).finally(()=>source.close())" $db $backup
+if ($LASTEXITCODE -ne 0) { throw "SQLite backup failed; do not migrate." }
+lodestar doctor --migration-preflight --db $backup | Set-Content .\backup-preflight.json -Encoding utf8NoBOM
+node -e "const f=require('fs'),c=require('crypto'),p=JSON.parse(f.readFileSync('preflight.json')).data,b=JSON.parse(f.readFileSync('backup-preflight.json')).data;f.writeFileSync('migration-request.json',JSON.stringify({v:5,request_id:c.randomUUID(),preflight:p,backup:{path:b.source.path,logical_digest:b.logical_digest,schema_fingerprint:b.schema_fingerprint}},null,2))"
+lodestar init --migrate --db $db --file .\migration-request.json
+lodestar doctor --db $db
 ```
 
-`more` says an explicit caller limit or optional startup target omitted additional
-results. `next` carries the exact commands that recover what was omitted. Errors carry a stable `code`, `identifiers`, and an `action`.
+The SQLite backup API includes committed WAL state; copying only the main database
+file is insufficient while a WAL file exists. Migration rechecks the locked source against `preflight` and requires the
+restore-inspected backup digest to match. Keep the backup and request until the
+converted database and required reads have been verified.
 
-### Which commands write
+A `content_owner` source using `local_file` or `package_manifest` must still match
+its exact locator, byte count, and SHA-256 immediately before write admission. If it
+changed, inspect it again and prepare a new logical request. A locator based on
+`source_root` also names `source_id`; its `config:lodestar:sources` record revision is
+a required mutation precondition, so changing the root configuration invalidates the
+old basis.
 
-`get`, `find`, `links`, `export`, `doctor`, `work status`, `work history`,
-`handoff status`, `decision show`, and `skills verify` do not write. Help and
-version do not open the database.
-
-`start` is write-capable on purpose: it initializes an absent registry and
-atomically claims a pending handoff. With an existing current-schema registry and
-no claimable handoff, its database bytes do not change.
-
-## Windows and WSL
-
-One registry, owned by Windows, reached from WSL through a one-shot shim that
-invokes the Windows runtime. WSL never opens the SQLite file with a second
-engine. `--cwd`, `--db`, and `--file` accept Windows, MSYS, Cygwin,
-WSL, and UNC forms and resolve to the same project identity.
-
-## Storage and migration
-
-One SQLite database with one schema and one migration path. Schema upgrades take
-a backup first and refuse to proceed when state would be lost. `lodestar doctor`
-reports schema version, integrity, foreign keys, decision and continuity health,
-and record counts without writing.
-
-## Requirements
-
-Node.js 24.15.0 or newer. Below that, Node's SQLite is experimental and writes a
-warning to stderr that corrupts the error envelope.
+See [schema](docs/schema.md), [limitations](docs/limitations.md), and the
+[2.0.0 release notes](docs/releases/v2.0.0.md).
 
 ## Development
 
+Requires Node.js 24.15.0 or newer and no third-party runtime dependencies.
+
 ```text
-npm test                 # asset parity check plus the full suite
-npm run pack:check       # inspect the exact published file list
+npm test
+npm run pack:check
+npm run assets:build -- --source-root <Golden-Rules-root>
 ```
 
-The optional Codex integration ships in the package under `codex-plugin/`.
+`assets:build` requires the explicit Golden source root before it updates the five
+Golden-owned generated package copies. `assets:check` verifies the packaged raw-byte
+manifest without needing a machine-specific source path; add the same `--source-root`
+argument when source-to-package verification is required.
 
 ## License
 

@@ -3,12 +3,14 @@ import { Buffer } from "node:buffer";
 import { lodestarError } from "./errors.mjs";
 import { canonicalStringify } from "./json.mjs";
 import {
+  normalizeRecord,
   parseStoredContent,
   parseStoredMetadata,
-  RECORD_BATCH,
+  recordsByRows,
   resolveRecordId,
 } from "./records.mjs";
 import { SCHEMA_VERSION } from "./schema.mjs";
+import { readMetadata } from "./database.mjs";
 import {
   FRESHNESS_STATES,
   validateIdentifier,
@@ -52,55 +54,23 @@ function parsedContent(row) {
   }
 }
 
-// Batched summary: one aliases query for every row and one content parse per
-// row. The previous per-record lookup re-parsed content_json twice and queried
-// aliases once per record, so find and links were N+1.
-function summarizeRow(row, aliases) {
-  const stored = parsedContent(row);
-  const { _lodestar, ...content } = stored;
-  let priority, revision;
-  try {
-    priority = Number(_lodestar?.priority ?? 0);
-    revision = Number(_lodestar?.revision ?? 0);
-  } catch (error) {
-    invalidStoredRow("record", { id: row.id ?? null }, error);
-  }
-  try {
-    for (const alias of aliases) validateIdentifier(alias, "alias");
-  } catch (error) {
-    invalidStoredRow("alias", { record_id: row.id }, error);
-  }
-  return {
-    id: row.id,
-    type: row.type,
-    name: row.name,
-    scope: row.scope,
-    state: content.state,
-    priority,
-    revision,
-    aliases,
-    updated_at: row.updated_at,
-  };
-}
-
-function summariesForRows(db, rows) {
-  const summaries = new Array(rows.length);
-  if (rows.length === 0) return summaries;
-  const ids = rows.map(({ id }) => id);
-  const aliases = new Map();
-  for (let offset = 0; offset < ids.length; offset += RECORD_BATCH) {
-    const batch = ids.slice(offset, offset + RECORD_BATCH);
-    const join = batch.map(() => "?").join(",");
-    for (const { record_id, alias } of db.prepare(
-      `SELECT record_id, alias FROM aliases WHERE record_id IN (${join}) ORDER BY alias`,
-    ).all(...batch)) {
-      (aliases.get(record_id) ?? aliases.set(record_id, []).get(record_id)).push(alias);
+// Assemble the already-selected rows into normalized records exactly once.
+// The previous path built throwaway summaries here and then re-fetched and
+// re-parsed the same rows in the caller, so find and links parsed every
+// selected record twice.
+export function normalizedForRows(db, rows) {
+  try { return { records: recordsByRows(db, rows).map(normalizeRecord), record_errors: [] }; }
+  catch (error) { if (!["record_requires_source_correction", "unsupported_numeric_value"].includes(error.code)) throw error; }
+  const records = [], record_errors = [];
+  for (const row of rows) {
+    try { records.push(normalizeRecord(recordsByRows(db, [row])[0])); }
+    catch (error) {
+      if (!["record_requires_source_correction", "unsupported_numeric_value"].includes(error.code)) throw error;
+      record_errors.push({ code: error.code, message: error.message,
+        identifiers: { ...error.identifiers, id: row.id }, action: error.action });
     }
   }
-  for (let index = 0; index < rows.length; index += 1) {
-    summaries[index] = summarizeRow(rows[index], aliases.get(rows[index].id) ?? []);
-  }
-  return summaries;
+  return { records, record_errors };
 }
 
 export function findRecords(
@@ -111,6 +81,7 @@ export function findRecords(
     type,
     limit,
     offset = 0,
+    history = false,
   } = {},
 ) {
   const query = validateQuery(queryValue);
@@ -121,6 +92,9 @@ export function findRecords(
       "Find offset requires an explicit --limit page size.",
       { action: "Retry with --limit set, or drop --offset for an unbounded search." });
   }
+  // The alias predicate comes from the single-pass alias_info CTE (defined in
+  // the main query below) instead of a per-row EXISTS: the aliases table is
+  // scanned once, not once per scanned record.
   const clauses = [String.raw`
     (
       instr(lower(r.id), lower($query)) > 0
@@ -128,11 +102,7 @@ export function findRecords(
       OR instr(lower(r.name), lower($query)) > 0
       OR instr(lower(r.scope), lower($query)) > 0
       OR instr(lower(r.content_json), lower($query)) > 0
-      OR EXISTS (
-        SELECT 1 FROM aliases a
-        WHERE a.record_id = r.id
-          AND instr(lower(a.alias), lower($query)) > 0
-      )
+      OR ai.record_id IS NOT NULL
     )
   `];
   const parameters = {
@@ -147,14 +117,25 @@ export function findRecords(
     validateType(type);
     clauses.push("r.type = $type");
     parameters.$type = type;
-  } else {
-    // Reserved internal cache: `start` persists the projection as a
-    // startup-snapshot record. Users cannot create or delete that type, and
-    // searching it returns a copy of other records' content, so default find
-    // omits it unless the caller explicitly asks for the kind.
-    clauses.push("r.type != 'startup-snapshot'");
+  } else if (!history) {
+    // Internal histories duplicate current facts; explicit history reads can
+    // retrieve them while ordinary discovery stays useful.
+    clauses.push("r.type NOT IN ('startup-snapshot','mutation-receipt','migration-source','work-event','handoff-packet')");
   }
+  if (!history) clauses.push("COALESCE(json_extract(r.content_json,'$._lodestar.semantics.lifecycle'),'current') NOT IN ('historical','superseded')");
+  // One pass over aliases computes exact/prefix flags per record; the record
+  // scan LEFT JOINs that result. Rank semantics are unchanged: exact id or
+  // alias = 0, exact name = 1, prefix id/name/alias = 2, substring = 3.
   const rows = db.prepare(String.raw`
+    WITH alias_info AS (
+      SELECT
+        record_id,
+        MAX(CASE WHEN alias = $query THEN 1 ELSE 0 END) AS exact,
+        MAX(CASE WHEN instr(lower(alias), lower($query)) = 1 THEN 1 ELSE 0 END) AS prefix
+      FROM aliases
+      WHERE instr(lower(alias), lower($query)) > 0
+      GROUP BY record_id
+    )
     SELECT
       r.id,
       r.type,
@@ -164,25 +145,16 @@ export function findRecords(
       r.created_at,
       r.updated_at,
       CASE
-        WHEN r.id = $query
-          OR EXISTS (
-            SELECT 1 FROM aliases exact_alias
-            WHERE exact_alias.record_id = r.id
-              AND exact_alias.alias = $query
-          )
-          THEN 0
+        WHEN r.id = $query OR ai.exact = 1 THEN 0
         WHEN lower(r.name) = lower($query) THEN 1
         WHEN instr(lower(r.id), lower($query)) = 1
           OR instr(lower(r.name), lower($query)) = 1
-          OR EXISTS (
-            SELECT 1 FROM aliases prefix_alias
-            WHERE prefix_alias.record_id = r.id
-              AND instr(lower(prefix_alias.alias), lower($query)) = 1
-          )
+          OR ai.prefix = 1
           THEN 2
         ELSE 3
       END AS rank
     FROM records r
+    LEFT JOIN alias_info ai ON ai.record_id = r.id
     WHERE ${clauses.join(" AND ")}
     ORDER BY rank, r.id COLLATE BINARY
     ${selectedLimit === null ? "" : "LIMIT $limit + 1 OFFSET $offset"}
@@ -192,7 +164,7 @@ export function findRecords(
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
   return { query, scope: scope ?? null, type: type ?? null, limit: selectedLimit,
-    offset: selectedOffset, truncated, records: summariesForRows(db, selected) };
+    offset: selectedOffset, truncated, ...normalizedForRows(db, selected) };
 }
 
 export function linkedRecords(
@@ -200,10 +172,15 @@ export function linkedRecords(
   identifier,
   {
     limit,
+    offset = 0,
   } = {},
 ) {
   const id = resolveRecordId(db, identifier);
   const selectedLimit = limit === undefined ? null : validateLimit(limit, {});
+  const selectedOffset = offset === undefined ? 0 : validateOffset(offset, {});
+  if (selectedLimit === null && selectedOffset !== 0) throw lodestarError("invalid_input",
+    "Links offset requires an explicit --limit page size.",
+    { action: "Retry with --limit set, or drop --offset for an unbounded read." });
   const rows = db.prepare(String.raw`
     SELECT
       0 AS direction_rank,
@@ -241,15 +218,19 @@ export function linkedRecords(
     JOIN records peer ON peer.id = l.from_id
     WHERE l.to_id = $id
     ORDER BY direction_rank, relationship, from_id, to_id
-    ${selectedLimit === null ? "" : "LIMIT $limit + 1"}
-  `).all(selectedLimit === null ? { $id: id } : { $id: id, $limit: selectedLimit });
+    ${selectedLimit === null ? "" : "LIMIT $limit + 1 OFFSET $offset"}
+  `).all(selectedLimit === null ? { $id: id }
+    : { $id: id, $limit: selectedLimit, $offset: selectedOffset });
   const truncated = selectedLimit !== null && rows.length > selectedLimit;
   const selected = truncated ? rows.slice(0, selectedLimit) : rows;
-  const peers = summariesForRows(db, selected);
+  const normalized = normalizedForRows(db, selected);
+  const peers = new Map(normalized.records.map((record) => [record.id, record]));
   return {
     id,
     limit: selectedLimit,
+    offset: selectedOffset,
     truncated,
+    record_errors: normalized.record_errors,
     links: selected.map((row, index) => {
       try {
         validateIdentifier(row.from_id, "from_id");
@@ -268,105 +249,23 @@ export function linkedRecords(
         relationship: row.relationship,
         to_id: row.to_id,
         created_at: row.created_at,
-        peer: peers[index],
+        peer: peers.get(row.id) ?? null,
       };
     }),
   };
 }
 
 export function exportRegistry(db) {
-  const document = {
-    schema_version: SCHEMA_VERSION,
-    records: [],
-    aliases: [],
-    links: [],
-    sources: [],
-  };
-  const append = (section, item) => { document[section].push(item); };
-
-  for (const row of db.prepare(
-      "SELECT id, type, name, scope, content_json, created_at, updated_at "
-        + "FROM records ORDER BY id",
-    ).iterate()) {
-    const stored = parsedContent(row);
-    const { _lodestar: _ignored, ...content } = stored;
-    try {
-      validateTimestamp(row.created_at, "records.created_at");
-    } catch (error) {
-      invalidStoredRow("record", { id: row.id }, error);
-    }
-    append("records", {
-      id: row.id,
-      type: row.type,
-      name: row.name,
-      scope: row.scope,
-      content,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    });
+  // Export is exact evidence, including payloads that cannot be normalized safely.
+  // It is not a current-context projection and never strips reserved metadata.
+  const document = { v: SCHEMA_VERSION, schema_version: SCHEMA_VERSION,
+    metadata: Object.fromEntries(db.prepare("SELECT key,value FROM metadata ORDER BY key").all()
+      .map(({ key, value }) => [key, value])), private_state: true };
+  for (const [table, order] of [["records", "id"], ["aliases", "alias"],
+    ["links", "from_id,relationship,to_id"], ["sources", "record_id,origin"]]) {
+    document[table] = db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
   }
-  for (const { alias, record_id: recordId } of db.prepare(
-    "SELECT alias, record_id FROM aliases ORDER BY alias",
-  ).iterate()) {
-    try {
-      validateIdentifier(alias, "alias");
-      validateIdentifier(recordId, "record_id");
-    } catch (error) {
-      invalidStoredRow("alias", { alias }, error);
-    }
-    append("aliases", { alias, record_id: recordId });
-  }
-  for (const {
-    from_id: fromId,
-    relationship,
-    to_id: toId,
-    created_at: createdAt,
-  } of db.prepare(
-      "SELECT from_id, relationship, to_id, created_at FROM links "
-        + "ORDER BY from_id, relationship, to_id",
-    ).iterate()) {
-    try {
-      validateIdentifier(fromId, "from_id");
-      validateRelationship(relationship);
-      validateIdentifier(toId, "to_id");
-      validateTimestamp(createdAt, "links.created_at");
-    } catch (error) {
-      invalidStoredRow("link", { from_id: fromId, to_id: toId }, error);
-    }
-    append("links", {
-      from_id: fromId,
-      relationship,
-      to_id: toId,
-      created_at: createdAt,
-    });
-  }
-  for (const row of db.prepare(
-      "SELECT record_id, origin, freshness, metadata_json FROM sources "
-        + "ORDER BY record_id, origin",
-    ).iterate()) {
-    let metadata;
-    try {
-      validateIdentifier(row.record_id, "record_id");
-      validateOrigin(row.origin);
-      if (!FRESHNESS_STATES.includes(row.freshness)) throw new Error();
-      metadata = parseStoredMetadata(row.metadata_json, {
-        id: row.record_id,
-        origin: row.origin,
-      });
-    } catch (error) {
-      if (error?.code === "database_integrity") throw error;
-      invalidStoredRow("source", {
-        record_id: row.record_id,
-        origin: row.origin,
-      }, error);
-    }
-    append("sources", {
-      record_id: row.record_id,
-      origin: row.origin,
-      freshness: row.freshness,
-      metadata,
-    });
-  }
-  const bytes = Buffer.byteLength(canonicalStringify(document), "utf8");
-  return { document, bytes };
+  document.schema = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema "
+    + "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
+  return { document, bytes: Buffer.byteLength(canonicalStringify(document), "utf8") };
 }

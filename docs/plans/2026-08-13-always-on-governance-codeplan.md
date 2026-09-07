@@ -1,5 +1,7 @@
 [codeplan · always-on-governance · IN · mode: full · confidence: high · candidates: V1 persisted seed external-store, V2 generated projection rename-compensation, V3 client hook runtime-injection, V4 duplicated policy file-rewrite · lean: V2 · baseline: V4]
 
+> **Historical plan.** This file preserves a retired pre-2.1 design and is not current operating guidance. See the [current documentation](../README.md).
+
 ## Calibration
 
 Lodestar is a zero-dependency, one-shot Node CLI with a generated managed-assets

@@ -1,5 +1,8 @@
 // Benchmark probe: time start/find/links/get on a synthetic DB.
 // Usage: node scripts/bench.mjs [recordCount]
+// Note: find and links measure the full CLI envelope shape (normalized records,
+// single pass). Earlier runs measured a lighter summary-only intermediate that
+// the CLI then re-fetched, which understated the real find cost.
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";

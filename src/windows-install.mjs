@@ -1,9 +1,16 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { COMMANDS, PATH_OPTIONS } from "./cli-commands.mjs";
 
 const execFileAsync = promisify(execFile);
+const PACKAGE_ENTRY = fileURLToPath(new URL("../lodestar.mjs", import.meta.url));
+const pathOptionPattern = PATH_OPTIONS.join("|");
+const valueOptions = [...new Set(Object.values(COMMANDS).flatMap(({ values }) => values))].join("|");
+const bashLiteral = (value) => `'${String(value).replaceAll("'", `'"'"'`)}'`;
 
 export async function pathExists(candidate) {
   try { await stat(candidate); return true; }
@@ -27,7 +34,7 @@ export async function resolveClientStateHome(home) {
   return resolved;
 }
 
-export function renderWindowsPosixShim() {
+export function renderWindowsPosixShim({ node = process.execPath, entry = PACKAGE_ENTRY } = {}) {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -36,39 +43,60 @@ if ! command -v cygpath >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -z "\${LODESTAR_HOME:-}" ]; then
-  for directory in "$HOME"/.local/opt/node-*/node_modules/lodestar-agent-context; do
-    if [ -f "$directory/lodestar.mjs" ]; then
-      LODESTAR_HOME="$directory"
-      break
-    fi
-  done
-fi
-
-if [ -z "\${LODESTAR_HOME:-}" ] || [ ! -f "$LODESTAR_HOME/lodestar.mjs" ]; then
-  echo "LODESTAR ERROR: lodestar.mjs not found. Set LODESTAR_HOME or reinstall Lodestar." >&2
+NODE_BIN_WIN=${bashLiteral(node)}
+LODESTAR_ENTRY_WIN=${bashLiteral(entry)}
+NODE_BIN="$(cygpath -u "$NODE_BIN_WIN")"
+LODESTAR_ENTRY="$(cygpath -u "$LODESTAR_ENTRY_WIN")"
+if [ ! -x "$NODE_BIN" ] || [ ! -f "$LODESTAR_ENTRY" ]; then
+  echo "LODESTAR ERROR: selected Windows Lodestar installation is unavailable; reinstall its launcher." >&2
   exit 1
 fi
-
-NODE_BIN=""
-for executable in "$HOME"/.local/opt/node-*/node.exe; do
-  if [ -x "$executable" ]; then
-    NODE_BIN="$executable"
-    break
-  fi
+arguments=("$@")
+command_name=""
+saw_home=false
+saw_launcher=false
+option_end=\${#arguments[@]}
+windows_path() {
+  # Automatic MSYS conversion is deliberately disabled below so payload arguments
+  # never change. Convert only declared path values before crossing to Windows Node.
+  case "$1" in
+    [a-zA-Z]:[\\/]*|\\\\*) printf '%s' "$1" ;;
+    *) cygpath -aw "$1" ;;
+  esac
+}
+for ((index=0; index<\${#arguments[@]}; index++)); do
+  option="\${arguments[$index]}"
+  case "$option" in
+    --) option_end=$index; break ;;
+    ${pathOptionPattern})
+      if ((index + 1 >= \${#arguments[@]})) || [[ "\${arguments[$((index + 1))]}" = --* ]]; then
+        echo "LODESTAR ERROR: $option requires a path" >&2
+        exit 1
+      fi
+      arguments[$((index + 1))]="$(windows_path "\${arguments[$((index + 1))]}")"
+      case "$option" in
+        --home) saw_home=true ;;
+        --wsl-shim|--posix-shim) saw_launcher=true ;;
+      esac
+      ((index += 1)) ;;
+    ${valueOptions}) ((index += 1)) ;;
+    -*) ;;
+    *) [ -n "$command_name" ] || command_name="$option" ;;
+  esac
 done
-if [ -z "$NODE_BIN" ]; then
-  echo "LODESTAR ERROR: pinned Windows node.exe not found" >&2
-  exit 1
-fi
-
-NODE_BIN_WIN="$(cygpath -aw "$NODE_BIN")"
-LODESTAR_ENTRY_WIN="$(cygpath -aw "$LODESTAR_HOME/lodestar.mjs")"
-MSYS2_ARG_CONV_EXCL='*' exec "$NODE_BIN_WIN" "$LODESTAR_ENTRY_WIN" "$@"
+case "$command_name" in
+  start|setup)
+    if [ "$saw_home" = false ] && [ "$saw_launcher" = false ] && [ -f "$0" ]; then
+      arguments=("\${arguments[@]:0:$option_end}" --posix-shim "$(windows_path "$0")" "\${arguments[@]:$option_end}")
+    fi ;;
+esac
+MSYS2_ARG_CONV_EXCL='*' exec "$NODE_BIN_WIN" "$LODESTAR_ENTRY_WIN" "\${arguments[@]}"
 `;
 }
 
-export function renderWslShim() {
+export function renderWslShim({ node = process.execPath, entry = PACKAGE_ENTRY } = {}) {
+  const cwdCommands = Object.entries(COMMANDS).filter(([, command]) => command.values.includes("--cwd"))
+    .map(([name]) => name).join("|");
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -77,70 +105,165 @@ if [ ! -x /init ] || ! command -v cmd.exe >/dev/null 2>&1 || ! command -v wslpat
   exit 1
 fi
 
-WINDOWS_PROFILE_WIN="$(/init "$(command -v cmd.exe)" -- /d /c echo %USERPROFILE% 2>/dev/null | tr -d '\r')"
-WINDOWS_PROFILE="$(wslpath -u "$WINDOWS_PROFILE_WIN")"
-LODESTAR_HOME=""
-NODE_BIN=""
-for directory in "$WINDOWS_PROFILE"/.local/opt/node-*/node_modules/lodestar-agent-context; do
-  if [ -f "$directory/lodestar.mjs" ]; then
-    LODESTAR_HOME="$directory"
-    break
-  fi
-done
-for executable in "$WINDOWS_PROFILE"/.local/opt/node-*/node.exe; do
-  if [ -f "$executable" ]; then
-    NODE_BIN="$executable"
-    break
-  fi
-done
-if [ -z "$LODESTAR_HOME" ] || [ -z "$NODE_BIN" ]; then
-  echo "LODESTAR ERROR: installed Windows Lodestar runtime not found" >&2
+NODE_BIN=${bashLiteral(node)}
+LODESTAR_ENTRY_WIN=${bashLiteral(entry)}
+if [ ! -f "$(wslpath -u "$NODE_BIN")" ] || [ ! -f "$(wslpath -u "$LODESTAR_ENTRY_WIN")" ]; then
+  echo "LODESTAR ERROR: selected Windows Lodestar installation is unavailable; reinstall its launcher." >&2
   exit 1
 fi
-
-LODESTAR_ENTRY_WIN="$(wslpath -w "$LODESTAR_HOME/lodestar.mjs")"
 arguments=("$@")
-if [ "\${1:-}" = "skills" ] || [ "\${1:-}" = "agents" ]; then
-  command_name="\${1:-}"
-  saw_home=false
-  saw_hermes_home=false
-  for ((index=0; index<\${#arguments[@]}; index++)); do
-    case "\${arguments[$index]}" in
-      --cwd|--home|--hermes-home|--opencode-root)
-        if ((index + 1 >= \${#arguments[@]})); then
-          echo "LODESTAR ERROR: \${arguments[$index]} requires a path" >&2
-          exit 1
-        fi
-        if [[ "\${arguments[$((index + 1))]}" = /* ]]; then
-          arguments[$((index + 1))]="$(wslpath -w "\${arguments[$((index + 1))]}")"
-        fi
-        [ "\${arguments[$index]}" = "--home" ] && saw_home=true
-        [ "\${arguments[$index]}" = "--hermes-home" ] && saw_hermes_home=true
-        ((index += 1))
-        ;;
-    esac
-  done
-  if [ "$command_name" = "skills" ]; then
-    [ "$saw_home" = true ] || arguments+=(--home "$(wslpath -w "$HOME")")
-    [ "$saw_hermes_home" = true ] || arguments+=(--hermes-home "$(wslpath -w "$HOME/.hermes")")
-  fi
+command_name=""
+saw_cwd=false
+saw_home=false
+saw_hermes_home=false
+saw_codex_home=false
+saw_claude_home=false
+saw_opencode_root=false
+saw_xdg_config_home=false
+saw_database=false
+saw_launcher=false
+option_end=\${#arguments[@]}
+windows_path() {
+  # Keep already-qualified Windows paths; resolve every Linux path, including
+  # relative and not-yet-created files, against the actual WSL working directory.
+  case "$1" in
+    [a-zA-Z]:[\\\\/]*|\\\\\\\\*) printf '%s' "$1" ;;
+    /*) wslpath -w "$1" ;;
+    *) wslpath -w "$PWD/$1" ;;
+  esac
+}
+check_database_path() {
+  case "\${1,,}" in
+    \\\\\\\\wsl.localhost\\\\*|\\\\\\\\wsl\$\\\\*|//wsl.localhost/*|//wsl\$/*)
+      echo "LODESTAR ERROR: SQLite must remain on a Windows filesystem; use a Windows drive or /mnt/<drive> path." >&2
+      exit 1 ;;
+  esac
+}
+for ((index=0; index<\${#arguments[@]}; index++)); do
+  option="\${arguments[$index]}"
+  case "$option" in
+    --) option_end=$index; break ;;
+    ${pathOptionPattern})
+      if ((index + 1 >= \${#arguments[@]})) || [[ "\${arguments[$((index + 1))]}" = --* ]]; then
+        echo "LODESTAR ERROR: $option requires a path" >&2
+        exit 1
+      fi
+      arguments[$((index + 1))]="$(windows_path "\${arguments[$((index + 1))]}")"
+      case "$option" in
+        --db) check_database_path "\${arguments[$((index + 1))]}"; saw_database=true ;;
+        --source) check_database_path "\${arguments[$((index + 1))]}" ;;
+        --wsl-shim|--posix-shim) saw_launcher=true ;;
+        --cwd) saw_cwd=true ;;
+        --home) saw_home=true; selected_home="\${arguments[$((index + 1))]}" ;;
+        --hermes-home) saw_hermes_home=true ;;
+        --codex-home) saw_codex_home=true ;;
+        --claude-home) saw_claude_home=true ;;
+        --opencode-root) saw_opencode_root=true ;;
+        --xdg-config-home) saw_xdg_config_home=true ;;
+      esac
+      ((index += 1)) ;;
+    ${valueOptions}) ((index += 1)) ;;
+    -*) ;;
+    *) [ -n "$command_name" ] || command_name="$option" ;;
+  esac
+done
+defaults=()
+case "$command_name" in
+  start|setup)
+    if [ "$saw_home" = false ] && [ "$saw_launcher" = false ] && [ -f "$0" ]; then
+      defaults+=(--wsl-shim "$(windows_path "$0")")
+    fi ;;
+esac
+case "$command_name" in
+  ${cwdCommands}) [ "$saw_cwd" = true ] || defaults+=(--cwd "$(windows_path "$PWD")") ;;
+esac
+case "$command_name" in
+  start|skills|setup)
+    [ "$saw_home" = true ] || defaults+=(--home "$(windows_path "$HOME")")
+    if [ "$saw_hermes_home" = false ]; then
+      if [ "$saw_home" = true ]; then
+        defaults+=(--hermes-home "$selected_home\\\\.hermes")
+      else
+        defaults+=(--hermes-home "$(windows_path "\${HERMES_HOME:-$HOME/.hermes}")")
+      fi
+    fi
+    # An explicit home selects an isolated host layout. Only explicit per-host
+    # options may override it; the caller's custom homes belong to another layout.
+    if [ "$saw_home" = false ] && [ "$saw_codex_home" = false ] && [ -n "\${CODEX_HOME:-}" ]; then
+      defaults+=(--codex-home "$(windows_path "$CODEX_HOME")")
+    fi
+    if [ "$saw_home" = false ] && [ "$saw_claude_home" = false ] && [ -n "\${CLAUDE_CONFIG_DIR:-}" ]; then
+      defaults+=(--claude-home "$(windows_path "$CLAUDE_CONFIG_DIR")")
+    fi
+    if [ "$saw_home" = false ] && [ "$saw_xdg_config_home" = false ] && [ -n "\${XDG_CONFIG_HOME:-}" ]; then
+      defaults+=(--xdg-config-home "$(windows_path "$XDG_CONFIG_HOME")")
+    fi
+    if [ "$saw_home" = false ] && [ "$saw_opencode_root" = false ] && [ -n "\${OPENCODE_CONFIG_DIR:-}" ]; then
+      defaults+=(--opencode-root "$(windows_path "$OPENCODE_CONFIG_DIR/skills")")
+    fi ;;
+esac
+# Put synthesized options before -- so positional data stays byte-for-byte intact.
+arguments=("\${arguments[@]:0:$option_end}" "\${defaults[@]}" "\${arguments[@]:$option_end}")
+if [ "$saw_database" = false ] && [ -n "\${LODESTAR_DB:-}" ]; then
+  LODESTAR_DB="$(windows_path "$LODESTAR_DB")"
+  check_database_path "$LODESTAR_DB"
+  export LODESTAR_DB
+  export WSLENV="\${WSLENV:+$WSLENV:}LODESTAR_DB/w"
 fi
-exec /init "$NODE_BIN" -- "$LODESTAR_ENTRY_WIN" "\${arguments[@]}"
+exec /init "$(wslpath -u "$NODE_BIN")" -- "$LODESTAR_ENTRY_WIN" "\${arguments[@]}"
 `;
 }
 
-async function installFileAtomically(target, text, mode) {
-  const directory = path.dirname(target);
-  const temporary = `${target}.${process.pid}.tmp`;
-  await mkdir(directory, { recursive: true });
-  await writeFile(temporary, text, {
-    encoding: "utf8",
-    flag: "wx",
-    mode,
+const installations = new Map();
+async function installFileAtomically(target, text, mode, { expectedContent } = {}) {
+  const key = path.resolve(target);
+  const previous = installations.get(key) ?? Promise.resolve();
+  const operation = previous.catch(() => {}).then(async () => {
+    const directory = path.dirname(target);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await mkdir(directory, { recursive: true });
+    const existing = await readFile(target).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (existing?.equals(Buffer.from(text))) { await chmod(target, mode); return target; }
+    if (existing !== null && (expectedContent === undefined || !existing.equals(Buffer.from(expectedContent)))) {
+      throw Object.assign(new Error("Launcher differs from the accepted installation baseline; preserve and review it before replacement."),
+        { code: "launcher_conflict", path: target });
+    }
+    try {
+      await writeFile(temporary, text, { encoding: "utf8", flag: "wx", mode });
+      await chmod(temporary, mode);
+      await ensureWslExecutable(temporary);
+      const stagedHandle = await open(temporary, "r+");
+      try { await stagedHandle.sync(); } finally { await stagedHandle.close(); }
+      // The distribution owner supplies the exact inspected bytes. Keep a recovery
+      // copy before publishing a replacement; an upgrade never discards local bytes.
+      if (existing !== null) {
+        const backup = `${target}.${randomUUID()}.bak`;
+        await writeFile(backup, existing, { flag: "wx", mode });
+        const backupHandle = await open(backup, "r+");
+        try { await backupHandle.sync(); } finally { await backupHandle.close(); }
+        if (!(await readFile(backup)).equals(existing)) {
+          throw Object.assign(new Error("The launcher recovery copy does not match the accepted bytes; the launcher was not replaced."),
+            { code: "launcher_backup_failed", path: target, backup });
+        }
+      }
+      const current = await readFile(target).catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (existing === null ? current !== null : !current?.equals(existing)) {
+        throw Object.assign(new Error("The launcher changed while its replacement was being staged; the newer state was preserved."),
+          { code: "launcher_conflict", path: target });
+      }
+      await rename(temporary, target);
+    } finally { await rm(temporary, { force: true }); }
+    return target;
   });
-  await rename(temporary, target);
-  await chmod(target, mode);
-  return target;
+  installations.set(key, operation);
+  try { return await operation; }
+  finally { if (installations.get(key) === operation) installations.delete(key); }
 }
 
 export function parseWslUncTarget(target) {
@@ -155,7 +278,7 @@ export function parseWslUncTarget(target) {
 async function ensureWslExecutable(target) {
   const wslTarget = parseWslUncTarget(target);
   if (!wslTarget) return;
-  const common = ["-d", wslTarget.distribution, "--"];
+  const common = ["-d", wslTarget.distribution, "--exec"];
   await execFileAsync("wsl.exe", [...common, "chmod", "755", wslTarget.linuxPath], {
     windowsHide: true,
   });
@@ -164,12 +287,12 @@ async function ensureWslExecutable(target) {
   });
 }
 
-export async function installWindowsPosixShim(target) {
-  return await installFileAtomically(target, renderWindowsPosixShim(), 0o755);
+export async function installWindowsPosixShim(target, options = {}) {
+  return await installFileAtomically(target, renderWindowsPosixShim(options), 0o755, options);
 }
 
-export async function installWslShim(target) {
-  const installed = await installFileAtomically(target, renderWslShim(), 0o755);
+export async function installWslShim(target, options = {}) {
+  const installed = await installFileAtomically(target, renderWslShim(options), 0o755, options);
   await ensureWslExecutable(installed);
   return installed;
 }

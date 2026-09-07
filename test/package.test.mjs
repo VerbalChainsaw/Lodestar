@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -61,12 +62,22 @@ test("the package publishes one executable and the canonical managed assets", as
   for (const required of [
     "lodestar.mjs", "src/bootstrap.mjs", "src/skills.mjs",
     "managed-assets/manifest.json", "managed-assets/bootstrap.json",
-    "managed-assets/governance.json",
   ]) assert.ok(files.has(required), `missing packaged canonical file: ${required}`);
   const manifest = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "manifest.json"), "utf8"));
-  for (const skill of manifest.skills)
-    assert.ok(files.has(`managed-assets/skills/${skill}/SKILL.md`), `missing canonical skill: ${skill}`);
+  assert.equal(manifest.contract, 5);
+  assert.equal(manifest.skills.length, 7);
+  for (const skill of manifest.skills) {
+    assert.ok(files.has(`managed-assets/${skill.source_entrypoint}`), `missing maintained skill: ${skill.name}`);
+    for (const payload of skill.files) {
+      assert.ok(files.has(`managed-assets/${skill.payload_root}/${payload.path}`),
+        `missing manifested payload: ${skill.name}/${payload.path}`);
+    }
+  }
+  assert.ok(!files.has("managed-assets/governance.json"));
+  assert.ok(!files.has("docs/GOLDEN-RULES.md"));
   assert.ok(!files.has("src/skills-payload.json"), "retired semantic payload must not ship");
+  assert.ok(!files.has("src/continuity-schema.mjs"), "retired hook/session schema must not ship");
+  assert.ok(!files.has("src/markers.mjs"), "retired transcript marker parser must not ship");
   assert.equal(
     artifact.files.find(({ path: file }) => file === "lodestar.mjs").mode,
     0o755,
@@ -170,44 +181,38 @@ test("package metadata and bootstrap have one source of truth", async () => {
   assert.deepEqual(documented, AGENT_BOOTSTRAP);
 });
 
-test("canonical managed assets are runtime authority without a semantic compiler", async () => {
+test("the contract-5 manifest verifies raw bytes and complete skill membership", async () => {
   const checked = spawnSync(process.execPath,
     [path.join(ROOT, "scripts", "build-managed-assets.mjs"), "--check"],
     { cwd: ROOT, encoding: "utf8" });
   assert.equal(checked.status, 0, checked.stderr || checked.error?.stack);
   const bootstrap = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "bootstrap.json"), "utf8"));
-  const governance = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "governance.json"), "utf8"));
   assert.deepEqual(AGENT_BOOTSTRAP, bootstrap);
-  assert.equal(governance.id, "g:lodestar:required-governance");
-  assert.equal(governance.data.required, true);
-  assert.equal(typeof governance.data.text, "string");
-  for (const sentinel of [
-    "## Anti-Certainty Psychosis",
-    "## Work Modes",
-    "## Repository Conduct",
-    "## Debugging Method",
-    "## Verification Standard",
-    "## Testing Philosophy",
-    "## Architecture and Refactoring",
-    "## Completion and Stop Standard",
-    "Never stack governance on governance",
-    "Governance requires a critical need",
-    "Limits require provenance",
-    "Completeness is atomic",
-    "Attempts remain retryable",
-    "Transport adapts to the contract",
-    "Canonical content is not source material for a semantic compiler",
-    "Reality Anchoring and Surface Integrity",
-  ]) assert.ok(governance.data.text.includes(sentinel), `missing canonical behavior: ${sentinel}`);
+  const manifest = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "manifest.json"), "utf8"));
+  assert.equal(manifest.contract, 5);
+  assert.deepEqual(manifest.skills.map(({ name }) => name).sort(), [
+    "adderall", "center-audit", "center-multigeometry", "codeplan",
+    "director-protocol", "ladder-audit", "lodestar",
+  ]);
+  for (const skill of manifest.skills) {
+    assert.match(skill.source_id, /^(?:golden-rules|lodestar-repository):/u);
+    assert.equal(skill.distribution_owner, "npm:lodestar-agent-context");
+    assert.ok(skill.files.some(({ path: file }) => file === "SKILL.md"));
+    for (const file of skill.files) {
+      const bytes = await readFile(path.join(ROOT, "managed-assets", skill.payload_root, file.path));
+      assert.equal(bytes.length, file.bytes);
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), file.sha256);
+    }
+  }
   const runtimeBootstrap = await readFile(path.join(ROOT, "src", "bootstrap.mjs"), "utf8");
   const runtimeSkills = await readFile(path.join(ROOT, "src", "skills.mjs"), "utf8");
   assert.doesNotMatch(runtimeBootstrap, /skills-payload\.json/u);
   assert.doesNotMatch(runtimeSkills, /skills-payload\.json/u);
-  assert.match(runtimeBootstrap, /managed-assets\/\$\{name\}/u);
   assert.match(runtimeSkills, /\.\.\/managed-assets/u);
   const builder = await readFile(path.join(ROOT, "scripts", "build-managed-assets.mjs"), "utf8");
   assert.doesNotMatch(builder, /historical-source-transformations|entry\.action\s*=|skills-payload\.json/u);
-  assert.match(builder, /Human-readable view of the exact canonical rule body/u);
+  assert.match(builder, /writeFile\(destination, file\.content\)/u);
+  assert.doesNotMatch(builder, /replaceAll\(["']\\r\\n/u);
   const codeplan = await readFile(path.join(ROOT, "managed-assets", "skills", "codeplan", "SKILL.md"), "utf8");
   const center = await readFile(path.join(ROOT, "managed-assets", "skills", "center-audit", "SKILL.md"), "utf8");
   assert.match(codeplan, /PLAN-OUT/u);

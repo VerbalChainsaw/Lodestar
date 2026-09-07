@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { cp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
@@ -9,16 +8,15 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.mjs";
 import { manageSkills } from "../src/skills.mjs";
+import { temporaryDirectory } from "./helpers/contract.mjs";
 
 const MANAGED_ROOT = fileURLToPath(new URL("../managed-assets/skills", import.meta.url));
 const APPROVED = JSON.parse(
   await readFile(new URL("../managed-assets/manifest.json", import.meta.url), "utf8"),
-).skills;
+).skills.map(({ name }) => name);
 
 async function temporaryHome(t) {
-  const home = await mkdtemp(path.join(os.tmpdir(), "lodestar-skills-readonly-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
-  return home;
+  return temporaryDirectory(t, "lodestar-skills-readonly-");
 }
 
 const skillPath = (home, target, skill, codexRoot = "agents") => {
@@ -113,7 +111,7 @@ test("read-only verification resolves target roots without creating them", async
   assert.equal(await treeDigest(home), before);
 });
 
-test("Codex verification detects alternate and duplicate roots without migrating either", async (t) => {
+test("Codex verification permits identical mirrors and detects divergent roots without migrating either", async (t) => {
   const home = await temporaryHome(t);
   await copySkill(skillPath(home, "codex", "director-protocol", "codex"), "director-protocol");
   const oneRootBefore = await treeDigest(home);
@@ -125,10 +123,142 @@ test("Codex verification detects alternate and duplicate roots without migrating
   await copySkill(skillPath(home, "codex", "director-protocol", "agents"), "director-protocol");
   const duplicateBefore = await treeDigest(home);
   const duplicate = await manageSkills("verify", { home, target: "codex" });
-  assert.equal(duplicate.codex.conflict, true);
+  assert.equal(duplicate.codex.conflict, false);
   assert.equal(duplicate.results.find(({ skill }) => skill === "director-protocol").action,
-    "duplicate");
+    "verified");
+  assert.deepEqual(duplicate.results.find(({ skill }) => skill === "director-protocol").warnings,
+    ["identical-mirrors"]);
   assert.equal(await treeDigest(home), duplicateBefore);
+  await writeFile(path.join(skillPath(home, "codex", "director-protocol", "codex"), "SKILL.md"), "old instructions");
+  const conflict = await manageSkills("verify", { home, target: "codex" });
+  assert.equal(conflict.codex.conflict, true);
+  assert.equal(conflict.results.find(({ skill }) => skill === "director-protocol").action, "conflict");
+});
+
+test("OpenCode checks every global discovery root and exposes missing primary destinations", async (t) => {
+  const home = await temporaryHome(t);
+  for (const skill of APPROVED) await copySkill(skillPath(home, "opencode", skill), skill);
+  const alternate = skillPath(home, "codex", "lodestar");
+  await copySkill(alternate, "lodestar");
+  await writeFile(path.join(alternate, "SKILL.md"), "conflicting old instructions");
+  const before = await treeDigest(home);
+  const conflict = await manageSkills("verify", { home, target: "opencode" });
+  assert.equal(conflict.verified, false);
+  const lodestar = conflict.results.find(({ skill }) => skill === "lodestar");
+  assert.equal(lodestar.action, "conflict");
+  assert.equal(lodestar.copies.find(({ path: candidate }) => candidate === alternate).action, "stale");
+  assert.equal(await treeDigest(home), before);
+  await rm(skillPath(home, "opencode", "lodestar"), { recursive: true });
+  const missing = (await manageSkills("verify", { home, target: "opencode" }))
+    .results.find(({ skill }) => skill === "lodestar");
+  assert.equal(missing.action, "missing");
+  assert.equal(missing.copies[0].action, "missing");
+  assert.equal(missing.copies[1].path, alternate);
+});
+
+test("Codex aliases to one physical skill are not duplicate installations", async (t) => {
+  const home = await temporaryHome(t);
+  const primary = skillPath(home, "codex", "lodestar");
+  const alias = skillPath(home, "codex", "lodestar", "codex");
+  await copySkill(primary, "lodestar");
+  await mkdir(path.dirname(alias), { recursive: true });
+  await symlink(primary, alias, process.platform === "win32" ? "junction" : "dir");
+  const result = (await manageSkills("verify", { home, target: "codex" }))
+    .results.find(({ skill }) => skill === "lodestar");
+  assert.equal(result.action, "verified");
+  assert.equal(result.copies.length, 2);
+  assert.equal(result.copies[0].physicalPath, result.copies[1].physicalPath);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("host environment roots are explicit, and an explicit home isolates inherited environment", async (t) => {
+  const home = await temporaryHome(t);
+  const env = { CODEX_HOME: path.join(home, "custom-codex"),
+    CLAUDE_CONFIG_DIR: path.join(home, "custom-claude"), XDG_CONFIG_HOME: path.join(home, "xdg"),
+    OPENCODE_CONFIG_DIR: path.join(home, "custom-opencode"), HERMES_HOME: path.join(home, "custom-hermes") };
+  const result = await manageSkills("verify", { home, env, target: "all", codexRoot: "codex" });
+  assert.equal(result.codex.path, path.join(env.CODEX_HOME, "skills"));
+  assert.equal(result.claude.path, path.join(env.CLAUDE_CONFIG_DIR, "skills"));
+  assert.equal(result.opencode.path, path.join(env.OPENCODE_CONFIG_DIR, "skills"));
+  assert.ok(result.scope.roots.opencode.includes(path.join(env.XDG_CONFIG_HOME, "opencode", "skills")));
+  assert.equal(result.hermes.home, env.HERMES_HOME);
+  const explicit = await manageSkills("verify", { home, env, target: "all", codexRoot: "codex",
+    codexHome: path.join(home, "explicit-codex"), claudeHome: path.join(home, "explicit-claude"),
+    xdgConfigHome: path.join(home, "explicit-xdg"), opencodeRoot: path.join(home, "explicit-opencode", "skills") });
+  assert.equal(explicit.codex.path, path.join(home, "explicit-codex", "skills"));
+  assert.equal(explicit.claude.path, path.join(home, "explicit-claude", "skills"));
+  assert.equal(explicit.opencode.path, path.join(home, "explicit-opencode", "skills"));
+  assert.ok(explicit.scope.roots.opencode.includes(path.join(home, "explicit-xdg", "opencode", "skills")));
+  // Restore environment even when an assertion fails; no child process changes it.
+  const original = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, env);
+    const isolated = await manageSkills("verify", { home, target: "all", codexRoot: "codex", platform: "linux" });
+    assert.equal(isolated.codex.path, path.join(home, ".codex", "skills"));
+    assert.equal(isolated.claude.path, path.join(home, ".claude", "skills"));
+    assert.equal(isolated.opencode.path, path.join(home, ".config", "opencode", "skills"));
+    assert.equal(isolated.hermes.home, path.join(home, ".hermes"));
+  } finally {
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
+
+test("physical skill identity survives a displaced target behind an alias", async (t) => {
+  const home = await temporaryHome(t);
+  const physical = path.join(home, "shared", "lodestar");
+  const alias = skillPath(home, "codex", "lodestar");
+  await copySkill(physical, "lodestar");
+  await mkdir(path.dirname(alias), { recursive: true });
+  await symlink(physical, alias, process.platform === "win32" ? "junction" : "dir");
+  const lookup = async () => (await manageSkills("verify", { home, target: "codex" }))
+    .results.find(({ skill }) => skill === "lodestar").copies[0];
+  assert.equal((await lookup()).physicalPath, physical);
+  await rename(physical, `${physical}.backup`);
+  const missing = await lookup();
+  assert.equal(missing.action, "missing");
+  assert.equal(missing.physicalPath, physical);
+
+  // A missing skill below a whole-directory alias also keeps its real target.
+  const linkedHome = path.join(home, "linked-home");
+  const sharedSkills = path.join(home, "shared-skills");
+  await mkdir(path.join(linkedHome, ".agents"), { recursive: true });
+  await mkdir(sharedSkills);
+  await symlink(sharedSkills, path.join(linkedHome, ".agents", "skills"), process.platform === "win32" ? "junction" : "dir");
+  const rootAlias = (await manageSkills("verify", { home: linkedHome, target: "codex" }))
+    .results.find(({ skill }) => skill === "lodestar").copies[0];
+  assert.equal(rootAlias.physicalPath, path.join(sharedSkills, "lodestar"));
+});
+
+test("Hermes refuses identical nested name collisions and ignores support archives and physical aliases", async (t) => {
+  const home = await temporaryHome(t);
+  const hermesHome = path.join(home, ".hermes");
+  const root = path.join(hermesHome, "skills");
+  for (const skill of APPROVED) await copySkill(path.join(root, skill), skill);
+  const nested = path.join(root, "software-development", "codeplan");
+  await copySkill(nested, "codeplan");
+  const before = await treeDigest(home);
+  const conflict = await manageSkills("verify", { home, hermesHome, target: "hermes" });
+  const codeplan = conflict.results.find(({ skill }) => skill === "codeplan");
+  assert.equal(conflict.verified, false);
+  assert.equal(codeplan.action, "ambiguous");
+  assert.equal(codeplan.copies.length, 2);
+  assert.ok(codeplan.copies.every(({ action }) => action === "verified"));
+  assert.equal(await treeDigest(home), before);
+  await rm(nested, { recursive: true });
+  const alias = path.join(root, "software-development", "alias-codeplan");
+  await symlink(path.join(root, "codeplan"), alias, process.platform === "win32" ? "junction" : "dir");
+  await symlink(root, path.join(root, "software-development", "loop"), process.platform === "win32" ? "junction" : "dir");
+  await copySkill(path.join(root, "codeplan", "references", "archive", "codeplan"), "codeplan");
+  const aliases = await manageSkills("verify", { home, hermesHome, target: "hermes" });
+  assert.notEqual(aliases.results.find(({ skill }) => skill === "codeplan").action, "ambiguous");
+  // Frontmatter names are loadable even when the directory has another name.
+  const named = path.join(root, "category", "different-directory");
+  await mkdir(named, { recursive: true });
+  await writeFile(path.join(named, "SKILL.md"), "---\nname: 'lodestar' # native name\ndescription: retained alias\n---\nold instructions\n");
+  const frontmatter = await manageSkills("verify", { home, hermesHome, target: "hermes" });
+  assert.equal(frontmatter.results.find(({ skill }) => skill === "lodestar").action, "ambiguous");
 });
 
 test("the CLI exposes read-only verification and rejects retired write surfaces", async (t) => {

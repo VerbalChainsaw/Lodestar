@@ -1,274 +1,67 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
-import { HANDOFF_ENTRY_KEY_PATTERN as CORE_ENTRY_KEY_PATTERN }
-  from "../src/continuity.mjs";
+import { COMMANDS, MUTATION_INPUTS } from "../src/cli-commands.mjs";
+import { AGENT_BOOTSTRAP } from "../src/bootstrap.mjs";
+import { MUTATION_REQUEST_SCHEMA, PUT_INPUT_SCHEMA, DELETE_INPUT_SCHEMA } from "../src/records.mjs";
+import { CONTRACT_VERSION } from "../src/schema.mjs";
+import { LODESTAR_VERSION } from "../src/version.mjs";
+import { callNativeTool, NATIVE_TOOLS } from "../codex-plugin/scripts/lodestar-mcp.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const PLUGIN_ROOT = process.env.LODESTAR_PLUGIN_ROOT ?? path.join(ROOT, "codex-plugin");
-const TEST_ENTRY = process.env.LODESTAR_TEST_ENTRY ?? path.join(ROOT, "lodestar.mjs");
-const { handleHook } = await import(pathToFileURL(
-  path.join(PLUGIN_ROOT, "scripts", "lodestar-hook.mjs"),
-));
-const {
-  executeHandoff,
-  HANDOFF_ENTRY_KEY_PATTERN: PLUGIN_ENTRY_KEY_PATTERN,
-  parseEnvelope,
-  parseHandoffCommand,
-  STARTUP_CONTEXT_PREFIX,
-  STARTUP_CONTEXT_SUFFIX,
-} = await import(pathToFileURL(path.join(PLUGIN_ROOT, "scripts", "lodestar-runtime.mjs")));
+const SERVER = path.join(ROOT, "codex-plugin", "scripts", "lodestar-mcp.mjs");
 
-// The installed plugin is a separate artifact from the npm package, stamped by hand as
-// <version>+codex.<timestamp>. Nothing forced the two to agree, so a Codex Desktop build
-// ran 1.1.0 against a 1.2.2 registry and reported 1.1.0 over MCP while doing it.
-test("the Codex plugin declares the package version", async () => {
-  const packageJson = JSON.parse(
-    await readFile(path.join(ROOT, "package.json"), "utf8"),
-  );
-  const manifest = JSON.parse(
-    await readFile(path.join(ROOT, "codex-plugin", ".codex-plugin", "plugin.json"), "utf8"),
-  );
-  assert.equal(
-    manifest.version.split("+")[0],
-    packageJson.version,
-    "codex-plugin/.codex-plugin/plugin.json must track the package version",
-  );
-
-  // And the server must report that manifest rather than a literal of its own.
-  const server = await readFile(
-    path.join(ROOT, "codex-plugin", "scripts", "lodestar-mcp.mjs"), "utf8",
-  );
-  assert.match(server, /serverInfo:\s*\{\s*name:\s*"lodestar",\s*version:\s*pluginVersion\(\)/u);
-  assert.doesNotMatch(server, /version:\s*"\d+\.\d+\.\d+"/u, "no hardcoded version");
-});
-
-test("the core validator and Codex packet contract use the same entry-key pattern", () => {
-  assert.equal(PLUGIN_ENTRY_KEY_PATTERN, CORE_ENTRY_KEY_PATTERN);
-});
-
-test("the plugin declares no client-specific context caps", async () => {
-  const manifest = JSON.parse(await readFile(
-    path.join(PLUGIN_ROOT, "hooks", "hooks.json"), "utf8",
-  ));
-  for (const event of ["UserPromptSubmit", "SessionStart"]) {
-    assert.equal("additionalContextLimit" in manifest.hooks[event][0].hooks[0], false);
-  }
-});
-
-test("the plugin recovers the envelope even when a runtime prepends notices", () => {
-  const envelope = '{"v":1,"ok":false,"error":{"code":"database_not_found"}}';
-
-  assert.equal(parseEnvelope(envelope).error.code, "database_not_found");
-  assert.equal(parseEnvelope(`${envelope}\n`).error.code, "database_not_found");
-  assert.equal(
-    parseEnvelope(
-      "(node:1) ExperimentalWarning: SQLite is an experimental feature\n"
-        + "(Use `node --trace-warnings ...` to show where the warning was created)\n"
-        + envelope,
-    ).error.code,
-    "database_not_found",
-    "a prepended runtime warning must not hide the real error code",
-  );
-  assert.equal(parseEnvelope('{\n  "v": 1,\n  "ok": true\n}').ok, true);
-
-  assert.equal(parseEnvelope(""), null);
-  assert.equal(parseEnvelope("   "), null);
-  assert.equal(parseEnvelope("LODESTAR ERROR: runtime not found"), null);
-  assert.equal(parseEnvelope("notice\n{not json}"), null);
-});
-
-test("the hook executable accepts BOM-prefixed JSON for prompt and stop events", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-hook-stdin-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const hook = path.join(PLUGIN_ROOT, "scripts", "lodestar-hook.mjs");
-
-  const invoke = async (input) => {
-    const child = spawn(process.execPath, [hook], {
-      cwd: directory,
-      env: { ...process.env, PLUGIN_DATA: directory,
-        LODESTAR_DB: path.join(directory, "missing", "lodestar.db"),
-        LODESTAR_NODE: process.execPath, LODESTAR_ENTRY: TEST_ENTRY },
-      stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
-    });
-    let stdout = "", stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (text) => { stdout += text; });
-    child.stderr.setEncoding("utf8").on("data", (text) => { stderr += text; });
-    const completed = new Promise((resolve, reject) => {
-      child.on("error", reject);
-      child.on("close", (status) => resolve(status));
-    });
-    child.stdin.end(`\uFEFF${JSON.stringify(input)}`, "utf8");
-    return { status: await completed, stdout, stderr };
-  };
-
-  for (const input of [
-    { hook_event_name: "UserPromptSubmit", session_id: "bom", turn_id: "prompt",
-      cwd: directory, prompt: "ordinary prompt" },
-    { hook_event_name: "Stop", session_id: "bom", turn_id: "stop", cwd: directory,
-      stop_hook_active: false, last_assistant_message: "ordinary response" },
-  ]) {
-    const result = await invoke(input);
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stderr, "");
-    assert.deepEqual(JSON.parse(result.stdout), { continue: true });
-  }
-});
-
-const packet = {
-  goal: "Continue the unified Lodestar verification",
-  rules: ["Preserve the one-suite command contract"],
-  entries: [{
-    key: "verification.state",
-    state: "fact",
-    text: "The API_KEY=secret-value must be redacted before storage.",
-    scope: ["project"],
-    provenance: {
-      kind: "repo",
-      sourceRef: "test/plugin.test.mjs",
-      observedAt: "2026-08-13T12:00:00.000Z",
-    },
-    generation: 1,
-  }],
-  work: { completed: [], current: ["plugin verification"], files: [] },
-  nextMove: "Run the next focused verification",
-  evidence: [],
-};
-
-// The security property is that the whole prompt is the command and nothing else, which
-// is what stops a passing mention from authorizing a baton write. Case, spacing, a
-// command sigil and a trailing period are not part of that property. Rejecting them
-// bounced `$handoff now` in Codex Desktop, and the agent fell back to the raw CLI.
-test("only the five continuity commands receive host authorization", () => {
-  for (const command of ["arm", "status", "checkpoint", "now", "disarm"]) {
-    assert.equal(parseHandoffCommand(`handoff ${command}`), command);
-  }
-  for (const prompt of ["$handoff now", "/handoff now", "!handoff now", "> handoff now",
-    "lodestar handoff now", "Handoff Now", "handoff  now", "handoff now.", "HANDOFF NOW"]) {
-    assert.equal(parseHandoffCommand(prompt), "now", prompt);
-  }
-  // Anything with words of its own around it is prose, not a command. "don't handoff
-  // now" must never authorize the thing it is refusing.
-  for (const prompt of ["handoff now please", "please handoff now", "don't handoff now",
-    "handoff save", "handoff", "handoff now and then disarm", "why did handoff now fail",
-    "```handoff now```", "handoff now?"]) {
-    assert.equal(parseHandoffCommand(prompt), null, prompt);
-  }
-});
-
-test("the Lodestar plugin runs all five commands, redacts, and restores one recovery", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const prior = {
-    LODESTAR_DB: process.env.LODESTAR_DB,
-    LODESTAR_NODE: process.env.LODESTAR_NODE,
-    LODESTAR_ENTRY: process.env.LODESTAR_ENTRY,
-  };
-  process.env.LODESTAR_DB = path.join(directory, "lodestar.db");
-  process.env.LODESTAR_NODE = process.execPath;
-  process.env.LODESTAR_ENTRY = TEST_ENTRY;
-  t.after(() => {
-    for (const [key, value] of Object.entries(prior)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+test("native tools derive the installed command and mutation contract", async () => {
+  assert.deepEqual(NATIVE_TOOLS.map(({ name }) => name), [
+    "lodestar_describe", "lodestar_read", "lodestar_mutate",
+  ]);
+  for (const tool of NATIVE_TOOLS) assert.equal(tool.inputSchema.type, "object",
+    `${tool.name} must declare an object input schema for MCP clients`);
+  const described = await callNativeTool("lodestar_describe");
+  assert.equal(described.contract, CONTRACT_VERSION);
+  assert.equal(described.package_version, LODESTAR_VERSION);
+  assert.deepEqual(described.operating_guide, AGENT_BOOTSTRAP);
+  assert.deepEqual(described.commands, COMMANDS);
+  assert.deepEqual(described.mutation_request, MUTATION_REQUEST_SCHEMA);
+  assert.deepEqual(described.mutation_inputs.put, PUT_INPUT_SCHEMA);
+  assert.deepEqual(described.mutation_inputs.delete, DELETE_INPUT_SCHEMA);
+  assert.equal(Object.hasOwn(described.read_operations, "decision.status"), false);
+  for (const operation of ["put", "delete", ...Object.keys(MUTATION_INPUTS)]) {
+    const branch = NATIVE_TOOLS[2].inputSchema.oneOf.find(
+      ({ properties }) => properties.operation.const === operation,
+    );
+    assert.ok(branch, `missing native mutation operation ${operation}`);
+    assert.equal(branch.properties.request.properties.v.const, CONTRACT_VERSION);
+    assert.deepEqual(branch.properties.request.required, MUTATION_REQUEST_SCHEMA.required);
+    if (Object.hasOwn(MUTATION_INPUTS, operation)) {
+      assert.deepEqual(branch.properties.request.properties.input, MUTATION_INPUTS[operation]);
     }
-  });
-
-  const sourceStart = await handleHook({
-    hook_event_name: "SessionStart", session_id: "source", cwd: directory,
-  }, directory);
-  const startup = sourceStart.hookSpecificOutput.additionalContext;
-  assert.ok(startup.startsWith(STARTUP_CONTEXT_PREFIX));
-  assert.ok(startup.endsWith(STARTUP_CONTEXT_SUFFIX));
-  const projection = JSON.parse(startup.slice(
-    STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length,
-  ));
-  assert.deepEqual(projection.budget,
-    { bytes: null, source: "unbounded" });
-  const governance = projection.required.find(({ id }) =>
-    id === "g:lodestar:required-governance");
-  assert.equal(governance.data.v, 3);
-  assert.match(governance.data.text, /## Core Governance Integrity/u);
-  assert.match(governance.data.text, /## Reality Anchoring and Surface Integrity/u);
-  assert.match(governance.data.text, /## Anti-Certainty Psychosis/u);
-
-  let turn = 0;
-  const execute = async (command, input = {}) => {
-    turn += 1;
-    const turnId = `turn-${turn}`;
-    const authorization = await handleHook({ hook_event_name: "UserPromptSubmit",
-      session_id: "source", turn_id: turnId, cwd: directory,
-      prompt: `handoff ${command}` }, directory);
-    assert.match(authorization.hookSpecificOutput.additionalContext,
-      new RegExp(`lodestar_handoff_${command}`, "u"));
-    if (["arm", "checkpoint", "now"].includes(command)) {
-      assert.ok(authorization.hookSpecificOutput.additionalContext
-        .includes("entry keys must match ^[a-z0-9][a-z0-9.-]*$"));
-    }
-    const toolName = `lodestar__lodestar_handoff_${command}`;
-    const attested = await handleHook({ hook_event_name: "PreToolUse", session_id: "source",
-      turn_id: turnId, tool_use_id: `tool-${turn}`, cwd: directory,
-      tool_name: toolName, tool_input: input }, directory);
-    assert.equal(attested.hookSpecificOutput.permissionDecision, "allow");
-    const result = await executeHandoff(toolName,
-      attested.hookSpecificOutput.updatedInput, directory);
-    await assert.rejects(() => executeHandoff(toolName,
-      attested.hookSpecificOutput.updatedInput, directory), /attestation/u);
-    return result;
-  };
-
-  const armed = await execute("arm", { packet });
-  assert.equal(armed.result.lane.data.state, "armed");
-  await handleHook({ hook_event_name: "UserPromptSubmit", session_id: "source",
-    turn_id: "tail-user", cwd: directory, prompt: "API_KEY=tail-secret" }, directory);
-  const checked = await execute("checkpoint", { packet: { ...packet,
-    nextMove: "Open the successor session" } });
-  assert.equal(checked.result.packet.recentTail.items.length, 1);
-  assert.doesNotMatch(JSON.stringify(checked), /secret-value|tail-secret/u);
-  assert.equal((await execute("status")).result.lane.data.state, "armed");
-  assert.equal((await execute("disarm")).result.changed, true);
-  const saved = await execute("now", { packet });
-  assert.equal(saved.result.recovery.data.state, "pending");
-  assert.doesNotMatch(JSON.stringify(saved), /secret-value/u);
-
-  const sourceRetry = await handleHook({
-    hook_event_name: "SessionStart", session_id: "source", cwd: directory,
-  }, directory);
-  assert.match(sourceRetry.hookSpecificOutput.additionalContext, /"handoff":null/u);
-  const claimant = await handleHook({
-    hook_event_name: "SessionStart", session_id: "next", cwd: directory,
-  }, directory);
-  assert.match(claimant.hookSpecificOutput.additionalContext, /"claimed_by":"next"/u);
-  const third = await handleHook({
-    hook_event_name: "SessionStart", session_id: "third", cwd: directory,
-  }, directory);
-  assert.match(third.hookSpecificOutput.additionalContext, /"handoff":null/u);
+  }
 });
 
-test("the plugin MCP stdio transport initializes, lists, and executes the authorized tool", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-mcp-"));
+test("the plugin declares MCP and skill capabilities without hooks", async () => {
+  const plugin = JSON.parse(await readFile(path.join(ROOT,
+    "codex-plugin", ".codex-plugin", "plugin.json"), "utf8"));
+  assert.equal(plugin.version, LODESTAR_VERSION);
+  assert.deepEqual(plugin.interface.capabilities, ["skills", "MCP tools"]);
+  assert.equal(Object.hasOwn(plugin, "hooks"), false);
+  await assert.rejects(readFile(path.join(ROOT, "codex-plugin", "hooks", "hooks.json")),
+    { code: "ENOENT" });
+});
+
+test("the MCP stdio transport lists and executes the installed contract-5 runtime", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-native-mcp-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  await handleHook({
-    hook_event_name: "UserPromptSubmit", session_id: "mcp-source", turn_id: "turn-mcp",
-    cwd: directory, prompt: "handoff now",
-  }, directory);
-  const attested = await handleHook({
-    hook_event_name: "PreToolUse", session_id: "mcp-source", turn_id: "turn-mcp",
-    tool_use_id: "tool-mcp", cwd: directory, tool_name: "lodestar__lodestar_handoff_now",
-    tool_input: { packet },
-  }, directory);
-  const server = path.join(PLUGIN_ROOT, "scripts", "lodestar-mcp.mjs");
-  const child = spawn(process.execPath, [server], {
+  const child = spawn(process.execPath, [SERVER], {
     cwd: directory,
-    env: { ...process.env, PLUGIN_DATA: directory,
-      LODESTAR_DB: path.join(directory, "lodestar.db"),
-      LODESTAR_NODE: process.execPath, LODESTAR_ENTRY: TEST_ENTRY },
+    env: { ...process.env, LODESTAR_NODE: process.execPath,
+      LODESTAR_ENTRY: path.join(ROOT, "lodestar.mjs"),
+      LODESTAR_DB: path.join(directory, "absent.db") },
     stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
   });
   let stdout = "", stderr = "";
@@ -276,67 +69,31 @@ test("the plugin MCP stdio transport initializes, lists, and executes the author
   child.stderr.setEncoding("utf8").on("data", (text) => { stderr += text; });
   const completed = new Promise((resolve, reject) => {
     child.on("error", reject);
-    child.on("close", (status) => resolve(status));
+    child.on("close", resolve);
   });
   for (const message of [
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
     { jsonrpc: "2.0", id: 3, method: "tools/call",
-      params: { name: "lodestar_handoff_now",
-        arguments: attested.hookSpecificOutput.updatedInput } },
+      params: { name: "lodestar_describe", arguments: {} } },
+    { jsonrpc: "2.0", id: 4, method: "tools/call",
+      params: { name: "lodestar_read", arguments: { operation: "start", arguments: ["--cwd", directory] } } },
+    { jsonrpc: "2.0", id: 5, method: "tools/call",
+      params: { name: "lodestar_read", arguments: { operation: "skills.verify",
+        arguments: ["--target", "codex", "--home", path.join(directory, "missing-home")] } } },
   ]) child.stdin.write(`${JSON.stringify(message)}\n`);
   child.stdin.end();
   assert.equal(await completed, 0);
   assert.equal(stderr, "");
   const replies = stdout.trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(replies[0].result.serverInfo.name, "lodestar");
-  // Work is exposed alongside continuity because only the host knows the session id;
-  // a shell cannot supply one, and guessing it captures a concurrent peer's marker.
-  assert.deepEqual(replies[1].result.tools.map(({ name }) => name), [
-    "lodestar_handoff_arm", "lodestar_handoff_status", "lodestar_handoff_checkpoint",
-    "lodestar_handoff_now", "lodestar_handoff_disarm",
-    "lodestar_work_start", "lodestar_work_done", "lodestar_work_status",
-  ]);
-  const arm = replies[1].result.tools.find(({ name }) => name === "lodestar_handoff_arm");
-  assert.equal(
-    arm.inputSchema.properties.packet.properties.entries.items.properties.key.pattern,
-    "^[a-z0-9][a-z0-9.-]*$",
-  );
-  assert.equal(replies[2].result.isError, false);
-  assert.equal(replies[2].result.structuredContent.result.recovery.data.state, "pending");
-});
-
-test("SessionStart fails soft when the Lodestar runtime is unavailable", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-soft-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const prior = { node: process.env.LODESTAR_NODE, entry: process.env.LODESTAR_ENTRY };
-  process.env.LODESTAR_NODE = path.join(directory, "missing-node.exe");
-  process.env.LODESTAR_ENTRY = path.join(directory, "missing-entry.mjs");
-  try {
-    const response = await handleHook({
-      hook_event_name: "SessionStart",
-      session_id: "session:probe",
-      cwd: directory,
-    }, directory);
-    assert.equal(response.continue, true);
-    assert.match(
-      response.hookSpecificOutput.additionalContext,
-      /^Lodestar unavailable:/u,
-    );
-  } finally {
-    if (prior.node === undefined) delete process.env.LODESTAR_NODE;
-    else process.env.LODESTAR_NODE = prior.node;
-    if (prior.entry === undefined) delete process.env.LODESTAR_ENTRY;
-    else process.env.LODESTAR_ENTRY = prior.entry;
-  }
-});
-
-test("UserPromptSubmit fails soft when identity fields are missing", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-plugin-soft-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const response = await handleHook({
-    hook_event_name: "UserPromptSubmit",
-    prompt: "hello",
-  }, directory);
-  assert.equal(response.continue, true);
+  assert.equal(replies[0].result.serverInfo.version, LODESTAR_VERSION);
+  assert.deepEqual(replies[1].result.tools.map(({ name }) => name),
+    ["lodestar_describe", "lodestar_read", "lodestar_mutate"]);
+  assert.equal(replies[2].result.structuredContent.contract, 5);
+  assert.equal(replies[3].result?.isError, true, "core execution errors must reach the model as tool results");
+  assert.equal(replies[3].result.structuredContent.error.code, "database_not_found");
+  assert.deepEqual(JSON.parse(replies[3].result.content[0].text), replies[3].result.structuredContent);
+  assert.equal(replies[4].result.structuredContent.ok, true,
+    "an ok contract envelope remains a native success when CLI status means attention");
+  assert.equal(replies[4].result.structuredContent.data.verified, false);
 });

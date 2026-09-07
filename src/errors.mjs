@@ -6,6 +6,59 @@ const INTERNAL_ACTION =
   "Retry the command. If it fails again, run lodestar doctor.";
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,127}$/u;
 const LODESTAR_ERRORS = new WeakSet();
+const COMPLETE_IDENTIFIER_CODES = new Set([
+  "database_epoch_conflict",
+  "database_instance_conflict",
+  "migration_source_conflict",
+  "missing_precondition",
+  "record_requires_source_correction",
+  "record_not_found", // get supplies a reusable absence write_basis, not just diagnostic prose.
+  "request_conflict",
+  "revision_conflict",
+  "subject_conflict",
+]);
+const INPUT_ERROR_CODES = new Set([
+  "direction_required",
+  "identity_required",
+  "invalid_input",
+  "invalid_json",
+  "invalid_mutation_contract",
+  "invalid_path",
+  "missing_argument",
+  "missing_precondition",
+  "reserved_record_type",
+  "resource_limit",
+  "skills_read_only",
+  "unknown_command",
+  "unknown_operation",
+  "unknown_option",
+  "unsupported_numeric_value",
+]);
+const CONFLICT_ERROR_CODES = new Set([
+  "database_epoch_conflict",
+  "database_instance_conflict",
+  "decision_conflict",
+  "decision_not_found",
+  "handoff_conflict",
+  "handoff_not_found",
+  "link_target_not_found",
+  "migration_source_conflict",
+  "needs_reinspection",
+  "pending_conflict",
+  "pending_not_found",
+  "project_binding_conflict",
+  "project_conflict",
+  "read_revision_conflict",
+  "record_collision",
+  "record_exists",
+  "record_not_found",
+  "recovery_accounting_conflict",
+  "request_conflict",
+  "revision_conflict",
+  "subject_conflict",
+  "work_conflict",
+  "work_not_found",
+]);
 
 function property(value, key) {
   try {
@@ -48,7 +101,9 @@ export function lodestarError(
   const error = new Error(message, cause ? { cause } : undefined);
   error.name = "LodestarError";
   error.code = code;
-  error.identifiers = boundedDiagnosticValue(identifiers);
+  error.identifiers = COMPLETE_IDENTIFIER_CODES.has(code)
+    ? identifiers
+    : boundedDiagnosticValue(identifiers);
   if (action) error.action = action;
   LODESTAR_ERRORS.add(error);
   return error;
@@ -71,6 +126,22 @@ export function wrapError(
   });
 }
 
+// Add only caller-owned context to branded errors. Raw thrown values may expose
+// getters with side effects, so this boundary never reads from an untrusted error.
+export function decorateError(error, identifiers = {}) {
+  if (!LODESTAR_ERRORS.has(error)) return error;
+  const code = knownCode(error);
+  if (!code) return error;
+  const identifiersFor = COMPLETE_IDENTIFIER_CODES.has(code) ? (value) => value ?? {} : boundedIdentifiers;
+  return lodestarError(code, boundedText(property(error, "message"),
+    "Lodestar could not complete the operation."), {
+    identifiers: { ...identifiersFor(property(error, "identifiers")),
+      ...identifiersFor(identifiers) },
+    action: property(error, "action"),
+    cause: error,
+  });
+}
+
 export function errorPayload(error) {
   const code = knownCode(error);
   const known = code !== null;
@@ -83,7 +154,9 @@ export function errorPayload(error) {
       )
       : "Lodestar could not complete the operation.",
     identifiers: known
-      ? boundedIdentifiers(property(error, "identifiers"))
+      ? COMPLETE_IDENTIFIER_CODES.has(code)
+        ? property(error, "identifiers") ?? {}
+        : boundedIdentifiers(property(error, "identifiers"))
       : {},
     action: known && property(error, "action")
       ? boundedText(property(error, "action"), DEFAULT_ACTION)
@@ -101,13 +174,12 @@ export function errorEnvelope(error) {
 }
 
 function exitCodeForCode(code) {
-  if (
-    code.endsWith("_not_found")
-    || code.endsWith("_conflict")
-    || code === "record_not_found"
-  ) {
-    return 3;
-  }
+  if (CONFLICT_ERROR_CODES.has(code) || code.endsWith("_not_found") || code.endsWith("_conflict")) return 3;
+  if (new Set([
+    "record_requires_source_correction",
+    "unsupported_schema",
+  ]).has(code)) return 4;
+  if (INPUT_ERROR_CODES.has(code)) return 2;
   if (
     code.includes("integrity")
     || code.includes("schema")
@@ -124,10 +196,6 @@ function exitCodeForCode(code) {
   }
   if (
     code.startsWith("invalid_")
-    || code === "resource_limit"
-    || code === "unknown_command"
-    || code === "unknown_option"
-    || code === "missing_argument"
   ) {
     return 2;
   }

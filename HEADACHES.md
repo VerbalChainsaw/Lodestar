@@ -1,72 +1,62 @@
-# HEADACHES.md — chronic frictions and root-cause fixes
+# Troubleshooting Lodestar 2.1.2
 
-Session log per Director rule 9. Each entry names the repeated grief and the
-root-cause fix option. Nothing here is acted on without Director approval.
+This page covers the current release. Start with the [installation guide](docs/installation.md), then use the matching recovery path below. `lodestar doctor` reports problems; it does not repair the database.
 
-## 1. Sandbox EPERM blocks every test run (recurring, highest friction)
+## `lodestar` is missing or reports the wrong version
 
-- **Grief:** `node --test` (and any Node child process with piped stdio) fails with
-  `spawn EPERM` under the confined DSH sandbox. Every single verification cycle
-  requires a `danger-full-access` escalation and approval. Hit 4+ times this session.
-- **Root-cause options:**
-  - (a) Pre-approve the exact test command (`node --test` / `npm test` in the Lodestar
-    workspace) so escalation is a one-time grant, not per-run.
-  - (b) Add a DSH sandbox affordance: allow child-process spawn with piped stdio inside
-    the session workspace (test runners are the legitimate use).
-  - (c) An in-sandbox test path that avoids child processes (not available in node:test
-    file mode; would need a custom in-process runner — not worth it).
-- **Recommendation:** (a) or (b). This friction recurs on every verify loop.
+Install the current package, open a new shell, and confirm the executable:
 
-## 2. PowerShell 7.3+ native argument passing surprises (recurring class)
+```text
+npm install --global lodestar-agent-context@2.1.2
+lodestar --version
+```
 
-- **Grief:** a PS variable holding multiple flags (`$s="--session x --agent y"`) passed to
-  a native command arrives as ONE argument (PSNativeCommandArgumentPassing Standard mode),
-  so `lodestar decision set ... $s` failed with `unknown_option` and the whole string
-  as the option name.
-- **Root-cause fix:** never splat a space-containing string variable into a native
-  command; pass individual arguments or use an array with the splat operator (`@args`).
-  Add a note to the Lodestar dev docs (or a shell helper) so scripters don't hit it.
+If a Git Bash or WSL launcher still points to an older Node or package location, rerun the selected `lodestar setup` plan and apply it. See [Windows and WSL installation](docs/installation.md#windows-and-wsl).
 
-## 3. Write-tool "file changed since read" policy (minor)
+## No database exists
 
-- **Grief:** mid-edit re-reads are required after long pauses; slows chained edits.
-- **Root-cause:** by-design fs-observation; acceptable. No action.
+Run `lodestar init` only to create a new schema-5 store. Do not initialize over an existing store. A schema-4 store requires the inspected conversion and verified backup described in [schema conversion and recovery](docs/schema.md#lifecycle-conversion-and-recovery).
 
-## Fact, not a headache: live DB is ACL read-only to sandboxed processes
+## Setup reports local content or a conflict
 
-`Gigaflex\CodexSandboxUsers` has RX only on `%LOCALAPPDATA%\Lodestar\lodestar.db`
-(SQLITE_READONLY on writes). Deliberate machine boundary matching the 2026-08-19
-live-readonly cutover. Do not weaken; sandboxed sessions record decisions via Q&A.md
-and let a non-sandboxed session transcribe to the ledger.
-## 4. Root-cause win found this session: in-process test execution
+First inspect the read-only plan:
 
-- Running a test file directly (`node test/<file>.test.mjs`) executes its tests
-  in-process with NO child spawn, so the confined sandbox allows it.
-- 15 of 22 test files pass this way (all core logic: decision, records, queries,
-  json, continuity, pending, doctor, migration, agents, skills, ...).
-- The 5 spawn-dependent files (plugin, e2e, concurrency, package, work-identity)
-  and 4 spawn/timing tests inside otherwise-fine files (cli, database, release,
-  windows-install) still require an escalated `node --test` run.
-- **Recommended process change:** make the escalated full-suite run the only
-  approval-gated step; use in-process per-file runs for day-to-day loops.
+```text
+lodestar setup --target all
+```
 
-## Class split (the missing link, recorded 2026-08-20)
+Unchanged Lodestar-owned copies upgrade from their installation receipts. Existing content without a matching receipt must be reviewed before using `--replace-local`; replaced bytes are retained. After an interrupted setup, repeat the same command so recovery can settle or report the preserved conflict. An `install_busy` result means another live installer or unresolved lock owns that directory.
 
-Reflection surfaced TWO classes; fixes map by class:
+## Skill verification fails
 
-- CLASS A — session/environment friction (items 1-3 above): resolved by environment
-  and policy changes, not by repo work.
-- CLASS B — structural accretion: machinery that outlives its justification
-  (wrappers, verdict-bearing helpers, governance layers, review grammars,
-  command-surface bloat). This is the chronic workshop headache and the class the
-  "repair the lowest shared owner" doctrine treats.
+```text
+lodestar skills verify --target all
+```
 
-Class B cures in this session:
-- Lodestar: capture functions merged into one mechanism; marker grammar unified
-  into one module; SUPERSEDED successor edge repaired (185/185 green).
-- golden-helpers (Codex, independently verified): deleted 826 lines
-  (planreview.py + verdict-bearing surface-owner.py/audit-limit.py), renamed the
-  two evidence commands (surface-volatility.py, trace-limit.py), zero new
-  machinery, review capability returned to its existing owner.
+Inspect the roots returned in the response. Verification covers those selected roots, not every project or plugin directory a host may discover. Native hosts can also reject duplicate skill names or retain already-loaded instructions. Resolve the owning duplicate or stale instruction, then start a fresh host session. See [homes and discovery](docs/installation.md#homes-and-discovery).
 
-The golden-helpers correction does NOT touch class A; it is a class-B cure.
+## Startup reports incomplete or stale context
+
+Run startup against the intended checkout:
+
+```text
+lodestar start --cwd .
+```
+
+Inspect `complete`, record errors, project identity, selected installation roots, and source observations. `needs_reinspection` means the current local or package source changed, disappeared, became unreadable, or could not be read stably against its saved observation. Re-read the source and use the returned write basis for any correction. Missing optional context does not block unrelated work whose required inputs are complete.
+
+If the host clips output, use `--output <new-file>` and verify the returned byte count and SHA-256 before relying on the file. Complete argument arrays can be supplied through `--args-file` or `--args-stdin`; see [complete input and output](docs/installation.md#complete-input-and-output).
+
+## A mutation is rejected
+
+Use `lodestar <command> --help` in JSON mode, or native `lodestar_describe`, for the current input schema. Read the target again, keep the complete returned basis, and submit a new request against that basis. If the response was lost after commit, retry the exact same request ID and payload; Lodestar replays the stored receipt instead of applying the change twice.
+
+Do not reuse a request ID with changed content. Do not guess missing fields, revisions, database instance IDs, or epochs. See the [contract-5 mutation model](docs/schema.md#mutation-contract).
+
+## `doctor` reports database damage
+
+Run `lodestar doctor` and preserve the exact report. Restore a verified external backup or follow the explicit recovery procedure; do not edit SQLite rows by hand or treat `doctor` as an automatic repair tool. See [storage and recovery limits](docs/limitations.md#storage-and-transactions).
+
+## WSL reaches the wrong project or database
+
+Use the installed one-shot WSL launcher. It invokes Windows Node, forwards the actual working directory, and keeps the SQLite database on the Windows side. Rerun setup when Node or the package moves. Do not open the Lodestar database directly with Linux Node. See [Windows and WSL](docs/installation.md#windows-and-wsl).

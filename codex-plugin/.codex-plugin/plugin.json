@@ -1,7 +1,7 @@
 {
   "name": "lodestar",
-  "version": "1.6.0",
-  "description": "Lodestar startup, knowledge, work, continuity, and decisions integration",
+  "version": "2.1.2",
+  "description": "Native contract-5 tools and automatic project context guidance",
   "author": {
     "name": "VerbalChainsaw"
   },
@@ -9,16 +9,15 @@
   "interface": {
     "displayName": "Lodestar",
     "shortDescription": "One suite for context, work, continuity, and decisions.",
-    "longDescription": "Loads bounded Lodestar context at session start and provides thin, redacted, one-shot knowledge, work, continuity, decision, skill, and doctor operations.",
+    "longDescription": "Provides automatic project-context guidance and native tools that invoke the same installed Lodestar one-shot package and guarded mutation contract.",
     "developerName": "VerbalChainsaw",
     "category": "Productivity",
     "capabilities": [
       "skills",
-      "hooks",
       "MCP tools"
     ],
     "defaultPrompt": [
-      "Use handoff now to save this project context for the next session."
+      "Use Lodestar automatically for substantive project orientation and evidence-backed updates when it is available."
     ]
   },
   "mcpServers": "./.mcp.json"

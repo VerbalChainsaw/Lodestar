@@ -1,14 +1,287 @@
 {
-  "schema": 2,
+  "contract": 5,
   "bootstrap": "bootstrap.json",
-  "governance": "governance.json",
   "skills": [
-    "director-protocol",
-    "codeplan",
-    "center-multigeometry",
-    "center-audit",
-    "ladder-audit",
-    "lodestar",
-    "adderall"
+    {
+      "name": "adderall",
+      "source_id": "lodestar-repository:adderall",
+      "source_entrypoint": "skills/adderall/SKILL.md",
+      "source_identity": {
+        "algorithm": "sha256",
+        "value": "17e7b7020e836f7141dec897dda636112e4166663bba0eb91da5e4e2f816e0e1"
+      },
+      "payload_root": "skills/adderall",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 3430,
+          "sha256": "d83d35ff61828e6b224fc22fb05aec96873c54b3c2647c4c695e6a96f250dd56"
+        }
+      ],
+      "distribution_owner": "npm:lodestar-agent-context"
+    },
+    {
+      "name": "center-audit",
+      "source_id": "golden-rules:center-audit",
+      "source_entrypoint": "skills/center-audit/SKILL.md",
+      "source_identity": {
+        "algorithm": "sha256",
+        "value": "e376849e3dd4ca44166a8025966d5dc0456b097fb8913847f780f1d719ef9a19"
+      },
+      "payload_root": "skills/center-audit",
+      "files": [
+        {
+          "path": "assets/center-audit-output.schema.json",
+          "bytes": 17956,
+          "sha256": "b5325de31e2c2a6e99af78e67a61b50b8143e2b2cbd58d1923168681204fac42"
+        },
+        {
+          "path": "LICENSE",
+          "bytes": 1085,
+          "sha256": "960dae46b2ce538c8da1697933880e5b4af88c7fe62da1006f7967ae0c66f926"
+        },
+        {
+          "path": "references/compact-mode.md",
+          "bytes": 4651,
+          "sha256": "e87fc050f5b7f747abe88af3cba7ec86ee33efe5a4d9d9d9aabdb5219d98d2b5"
+        },
+        {
+          "path": "references/evidence-model.md",
+          "bytes": 7130,
+          "sha256": "f3e38c145ae79c14d986f201d6a4bcc798ac90603a56b78d469ec9cf5adbb9c8"
+        },
+        {
+          "path": "references/execution-safety.md",
+          "bytes": 4623,
+          "sha256": "f4a2d09a4b691c313eada879991612a87e020650a28d29cea82eb37697e707c1"
+        },
+        {
+          "path": "references/formats.md",
+          "bytes": 4097,
+          "sha256": "733b689d87a546eaac662d6e30044e93404507e3ecfbe6509b04f3a45a80f5b9"
+        },
+        {
+          "path": "references/machine-output.md",
+          "bytes": 1476,
+          "sha256": "84c1f527faa9cb6a0d05bad1caebce869a362a61902e1a0c9815c77a52c844a0"
+        },
+        {
+          "path": "references/modern-systems.md",
+          "bytes": 10532,
+          "sha256": "cabcd839d176bf36f921308084062e22b276f9064a697ae760aa371bd4871399"
+        },
+        {
+          "path": "references/multi-perspective-audit.md",
+          "bytes": 3742,
+          "sha256": "7051162ef765c109cc6d932e3403c364e00cf2b3533b08b0d27e49d24067958b"
+        },
+        {
+          "path": "references/multi-perspective-cascade.md",
+          "bytes": 2515,
+          "sha256": "31768a5034a242562361cb467bbcc1c4ffd0401fc63f7a46fe5819e0ccdd133c"
+        },
+        {
+          "path": "references/output-format.md",
+          "bytes": 4856,
+          "sha256": "9c19c31f494cd17f04b719feeeebea9a54c993396c6b47087338843ebe1232d6"
+        },
+        {
+          "path": "references/prime-tags.md",
+          "bytes": 1402,
+          "sha256": "dcfb4713b5ecfa68f363177825d618de9fe3de5cbeeaebbafca715c85d8d5f98"
+        },
+        {
+          "path": "references/severity-rubric.md",
+          "bytes": 3675,
+          "sha256": "1d983b5d7fed54324b52a2a04d53c60399f2506fcdf43262739f8184c3a416fe"
+        },
+        {
+          "path": "references/worked-example-autogoal-bridge-webhook.md",
+          "bytes": 10963,
+          "sha256": "17f892e657793ca19b8ca5b2087e3d15ef16682ab1590e0fcbe18eedb8ae6500"
+        },
+        {
+          "path": "SKILL.md",
+          "bytes": 31635,
+          "sha256": "a65768d368a71bde537d3cd5a552344a129c5d0aa044bfdf206b497c800828cb"
+        }
+      ],
+      "distribution_owner": "npm:lodestar-agent-context"
+    },
+    {
+      "name": "center-multigeometry",
+      "source_id": "golden-rules:center-multigeometry",
+      "source_entrypoint": "skills/center-multigeometry/SKILL.md",
+      "source_identity": {
+        "algorithm": "sha256",
+        "value": "83f6a9193fba35bf70cc6c1201a437109eb7bb5df451b703149b3b731c1d26c8"
+      },
+      "payload_root": "skills/center-multigeometry",
+      "files": [
+        {
+          "path": "LICENSE",
+          "bytes": 1069,
+          "sha256": "702ab85bb649424b323bada15b0e37c41d180ba97eff5c0932e04da4e75cd3d4"
+        },
+        {
+          "path": "SKILL.md",
+          "bytes": 10298,
+          "sha256": "598acdbd464f2f72331c6e0165d39a730d0a3c30fa3b61c5935f73f775972a6b"
+        }
+      ],
+      "distribution_owner": "npm:lodestar-agent-context"
+    },
+    {
+      "name": "codeplan",
+      "source_id": "golden-rules:codeplan",
+      "source_entrypoint": "skills/codeplan/SKILL.md",
+      "source_identity": {
+        "algorithm": "sha256",
+        "value": "4e384f9e789b31833333fde544e1afc27df4470756e98ec44096c5db5628e8a8"
+      },
+      "payload_root": "skills/codeplan",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 27171,
+          "sha256": "5cf5982709eac36af68751ef1349e8c1c6ff7b22b30cbd3aaaf6c1eb205dd38f"
+        }
+      ],
+      "distribution_owner": "npm:lodestar-agent-context"
+    },
+    {
+      "name": "director-protocol",
+      "source_id": "golden-rules:director-protocol",
+      "source_entrypoint": "skills/director-protocol/SKILL.md",
+      "source_identity": {
+        "algorithm": "sha256",
+        "value": "141bfd2af6c3dcadf943a1851a915332614f499c23f31317ff6e7ddea8839c59"
+      },
+      "payload_root": "skills/director-protocol",
+      "files": [
+        {
+          "path": "agents/openai.yaml",
+          "bytes": 296,
+          "sha256": "8a0e28b3a10e8ffefaa1f2f0ad147f1176afb1c5639940fbe94ff45b752d23a7"
+        },
+        {
+          "path": "SKILL.md",
+          "bytes": 9853,
+          "sha256": "15e31ab5173e7bf779ee906d25a96dfe4828906122f7a2c14d37c38d7b074776"
+        }
+      ],
+      "distribution_owner": "npm:lodestar-agent-context"
+    },
+    {
+      "name": "ladder-audit",
+      "source_id": "golden-rules:ladder-audit",
+      "source_entrypoint": "skills/ladder-audit/SKILL.md",
+      "source_identity": {
+        "algorithm": "sha256",
+        "value": "3a71a426ba2a26054a8f947fd5aa7a7ed8b9678e0130843b1869115352e86feb"
+      },
+      "payload_root": "skills/ladder-audit",
+      "files": [
+        {
+          "path": "README.md",
+          "bytes": 2816,
+          "sha256": "c63d8091e9eaf4b676404c4ebe5fee4f9ab664d449ec4f4b953614c14df94a9a"
+        },
+        {
+          "path": "references/output-template.md",
+          "bytes": 4861,
+          "sha256": "0319f7e52fed0384b389a0ad1dcb8891dba6f5d2d03502a5878590aee3ae5e69"
+        },
+        {
+          "path": "references/worked-examples.md",
+          "bytes": 6559,
+          "sha256": "c493ec62487eb2abd16fe290bcd5591bc79d34cb5506ff1eda8f1d265561a201"
+        },
+        {
+          "path": "SKILL.md",
+          "bytes": 16214,
+          "sha256": "6585ab870b6b224a80a23f4a110c7934d34a7e8ea300420aeba3839300b63ae6"
+        }
+      ],
+      "distribution_owner": "npm:lodestar-agent-context"
+    },
+    {
+      "name": "lodestar",
+      "source_id": "lodestar-repository:lodestar",
+      "source_entrypoint": "skills/lodestar/SKILL.md",
+      "source_identity": {
+        "algorithm": "sha256",
+        "value": "06d1b3a62061ec7f35f91fc47456d69054d5a77abcccc5f49629c606e8bc34ef"
+      },
+      "payload_root": "skills/lodestar",
+      "files": [
+        {
+          "path": "agents/openai.yaml",
+          "bytes": 241,
+          "sha256": "bb4dc921e7ba318b94b14d444598607bfc1159e43bf59a35fe52f9dd969ef5ed"
+        },
+        {
+          "path": "assets/templates/_stub-pattern.AGENTS.md",
+          "bytes": 1659,
+          "sha256": "805b34f4aa542045c07fdc80bec6f4a46763042098a30b493f57e2d8e5bc64d2"
+        },
+        {
+          "path": "assets/templates/AGENTS.template.md",
+          "bytes": 5570,
+          "sha256": "20a63e7cafefd7fe72c2300ee50e19bf93bac38efb064d532d309d46abb9a16a"
+        },
+        {
+          "path": "assets/templates/CLAUDE.template.md",
+          "bytes": 1891,
+          "sha256": "73357dafe09dc010b0da79153697876d1b14fc8693981a49f48f21af186e8f24"
+        },
+        {
+          "path": "assets/templates/SOUL.template.md",
+          "bytes": 4275,
+          "sha256": "9c398720ce3d29bf10c3aefc739e8b9c17dc9baf2af06bac7957f54cf366b409"
+        },
+        {
+          "path": "references/bootstrap-and-failures.md",
+          "bytes": 3296,
+          "sha256": "2c229f95dec145a8917b1e0fcbd8b593830872f1ebb8329c3a49b7ec0e18b137"
+        },
+        {
+          "path": "references/continuity.md",
+          "bytes": 1171,
+          "sha256": "09553b4fbc6c1f489dc92188bf0880147381b14738a1643a2e35802461cba940"
+        },
+        {
+          "path": "references/decisions.md",
+          "bytes": 1280,
+          "sha256": "6e9ba51bfc5917778e18d5902026ceba8e84297fe028bc7010ded42cf3b24650"
+        },
+        {
+          "path": "references/knowledge.md",
+          "bytes": 2426,
+          "sha256": "01c558a7c7938aa087e587256f5f4c69877853b600478aaaf80f9f28535e3041"
+        },
+        {
+          "path": "references/templates.md",
+          "bytes": 1975,
+          "sha256": "ddc96e14b731277dfec71f9718e2cab0fde9a07de7fe4c5709513af93f11e340"
+        },
+        {
+          "path": "references/toolchain.md",
+          "bytes": 7496,
+          "sha256": "4dbc8f9bb86011f1d05fb0dee1563ccca7fc8f762a72bc3361b0422150dd336a"
+        },
+        {
+          "path": "references/work-presence.md",
+          "bytes": 1050,
+          "sha256": "69916efb4e5ce8acc537ceb0070a8a5e487f70cb33b03fc7b4debd9cc1e34982"
+        },
+        {
+          "path": "SKILL.md",
+          "bytes": 5463,
+          "sha256": "e0a0889bec091d12d9940e21196a306185d6fb2f5f665515fad5ff9549167ee7"
+        }
+      ],
+      "distribution_owner": "npm:lodestar-agent-context"
+    }
   ]
 }

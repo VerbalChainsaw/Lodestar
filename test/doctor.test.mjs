@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync as SQLiteDatabase } from "node:sqlite";
 import test from "node:test";
 
 import {
@@ -10,6 +10,11 @@ import {
   openDiagnosticDatabase,
 } from "../src/database.mjs";
 import { diagnoseDatabase } from "../src/doctor.mjs";
+
+// This test-only connection deliberately injects corruption for diagnostic probes.
+class DatabaseSync extends SQLiteDatabase {
+  constructor(...args) { super(...args); this.function('lodestar_write_contract', () => 5); }
+}
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-doctor-"));
@@ -33,8 +38,8 @@ test("doctor reports a healthy schema without writing", async (t) => {
     expected_tables: true,
     expected_indexes: true,
     expected_definitions: true,
-    decisions: { events: 0, invalid: [], healthy: true },
-    handoff: { records: 0, invalid: [], healthy: true },
+    decisions: { events: 0, invalid: [], legacy_unverified: [], healthy: true },
+    handoff: { records: 0, invalid: [], historical: [], healthy: true },
   });
 });
 

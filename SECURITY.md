@@ -4,43 +4,38 @@
 
 | Version | Supported |
 | --- | --- |
-| 1.x | Yes |
-| 0.x | No |
+| 2.x | Yes |
+| 1.x and earlier | No |
 
-Use the latest published 1.x patch before reporting behavior that may already
-be fixed.
+Before publication, verify the supplied `lodestar-agent-context-2.0.0.tgz` artifact.
+After a 2.x release is published, use the latest published patch before reporting
+behavior that may already be fixed.
 
 ## Reporting a vulnerability
 
-Do not open a public issue for an undisclosed vulnerability. Use
-[GitHub private vulnerability reporting](https://github.com/VerbalChainsaw/Lodestar/security/advisories/new)
-and include the affected version and platform, the smallest reproduction,
-required attacker capabilities, impact, and any suggested mitigation.
+Use [GitHub private vulnerability reporting](https://github.com/VerbalChainsaw/Lodestar/security/advisories/new)
+for an undisclosed issue. Include the affected version and platform, smallest
+reproduction, required attacker capabilities, impact, and suggested mitigation.
 
 ## Security boundary
 
 Lodestar is an offline, single-user local registry. It has no runtime network
-requirement, service, telemetry, plugin loader, provider adapter, or background
-process.
+requirement, daemon, telemetry, hook service, App Server integration, plugin loader,
+or background process. Its optional MCP adapter invokes the same installed one-shot
+package and owns no database, receipt cache, or authority policy.
 
-The SQLite database is not encrypted, signed, authenticated, or an
-authorization boundary. Scope values organize context; they do not restrict
-access. A process able to read or replace the database can read or replace its
-knowledge. Protect the file with operating-system permissions and tested
-backup practices suitable for its contents.
+The SQLite database is not encrypted, signed, authenticated, or an authorization
+boundary. A process that can read or replace the file can read or replace its records.
+Protect it with operating-system permissions and tested backups.
 
-Writes use SQLite transactions, foreign keys, rollback journaling, and full
-synchronous mode. These protect normal commits and interrupted transactions;
-they do not defend against malicious file replacement, faulty storage, or
-loss. New targets are reserved with no-replace file creation and restrictive
-POSIX permissions before SQLite initialization. Published reservations are
-never removed as failure cleanup because another process may have completed
-the visible path; zero-byte reservations are resumable. Valid records, startup state, CLI arguments, and successful command
-results are not clipped by Lodestar. Hostile thrown values are copied into error
-envelopes through a deliberately bounded traversal so error reporting itself
-cannot exhaust memory or recurse forever. `lodestar doctor` detects supported
-schema, referential, complete stored-semantic, and SQLite integrity problems but
-does not repair them. If SQLite cannot confirm a transaction's commit outcome,
-Lodestar reports `database_commit_outcome_unknown` and preserves a newly
-initialized database for read-only diagnosis instead of deleting evidence.
-Keep an independent backup until changes are validated.
+All state-table writes require a connection-scoped contract-5 admission guard and run
+inside an immediate transaction with foreign keys and full synchronous mode. Requests
+bind the database instance, recovery epoch, target revisions, applicability, and full
+payload to an idempotent receipt. These controls protect normal concurrency, retries,
+and retained old clients. They do not defend against deliberate SQLite page rewriting,
+faulty storage, or total loss of uncommitted external task context.
+
+Record content and source metadata may contain sensitive information. The package does
+not redact arbitrary user records. Keep private exports and backups under appropriate
+filesystem permissions. Native tool adapters must not invent actor or user attribution;
+identity-required mutations fail when authenticated host evidence is unavailable.
