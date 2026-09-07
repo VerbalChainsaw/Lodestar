@@ -1,6 +1,6 @@
-# Lodestar 2.0 implementation contract
+# Lodestar 2.1 implementation contract
 
-Lodestar 2.0 has one installed one-shot executable, one Windows-owned SQLite
+Lodestar 2.1 has one installed one-shot executable, one Windows-owned SQLite
 database, one contract-5 JSON envelope, and one guarded mutation owner. The current
 runtime has no daemon, hooks, App Server calls, session rotation, startup cache, or
 private governance payload.
@@ -15,5 +15,7 @@ The Codex integration is a native skill plus MCP adapter. Its tool schemas impor
 same command, mutation-input, request, and contract declarations as the CLI. The
 adapter spawns the installed package for each call and owns no durable state.
 
-See [schema](schema.md), [limitations](limitations.md), and the
-[2.0.0 release notes](releases/v2.0.0.md).
+See [installation](installation.md), [schema](schema.md), [limitations](limitations.md),
+and the [2.1.1 release notes](releases/v2.1.1.md). JSON command help exposes complete
+mutation inputs. Ordinary local-source reads flag changed evidence without rewriting
+saved observations; explicit canonical project mappings preserve usable correction paths.
