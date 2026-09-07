@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.2 - 2026-09-07
+
+- Publish current product documentation and a static landing page with shared hero artwork.
+- Explain the contract-5 upgrade from 1.6, source freshness, guarded corrections, and explicit installation.
+- Use the same current-contract packed executable smoke in CI and release verification.
+- Retain contract 5 and schema 5; no new database migration is required from 2.x.
+
 ## 2.1.1 - 2026-09-07
 
 - Share the read-operation declaration between CLI dispatch and MCP. Reject the

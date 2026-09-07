@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Local contract-5 project context, evidence, decisions, work, and continuity",
   "type": "module",
   "bin": {
@@ -21,6 +21,7 @@
     "docs/releases/v2.0.2.md",
     "docs/releases/v2.1.0.md",
     "docs/releases/v2.1.1.md",
+    "docs/releases/v2.1.2.md",
     "docs/installation.md",
     "README.md",
     "CHANGELOG.md",
@@ -58,7 +59,7 @@
     "type": "git",
     "url": "git+https://github.com/VerbalChainsaw/Lodestar.git"
   },
-  "homepage": "https://github.com/VerbalChainsaw/Lodestar#readme",
+  "homepage": "https://verbalchainsaw.github.io/Lodestar/",
   "bugs": {
     "url": "https://github.com/VerbalChainsaw/Lodestar/issues"
   }

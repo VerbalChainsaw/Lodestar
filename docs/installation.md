@@ -1,18 +1,21 @@
 # Installation and startup
 
-Install the supplied package with Node.js 24.15.0 or newer:
+For a new installation, use Node.js 24.15.0 or newer:
 
 ```text
-npm install --global ./lodestar-agent-context-2.1.1.tgz
+npm install --global lodestar-agent-context@2.1.2
 lodestar setup --target all
 lodestar setup --target all --apply
+lodestar init
 lodestar skills verify --target all
 lodestar doctor
 lodestar start --cwd .
 ```
 
 Use `lodestar init` only when creating a new store. An existing store must pass
-the documented migration/recovery procedure; setup never changes a database.
+the [migration/recovery procedure](../README.md#storage-and-recovery); setup never
+changes a database. You can also install the versioned tarball from the
+[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.1.2).
 
 `setup` without `--apply` is a read-only plan. Choose codex, claude, opencode,
 hermes, or all. Missing skills are installed; unchanged owned copies upgrade

@@ -1,8 +1,8 @@
 # Golden Rules migration history — 2026-08-19
 
-> Non-runtime history. Lodestar agents do not receive this file at startup.
-> Current authority lives only in `managed-assets/governance.json` as
-> `g:lodestar:required-governance`.
+> **Historical record.** This file describes retired 1.x governance and migration
+> mechanisms. It is not current authority or operating guidance. See the
+> [current documentation](../README.md) and [2.1.2 release notes](../releases/v2.1.2.md).
 
 ## Why this migration occurred
 

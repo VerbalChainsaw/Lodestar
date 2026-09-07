@@ -23,6 +23,8 @@ jobs:
         with:
           node-version: 24.15.0
       - run: npm test
+      - name: Build the static site
+        run: node scripts/build-site.mjs .site-smoke
       - run: npm run pack:check
       - run: npm pack --json
       - name: Resolve package artifact
