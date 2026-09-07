@@ -21,6 +21,7 @@ import {
   openReadDatabase,
   openWriteDatabase,
   admittedTransaction,
+  normalizeDatabaseBusyError,
   transaction,
 } from "../src/database.mjs";
 import {
@@ -38,6 +39,51 @@ async function temporaryDirectory(t) {
 async function digest(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
+
+test("database busy normalization recognizes only native SQLite busy and locked errors", () => {
+  const file = "test.db";
+  for (const raw of [
+    Object.assign(new Error("busy"), { code: "SQLITE_BUSY" }),
+    Object.assign(new Error("locked"), { code: "SQLITE_LOCKED" }),
+    Object.assign(new Error("busy recovery"), { code: "ERR_SQLITE_ERROR", errcode: 5 | (1 << 8) }),
+    Object.assign(new Error("locked shared cache"), { code: "ERR_SQLITE_ERROR", errcode: 6 | (1 << 8) }),
+  ]) {
+    const normalized = normalizeDatabaseBusyError(raw, file);
+    assert.equal(normalized.code, "database_busy");
+    assert.equal(normalized.identifiers.database, file);
+    assert.equal(normalized.cause, raw);
+  }
+
+  for (const unrelated of [
+    Object.assign(new Error("I/O"), { code: "ERR_SQLITE_ERROR", errcode: 10 }),
+    Object.assign(new Error("not SQLite"), { code: "OTHER_ERROR", errcode: 5 }),
+    new Error("ordinary failure"),
+  ]) {
+    assert.equal(normalizeDatabaseBusyError(unrelated, file), unrelated);
+  }
+});
+
+test("database busy normalization does not invoke hostile getters or propagate descriptor traps", () => {
+  let getterReads = 0;
+  const getters = {};
+  for (const key of ["code", "errcode"]) {
+    Object.defineProperty(getters, key, {
+      get() {
+        getterReads += 1;
+        throw new Error("hostile getter");
+      },
+    });
+  }
+  assert.equal(normalizeDatabaseBusyError(getters, "test.db"), getters);
+  assert.equal(getterReads, 0);
+
+  const descriptorTrap = new Proxy({}, {
+    getOwnPropertyDescriptor() {
+      throw new Error("hostile descriptor trap");
+    },
+  });
+  assert.equal(normalizeDatabaseBusyError(descriptorTrap, "test.db"), descriptorTrap);
+});
 
 test("initializes the universal-record schema and is read-only when repeated", async (t) => {
   const directory = await temporaryDirectory(t);

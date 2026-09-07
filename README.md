@@ -32,7 +32,8 @@ and native tools, explicit installation ownership, and read-only startup.
 The 2.1.1 repairs also close a native read/write routing error, incomplete dependency
 reporting, clipped recovery bases, and JSON data-key handling defects. Version 2.1.2
 brings those changes into a public release with current documentation, artwork, and
-shared package-smoke checks in CI and release workflows. See the
+shared package-smoke checks in CI and release workflows. It also preserves typed
+busy recovery when contention occurs before a write transaction starts. See the
 [release notes](docs/releases/v2.1.2.md) for upgrade details.
 
 There is no daemon, telemetry, background indexer, or startup write. Missing optional

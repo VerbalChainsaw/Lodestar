@@ -33,16 +33,37 @@ function stateFor(db) {
   return state;
 }
 
-function sqliteError(error, file) {
-  const code = String(error?.code ?? "");
-  const primaryCode = Number.isInteger(error?.errcode)
-    ? error.errcode & 0xff
+function ownDataProperty(value, key) {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
+    return undefined;
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && Object.hasOwn(descriptor, "value")
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function normalizeDatabaseBusyError(error, file = null) {
+  const rawCode = ownDataProperty(error, "code");
+  const code = typeof rawCode === "string" ? rawCode : "";
+  const rawErrorCode = ownDataProperty(error, "errcode");
+  const primaryCode = Number.isInteger(rawErrorCode)
+    ? rawErrorCode & 0xff
     : null;
+  const nativeSqliteError = code === "ERR_SQLITE_ERROR"
+    || code.startsWith("SQLITE_");
   if (
-    code.includes("SQLITE_BUSY")
-    || code.includes("SQLITE_LOCKED")
-    || primaryCode === 5
-    || primaryCode === 6
+    nativeSqliteError
+    && (
+      code.includes("SQLITE_BUSY")
+      || code.includes("SQLITE_LOCKED")
+      || primaryCode === 5
+      || primaryCode === 6
+    )
   ) {
     return lodestarError(
       "database_busy",
@@ -54,6 +75,16 @@ function sqliteError(error, file) {
       },
     );
   }
+  return error;
+}
+
+function sqliteError(error, file) {
+  const busyError = normalizeDatabaseBusyError(error, file);
+  if (busyError !== error) return busyError;
+  const code = String(error?.code ?? "");
+  const primaryCode = Number.isInteger(error?.errcode)
+    ? error.errcode & 0xff
+    : null;
   if (
     code.includes("SQLITE_CORRUPT")
     || code.includes("SQLITE_NOTADB")
@@ -299,7 +330,7 @@ export async function openReadDatabase(file) {
       {
         identifiers: { database: file },
         action:
-          "Write the first record with lodestar put or import a legacy store.",
+          "Run lodestar init to create a new store, or select an existing database with --db.",
       },
     );
   }
@@ -323,7 +354,7 @@ export async function openDiagnosticDatabase(file) {
       {
         identifiers: { database: file },
         action:
-          "Write the first record with lodestar put before running diagnostics.",
+          "Run lodestar init to create a new store, or select an existing database with --db.",
       },
     );
   }
@@ -345,7 +376,7 @@ export async function openWriteDatabase(file) {
       {
         identifiers: { database: file },
         action:
-          "Write the first record with lodestar put or import a legacy store.",
+          "Run lodestar init to create a new store, or select an existing database with --db.",
       },
     );
   }
