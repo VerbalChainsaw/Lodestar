@@ -1,5 +1,7 @@
 # Lodestar lean reduction codeplan
 
+> **Historical plan.** This file preserves pre-2.1 design and verification history; it is not current operating guidance. See the [current documentation](../README.md).
+
 Date: 2026-08-27
 Scope owner: Director
 Method: Codeplan (evidence-gated) + Center Audit (claim proof) applied before each edit.

@@ -1,5 +1,7 @@
 # LodestarLite architectural reduction report
 
+> **Historical plan.** This file preserves pre-2.1 design and verification history; it is not current operating guidance. See the [current documentation](../README.md).
+
 Status: implemented and locally verified; hosted cross-platform CI pending push
 
 Branch: `LodestarLite`

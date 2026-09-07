@@ -1,30 +1,70 @@
 # Lodestar
 
-Lodestar is a local, JSON-first project context registry for agents. Version 2.1
-ships one executable, one contract-5 envelope, one current SQLite schema, and one
-guarded mutation path for facts, decisions, work outcomes, and continuity.
+**Give your next session a head start.**
+
+![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
+
+[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.1.2.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
+
+Lodestar keeps useful project context, decisions, and unfinished work in one local
+registry. Your coding agent can get its bearings, check what changed, and leave a
+clear continuation for the next session.
+
+Use it when new sessions keep rediscovering project facts, revisiting settled
+decisions, or losing the thread of unfinished work. It provides a current starting
+point and a checked correction path. You and your native project instructions
+keep authority over the work.
+
+## What is better in 2.1
+
+The 2.1.2 public release replaces the older 1.6 workflow with one contract for CLI
+and native tools, explicit installation ownership, and read-only startup.
+
+| Everyday problem | What Lodestar does |
+| --- | --- |
+| A new session starts from scratch. | Returns relevant saved context, decisions, and work for the current project and checkout. |
+| A saved claim outlives its source. | Checks local file and package evidence during ordinary reads and flags claims needing reinspection. |
+| An agent guesses how to update a record. | Exposes complete mutation inputs through JSON help and native describe, with a usable write basis from reads. |
+| Two updates collide, or a response is lost. | Checks observed revisions, preserves history, and makes exact request retries safe for database effects. |
+| Native skill copies drift. | Plans owned updates, preserves displaced bytes, verifies installed files, and reports local conflicts. |
+| Project identity changes. | Keeps explicitly mapped member records usable while retaining their origin and history. |
+
+The 2.1.1 repairs also close a native read/write routing error, incomplete dependency
+reporting, clipped recovery bases, and JSON data-key handling defects. Version 2.1.2
+brings those changes into a public release with current documentation, artwork, and
+shared package-smoke checks in CI and release workflows. See the
+[release notes](docs/releases/v2.1.2.md) for upgrade details.
+
+There is no daemon, telemetry, background indexer, or startup write. Missing optional
+context does not stop work whose required inputs are otherwise available. A source
+check is evidence at read time; it does not prove the truth of a saved claim.
+
+## Install
+
+Requires **Node.js 24.15.0 or newer**. For a new installation:
 
 ```text
-npm install --global .\lodestar-agent-context-2.1.1.tgz
+npm install --global lodestar-agent-context@2.1.2
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
 lodestar start --cwd .
 ```
 
-The local tarball is the supplied release artifact. Use the registry package name
-only after version 2.1.1 has been published. Review the setup plan; existing locally
-changed or unowned skills require `--replace-local`, which preserves backups.
-Choose an individual `--target` to install only one host. See
-[installation and startup checks](docs/installation.md). `init` is explicit and idempotent for a
-new current store; `start` never creates one.
+Inspect the setup plan before applying it. Choose an individual target if you only
+use one host. Independently edited skill files are reported for review; they are
+not silently overwritten. Start fresh host sessions after installing updated skills.
 
-`start` resolves the current project and checkout, reads applicable configured
-sources, and returns relevant records, conflicts, source status, and a usable
-`write_basis`. It also returns the maintained operating guide and a fresh, read-only
-installation check with an actionable setup command when needed. It does not
-initialize or mutate a database. Missing optional
-Lodestar context does not prevent ordinary work from native files and tools.
+**Upgrading an existing registry:** follow [storage and recovery](#storage-and-recovery)
+before converting an older store. The current runtime uses schema 5. Schema-4
+conversion is explicit and requires inspected preservation evidence and a backup.
+
+Native skill targets are Codex, Claude Code, OpenCode, and Hermes. Other agents and
+scripts can use the CLI. The optional Codex plugin exposes structured MCP tools.
+Windows and WSL use the same Windows-owned database through the one-shot launcher.
+Host discovery, authentication, and actual model use remain separate from package
+compatibility; see [installation checks](docs/installation.md) and
+[limitations](docs/limitations.md).
 
 ## Normal use
 

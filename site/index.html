@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#102a3b" />
+    <title>Lodestar — a head start for your next session</title>
+    <meta
+      name="description"
+      content="Local project context, decisions, and continuity for coding agents. Find your bearings, notice changed evidence, and leave useful work for the next session."
+    />
+    <link rel="canonical" href="https://verbalchainsaw.github.io/Lodestar/" />
+    <meta
+      property="og:title"
+      content="Lodestar — a head start for your next session"
+    />
+    <meta
+      property="og:description"
+      content="Current context. Remembered decisions. Useful continuity. One local tool for your coding agents."
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:url"
+      content="https://verbalchainsaw.github.io/Lodestar/"
+    />
+    <meta
+      property="og:image"
+      content="https://verbalchainsaw.github.io/Lodestar/assets/lodestar-ridgeline.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="hero">
+      <img
+        class="hero-photo"
+        src="assets/lodestar-ridgeline.png"
+        alt="A mountain trail follows a blue ridgeline toward the first light of dawn beneath a guiding star."
+        fetchpriority="high"
+      />
+      <div class="hero-shade"></div>
+      <nav class="nav wrap" aria-label="Main navigation">
+        <a class="wordmark" href="./" aria-label="Lodestar home"
+          ><span aria-hidden="true">✦</span> Lodestar</a
+        >
+        <div class="nav-links">
+          <a href="#how-it-helps">How it helps</a
+          ><a
+            href="https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/installation.md"
+            >Docs</a
+          ><a
+            class="nav-source"
+            href="https://github.com/VerbalChainsaw/Lodestar"
+            >GitHub <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </nav>
+      <div class="hero-copy wrap">
+        <p class="eyebrow">Project context, kept close.</p>
+        <h1>
+          Give your next session<br />
+          a head start.
+        </h1>
+        <p class="lede">
+          The decisions you made. The evidence that changed. The work still in
+          flight. Lodestar keeps useful context ready for your agent.
+        </p>
+        <div class="actions">
+          <a class="button" href="#get-started"
+            >Get started <span aria-hidden="true">↓</span></a
+          ><a
+            class="text-link"
+            href="https://github.com/VerbalChainsaw/Lodestar#normal-use"
+            >See the workflow <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </div>
+      <div class="hero-foot wrap">
+        <span>Local storage. Open source. Yours to inspect.</span
+        ><a
+          href="https://github.com/VerbalChainsaw/Lodestar/releases/tag/v{{VERSION}}"
+          >Release {{VERSION}} <span aria-hidden="true">↗</span></a
+        >
+      </div>
+    </header>
+    <main id="main">
+      <section
+        class="intro wrap"
+        id="how-it-helps"
+        aria-labelledby="intro-title"
+      >
+        <div>
+          <p class="eyebrow ink">Less rediscovery</p>
+          <h2 id="intro-title">
+            Good work should<br />
+            carry forward.
+          </h2>
+        </div>
+        <div class="intro-body">
+          <p>
+            Every new session needs its bearings. What matters in this project?
+            Which decision still stands? What changed since the last run?
+          </p>
+          <p>
+            Lodestar gives your agent a current starting point and a clear way
+            to correct it. You stay in charge of the work.
+          </p>
+        </div>
+      </section>
+      <section class="steps wrap" aria-label="The normal workflow">
+        <article class="step">
+          <span class="step-no">01 / ORIENT</span>
+          <div>
+            <h3>Find your bearings.</h3>
+            <p>
+              Start in your project directory. Get the relevant saved context,
+              decisions, and unfinished work alongside the sources your agent
+              needs to inspect.
+            </p>
+          </div>
+          <code>lodestar start --cwd .</code>
+        </article>
+        <article class="step">
+          <span class="step-no">02 / CHECK</span>
+          <div>
+            <h3>Notice what changed.</h3>
+            <p>
+              Local source checks flag evidence that needs another look. A saved
+              claim remains an observation, with its source and scope attached.
+            </p>
+          </div>
+          <code>lodestar find "release process"</code>
+        </article>
+        <article class="step">
+          <span class="step-no">03 / CONTINUE</span>
+          <div>
+            <h3>Leave a useful next step.</h3>
+            <p>
+              Keep consequential decisions, corrections, and actual outcomes.
+              Checked updates preserve history and surface conflicts for a
+              deliberate correction.
+            </p>
+          </div>
+          <code>lodestar put --file update.json</code>
+        </article>
+      </section>
+      <section class="principle" aria-labelledby="principle-title">
+        <div class="wrap principle-inner">
+          <p class="eyebrow">The premise</p>
+          <h2 id="principle-title">
+            Useful enough to reach for.<br />
+            Clear enough to trust.
+          </h2>
+          <p>
+            Automatic orientation when your host loads the skill. Native
+            instructions and your decisions keep their authority. Missing
+            optional context never becomes a reason to stop well-grounded work.
+          </p>
+          <a
+            href="https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/limitations.md"
+            >Read the operating boundaries <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </section>
+      <section class="release-note wrap" aria-labelledby="release-title">
+        <p class="eyebrow ink">Updated for the way agents work</p>
+        <h2 id="release-title">What changed in 2.1?</h2>
+        <p>
+          Read-only startup, fresh local source checks, and one checked update
+          contract replace the older hook-driven workflow. Native setup now owns
+          its installed copies and reports conflicts. The result is easier
+          correction, clearer recovery, and less repeated discovery.
+        </p>
+        <a
+          href="https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/releases/v{{VERSION}}.md"
+          >Read the changes and upgrade notes
+          <span aria-hidden="true">↗</span></a
+        >
+      </section>
+      <section
+        class="install wrap"
+        id="get-started"
+        aria-labelledby="install-title"
+      >
+        <div>
+          <p class="eyebrow ink">Get started</p>
+          <h2 id="install-title">
+            One local tool.<br />
+            Your existing workflow.
+          </h2>
+          <p>
+            Native skill installation for Codex, Claude Code, OpenCode, and
+            Hermes. A CLI for scripts and other agents. The optional Codex
+            plugin adds structured tools.
+          </p>
+          <p class="requirements">
+            Requires Node.js 24.15.0 or newer. Windows and WSL share one
+            Windows-owned database.
+          </p>
+          <p>
+            <a
+              href="https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/installation.md"
+              >Installation and host setup <span aria-hidden="true">↗</span></a
+            >
+          </p>
+        </div>
+        <div class="terminal">
+          <div class="terminal-top">
+            <span>New installation</span><span>v{{VERSION}}</span>
+          </div>
+          <pre><code><span class="comment"># Install and inspect the setup plan</span>
+npm install --global lodestar-agent-context@{{VERSION}}
+lodestar setup --target all
+
+<span class="comment"># Apply the selected setup, then initialize</span>
+lodestar setup --target all --apply
+lodestar init
+lodestar start --cwd .</code></pre>
+          <p>
+            Already have a registry? Follow the
+            <a
+              href="https://github.com/VerbalChainsaw/Lodestar#storage-and-recovery"
+              >upgrade and recovery instructions</a
+            >
+            before converting an older store.
+          </p>
+        </div>
+      </section>
+      <section class="resources wrap" aria-label="Project resources">
+        <a href="https://github.com/VerbalChainsaw/Lodestar"
+          >Explore the source <span aria-hidden="true">↗</span></a
+        ><a
+          href="https://github.com/VerbalChainsaw/Lodestar/releases/tag/v{{VERSION}}"
+          >Release notes &amp; downloads <span aria-hidden="true">↗</span></a
+        ><a href="https://www.npmjs.com/package/lodestar-agent-context"
+          >Package on npm <span aria-hidden="true">↗</span></a
+        >
+      </section>
+    </main>
+    <footer class="wrap footer">
+      <a class="wordmark" href="./"
+        ><span aria-hidden="true">✦</span> Lodestar</a
+      ><span
+        >By <a href="https://github.com/VerbalChainsaw">VerbalChainsaw</a> ·
+        <a href="https://github.com/VerbalChainsaw/Lodestar/blob/main/LICENSE"
+          >MIT license</a
+        ></span
+      >
+    </footer>
+  </body>
+</html>

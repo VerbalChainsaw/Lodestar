@@ -1,5 +1,7 @@
 # Announcing Lodestar 1.6
 
+> **Historical announcement.** This page describes the 1.6 release line and is not current operating guidance. See the [current documentation](../README.md) and [2.1.2 release notes](../releases/v2.1.2.md).
+
 Current release: **Lodestar 1.6.0**
 
 ![Lodestar 1.6.0 social card](../assets/lodestar-v1.6.0-social.png)

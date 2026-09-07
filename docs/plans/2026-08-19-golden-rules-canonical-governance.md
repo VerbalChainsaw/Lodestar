@@ -1,5 +1,7 @@
 [codeplan · canonical-golden-governance · IN · mode: full · confidence: high · candidates: V1 structured asset+generator asset-structured, V2 embedded Markdown text-embedded, V3 registry authority registry-canonical, V4 parsed Markdown markdown-parsed · lean: V1 · baseline: V2]
 
+> **Historical plan.** This file preserves a retired pre-2.1 design and is not current operating guidance. See the [current documentation](../README.md).
+
 # Canonical Golden Rules governance
 
 ## Calibration

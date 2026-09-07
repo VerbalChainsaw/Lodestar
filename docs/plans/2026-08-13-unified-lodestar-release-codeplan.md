@@ -1,5 +1,7 @@
 # Unified Lodestar repair and release codeplan
 
+> **Historical plan.** This file preserves pre-2.1 design and verification history; it is not current operating guidance. See the [current documentation](../README.md).
+
 ## Decision
 
 Ship one suite named **Lodestar** with one public command family:
