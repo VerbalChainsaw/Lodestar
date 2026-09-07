@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.2 - 2026-09-07
+
+- Validate recovery operation paths, inventories, and preserved backup bytes before
+  restoring, settling, or cleaning up interrupted installations.
+- Keep lock ownership readable after abrupt process exit. Flush journal, receipt,
+  staged payload, and launcher backup files before publishing their replacements.
+- Detect changed displaced skills and launcher targets before publication; preserve
+  newer edits and reject launcher destinations overlapping skills or recovery state.
+- Track launcher ownership with the existing installation receipts so unchanged
+  owned launchers upgrade without repeated forced replacement.
+- Make explicit WSL home selection isolate caller host overrides while preserving
+  explicit per-host options. Keep contract 5 and schema 5 unchanged.
+
 ## 2.0.1 - 2026-09-06
 
 - Ship explicit native installation planning and application with retained backups,

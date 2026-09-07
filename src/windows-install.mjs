@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -112,7 +112,7 @@ for ((index=0; index<\${#arguments[@]}; index++)); do
         --db) check_database_path "\${arguments[$((index + 1))]}"; saw_database=true ;;
         --source) check_database_path "\${arguments[$((index + 1))]}" ;;
         --cwd) saw_cwd=true ;;
-        --home) saw_home=true ;;
+        --home) saw_home=true; selected_home="\${arguments[$((index + 1))]}" ;;
         --hermes-home) saw_hermes_home=true ;;
         --codex-home) saw_codex_home=true ;;
         --claude-home) saw_claude_home=true ;;
@@ -132,17 +132,25 @@ esac
 case "$command_name" in
   skills|setup)
     [ "$saw_home" = true ] || defaults+=(--home "$(windows_path "$HOME")")
-    [ "$saw_hermes_home" = true ] || defaults+=(--hermes-home "$(windows_path "\${HERMES_HOME:-$HOME/.hermes}")")
-    if [ "$saw_codex_home" = false ] && [ -n "\${CODEX_HOME:-}" ]; then
+    if [ "$saw_hermes_home" = false ]; then
+      if [ "$saw_home" = true ]; then
+        defaults+=(--hermes-home "$selected_home\\\\.hermes")
+      else
+        defaults+=(--hermes-home "$(windows_path "\${HERMES_HOME:-$HOME/.hermes}")")
+      fi
+    fi
+    # An explicit home selects an isolated host layout. Only explicit per-host
+    # options may override it; the caller's custom homes belong to another layout.
+    if [ "$saw_home" = false ] && [ "$saw_codex_home" = false ] && [ -n "\${CODEX_HOME:-}" ]; then
       defaults+=(--codex-home "$(windows_path "$CODEX_HOME")")
     fi
-    if [ "$saw_claude_home" = false ] && [ -n "\${CLAUDE_CONFIG_DIR:-}" ]; then
+    if [ "$saw_home" = false ] && [ "$saw_claude_home" = false ] && [ -n "\${CLAUDE_CONFIG_DIR:-}" ]; then
       defaults+=(--claude-home "$(windows_path "$CLAUDE_CONFIG_DIR")")
     fi
-    if [ "$saw_xdg_config_home" = false ] && [ -n "\${XDG_CONFIG_HOME:-}" ]; then
+    if [ "$saw_home" = false ] && [ "$saw_xdg_config_home" = false ] && [ -n "\${XDG_CONFIG_HOME:-}" ]; then
       defaults+=(--xdg-config-home "$(windows_path "$XDG_CONFIG_HOME")")
     fi
-    if [ "$saw_opencode_root" = false ] && [ -n "\${OPENCODE_CONFIG_DIR:-}" ]; then
+    if [ "$saw_home" = false ] && [ "$saw_opencode_root" = false ] && [ -n "\${OPENCODE_CONFIG_DIR:-}" ]; then
       defaults+=(--opencode-root "$(windows_path "$OPENCODE_CONFIG_DIR/skills")")
     fi ;;
 esac
@@ -179,9 +187,28 @@ async function installFileAtomically(target, text, mode, { expectedContent } = {
       await writeFile(temporary, text, { encoding: "utf8", flag: "wx", mode });
       await chmod(temporary, mode);
       await ensureWslExecutable(temporary);
+      const stagedHandle = await open(temporary, "r+");
+      try { await stagedHandle.sync(); } finally { await stagedHandle.close(); }
       // The distribution owner supplies the exact inspected bytes. Keep a recovery
       // copy before publishing a replacement; an upgrade never discards local bytes.
-      if (existing !== null) await writeFile(`${target}.${randomUUID()}.bak`, existing, { flag: "wx", mode });
+      if (existing !== null) {
+        const backup = `${target}.${randomUUID()}.bak`;
+        await writeFile(backup, existing, { flag: "wx", mode });
+        const backupHandle = await open(backup, "r+");
+        try { await backupHandle.sync(); } finally { await backupHandle.close(); }
+        if (!(await readFile(backup)).equals(existing)) {
+          throw Object.assign(new Error("The launcher recovery copy does not match the accepted bytes; the launcher was not replaced."),
+            { code: "launcher_backup_failed", path: target, backup });
+        }
+      }
+      const current = await readFile(target).catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (existing === null ? current !== null : !current?.equals(existing)) {
+        throw Object.assign(new Error("The launcher changed while its replacement was being staged; the newer state was preserved."),
+          { code: "launcher_conflict", path: target });
+      }
       await rename(temporary, target);
     } finally { await rm(temporary, { force: true }); }
     return target;

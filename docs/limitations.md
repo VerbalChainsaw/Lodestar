@@ -59,3 +59,9 @@
 - Installation replacement is recoverable per skill tree, not an atomic switch
   across every host. Restart host sessions after an upgrade; retry interrupted
   setup to settle pending replacements. Retained backups live outside skill discovery.
+- Flushed files and process-exit recovery tests do not certify physical power-loss
+  durability on every filesystem. Installer locks coordinate setup processes;
+  arbitrary external writers can still race the final check and rename. Changed or
+  malformed recovery state is preserved for inspection, not silently overwritten.
+- Host authentication and provider availability are independent of installation.
+  Native discovery can succeed while an expired login prevents a model session.

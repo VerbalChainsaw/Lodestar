@@ -5,7 +5,7 @@ ships one executable, one contract-5 envelope, one current SQLite schema, and on
 guarded mutation path for facts, decisions, work outcomes, and continuity.
 
 ```text
-npm install --global .\lodestar-agent-context-2.0.1.tgz
+npm install --global .\lodestar-agent-context-2.0.2.tgz
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -13,7 +13,7 @@ lodestar start --cwd .
 ```
 
 The local tarball is the supplied release artifact. Use the registry package name
-only after version 2.0.1 has been published. Review the setup plan; existing locally
+only after version 2.0.2 has been published. Review the setup plan; existing locally
 changed or unowned skills require `--replace-local`, which preserves backups.
 Choose an individual `--target` to install only one host. See
 [installation and startup checks](docs/installation.md). `init` is explicit and idempotent for a
