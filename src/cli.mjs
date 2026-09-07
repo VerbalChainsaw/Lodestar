@@ -9,6 +9,7 @@ import { canonicalStringify } from "./json.mjs";
 import { dispatch, operationResult } from "./agent-state.mjs";
 import { resolveDatabasePath } from "./paths.mjs";
 import { manageSkills } from "./skills.mjs";
+import { setup } from "./setup.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
 import { CONTRACT_VERSION } from "./schema.mjs";
 export { LODESTAR_VERSION } from "./version.mjs";
@@ -271,11 +272,26 @@ export async function runCli(
       writeSuccess(io, attemptedOperation, result, global.human);
       return result.data.verified === false && parsed.positionals[0] === "verify" ? 4 : 0;
     }
+    if (command === "setup") {
+      const result = operationResult(await setup({
+        target: parsed.options["--target"], home: parsed.options["--home"],
+        codexRoot: parsed.options["--codex-root"], hermesHome: parsed.options["--hermes-home"],
+        codexHome: parsed.options["--codex-home"], claudeHome: parsed.options["--claude-home"],
+        xdgConfigHome: parsed.options["--xdg-config-home"],
+        opencodeRoot: parsed.options["--opencode-root"],
+        apply: parsed.options["--apply"], replaceLocal: parsed.options["--replace-local"],
+        wslShim: parsed.options["--wsl-shim"], posixShim: parsed.options["--posix-shim"],
+      }));
+      writeSuccess(io, attemptedOperation, result, global.human);
+      return result.data.ready === false || result.data.verified === false ? 4 : 0;
+    }
     if (command === "skills") {
       const result = operationResult(await manageSkills(parsed.positionals[0] ?? "verify", {
         target: parsed.options["--target"],
         home: parsed.options["--home"],
         codexRoot: parsed.options["--codex-root"],
+        codexHome: parsed.options["--codex-home"], claudeHome: parsed.options["--claude-home"],
+        xdgConfigHome: parsed.options["--xdg-config-home"],
         hermesHome: parsed.options["--hermes-home"],
         opencodeRoot: parsed.options["--opencode-root"],
       }));

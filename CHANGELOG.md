@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.1 - 2026-09-06
+
+- Ship explicit native installation planning and application with retained backups,
+  recovery journals, and repeatable upgrades through the same package manifest.
+- Detect divergent discovered skill copies while recognizing physical aliases and
+  identical mirrors; expose the exact verification scope and selected host homes.
+- Repair WSL global-option and filesystem-argument routing and protect custom
+  launchers during replacement. Update the installed WSL acceptance check.
+- Document actual native startup checks separately from file-byte verification.
+
 ## Unreleased
 
 ## 2.0.0 - 2026-09-06

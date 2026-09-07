@@ -5,13 +5,18 @@ ships one executable, one contract-5 envelope, one current SQLite schema, and on
 guarded mutation path for facts, decisions, work outcomes, and continuity.
 
 ```text
-npm install --global .\lodestar-agent-context-2.0.0.tgz
+npm install --global .\lodestar-agent-context-2.0.1.tgz
+lodestar setup --target all
+lodestar setup --target all --apply
 lodestar init
 lodestar start --cwd .
 ```
 
 The local tarball is the supplied release artifact. Use the registry package name
-only after version 2.0.0 has been published. `init` is explicit and idempotent for a
+only after version 2.0.1 has been published. Review the setup plan; existing locally
+changed or unowned skills require `--replace-local`, which preserves backups.
+Choose an individual `--target` to install only one host. See
+[installation and startup checks](docs/installation.md). `init` is explicit and idempotent for a
 new current store; `start` never creates one.
 
 `start` resolves the current project and checkout, reads applicable configured
@@ -92,6 +97,7 @@ associations, and history.
 | `doctor`, `export` | Inspect integrity, produce conversion/recovery preflight evidence, or export exact private recovery evidence. |
 | `skills`, `agents` | Verify skill copies or inspect/print agent templates read-only. |
 | `init` | Explicitly create, migrate, or promote a recovered store. |
+| `setup` | Plan or explicitly install native skills, preserving replaced content and recovering interrupted installs. |
 
 Run `lodestar --help` or `lodestar <command> --help` for the declarations used by
 the CLI and native adapter. JSON is the default. Success goes to stdout and failure
@@ -122,9 +128,12 @@ source, entrypoint, distribution owner, source identity, and every payload file'
 byte length and SHA-256. It is tied directly to contract 5; there is no second
 manifest protocol. Private Golden Rules content is not bundled.
 
-`lodestar skills verify` is read-only. Native host owners install or update skill
-files; Lodestar reports missing, stale, duplicate, alternate-root, or verified trees
-without overwriting local edits.
+`lodestar skills verify` is read-only. `lodestar setup` plans native installation;
+`--apply` performs it. Both share the package manifest and host discovery resolver.
+Verification checks known user skill roots, deduplicates physical aliases, and
+reports divergent copies. Exact mirrored copies are identified without treating
+them as content conflicts. Custom project/plugin roots, permissions, and actual
+model selection require native host checks; file verification does not certify them.
 
 ## Storage and recovery
 
