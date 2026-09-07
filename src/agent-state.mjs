@@ -1,5 +1,6 @@
 import { AGENT_BOOTSTRAP, checkRecordSources, nativeInstructionSources, requiredSourceBundle } from "./bootstrap.mjs";
-import { initializeDatabase, openDiagnosticDatabase, openReadDatabase, openWriteDatabase, readMetadata } from "./database.mjs";
+import { initializeDatabase, normalizeDatabaseBusyError, openDiagnosticDatabase, openReadDatabase,
+  openWriteDatabase, readMetadata } from "./database.mjs";
 import { migrationPreflight, migrateDatabase, promoteRecoveredDatabase, recoveryPreflight } from "./schema-migration.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
 import { decisionMutation, decisionProjection } from "./decision.mjs";
@@ -47,7 +48,7 @@ async function withDatabase(open, file, operation, { read = false } = {}) {
     } catch { /* The original database error remains authoritative. */ }
     try { identifiers.revision = currentRevision(db); }
     catch { /* Revision may be unavailable on a damaged database. */ }
-    throw decorateError(error, identifiers);
+    throw decorateError(normalizeDatabaseBusyError(error, file), identifiers);
   } finally { db.close(); }
 }
 const cwd = (options) => options["--cwd"] ?? process.cwd();

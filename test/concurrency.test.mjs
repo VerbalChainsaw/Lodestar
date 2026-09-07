@@ -276,6 +276,45 @@ test('competing processes either commit the same request once or return retryabl
   } finally { db.close(); }
 });
 
+test('pre-admission SQLite contention stays typed and leaves the exact request reusable', async (t) => {
+  const f = await fixture(t);
+  const request = await f.request({ mode: 'create', record: { id: 'fact:preflight-busy', kind: 'fact',
+    name: 'Preflight busy', scope: 'global', data: { value: 'once' }, aliases: [], links: [], sources: [] } },
+  [{ kind: 'record', id: 'fact:preflight-busy' }]);
+  const holder = new DatabaseSync(f.database, { timeout: 0 });
+  const originalExec = DatabaseSync.prototype.exec;
+  let lockedAfterWriterOpened = false;
+  DatabaseSync.prototype.exec = function (sql) {
+    const result = originalExec.call(this, sql);
+    if (!lockedAfterWriterOpened && this !== holder && sql === 'PRAGMA journal_mode = DELETE') {
+      originalExec.call(holder, 'BEGIN EXCLUSIVE');
+      lockedAfterWriterOpened = true;
+    }
+    return result;
+  };
+  try {
+    const refused = await f.cli(['put'], request);
+    assert.equal(lockedAfterWriterOpened, true);
+    assert.equal(refused.code, 5, JSON.stringify(refused.value));
+    assert.equal(refused.value.ok, false, JSON.stringify(refused.value));
+    assert.equal(refused.value.error.code, 'database_busy', JSON.stringify(refused.value));
+    assert.equal(holder.isTransaction, true);
+    assert.equal(holder.prepare("SELECT COUNT(*) n FROM records").get().n, 0);
+  } finally {
+    DatabaseSync.prototype.exec = originalExec;
+    if (holder.isTransaction) holder.exec('ROLLBACK');
+    holder.close();
+  }
+
+  const accepted = await f.cli(['put'], request);
+  assert.equal(accepted.code, 0, JSON.stringify(accepted.value));
+  assert.equal(accepted.value.request.replayed, false, JSON.stringify(accepted.value));
+  const replay = await f.cli(['put'], request);
+  assert.equal(replay.code, 0, JSON.stringify(replay.value));
+  assert.equal(replay.value.request.replayed, true, JSON.stringify(replay.value));
+  assert.equal(replay.value.receipt_id, accepted.value.receipt_id);
+});
+
 test('busy refusal leaves the request reusable and the lock holder untouched', async (t) => {
   const f = await fixture(t);
   const request = await f.request({ mode: 'create', record: { id: 'fact:busy', kind: 'fact', name: 'Busy', scope: 'global',
