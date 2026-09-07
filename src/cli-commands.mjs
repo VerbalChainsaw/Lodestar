@@ -118,3 +118,15 @@ export const COMMANDS = Object.freeze({
     summary: "Compare complete maintained/package/installed skill payloads.",
     values: Object.keys(HOST_OPTIONS), booleans: [], positionals: { min: 0, max: 1 } },
 });
+
+// Core dispatch and native tools share the operation effect classification.
+// In particular, decision.status changes a decision; decision.show reads it.
+export const READ_OPERATIONS = Object.freeze({
+  start: ["start"], get: ["get"], find: ["find"], links: ["links"],
+  doctor: ["doctor"], export: ["export"],
+  "work.status": ["work", "status"], "work.history": ["work", "history"],
+  "handoff.status": ["handoff", "status"], "handoff.history": ["handoff", "history"],
+  "decision.show": ["decision", "show"], "pending.list": ["pending", "list"],
+  "skills.verify": ["skills", "verify"], "agents.status": ["agents", "status"],
+  "agents.verify": ["agents", "verify"], "agents.template": ["agents", "template"],
+});

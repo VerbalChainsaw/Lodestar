@@ -147,6 +147,11 @@ test('a project mapping invalidates old fact bases and returns a canonical check
   assert.equal(fresh.value.data.write_basis.project_scope, 'project:new');
   assert.ok(fresh.value.data.write_basis.targets.some(({ id }) => id === 'project:new'));
   assert.equal(fresh.value.data.data.value, 'old');
+  const corrected = await f.cli(['put'], { v: 5, request_id: 'fresh-binding', write_basis: fresh.value.data.write_basis,
+    input: { mode: 'update', id: 'fact:old', set: { data: { value: 'corrected' } }, remove: [] } });
+  assert.equal(corrected.code, 0, JSON.stringify(corrected.value));
+  assert.equal(corrected.value.data.data.value, 'corrected');
+  assert.equal(corrected.value.data.scope, 'project:old', 'correcting meaning preserves its origin');
 });
 
 test('schema and fence definitions are rechecked under mutation admission', async (t) => {

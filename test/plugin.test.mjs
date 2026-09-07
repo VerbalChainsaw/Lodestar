@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { COMMANDS, MUTATION_INPUTS } from "../src/cli-commands.mjs";
 import { AGENT_BOOTSTRAP } from "../src/bootstrap.mjs";
-import { MUTATION_REQUEST_SCHEMA } from "../src/records.mjs";
+import { MUTATION_REQUEST_SCHEMA, PUT_INPUT_SCHEMA, DELETE_INPUT_SCHEMA } from "../src/records.mjs";
 import { CONTRACT_VERSION } from "../src/schema.mjs";
 import { LODESTAR_VERSION } from "../src/version.mjs";
 import { callNativeTool, NATIVE_TOOLS } from "../codex-plugin/scripts/lodestar-mcp.mjs";
@@ -20,11 +20,17 @@ test("native tools derive the installed command and mutation contract", async ()
   assert.deepEqual(NATIVE_TOOLS.map(({ name }) => name), [
     "lodestar_describe", "lodestar_read", "lodestar_mutate",
   ]);
+  for (const tool of NATIVE_TOOLS) assert.equal(tool.inputSchema.type, "object",
+    `${tool.name} must declare an object input schema for MCP clients`);
   const described = await callNativeTool("lodestar_describe");
   assert.equal(described.contract, CONTRACT_VERSION);
   assert.equal(described.package_version, LODESTAR_VERSION);
   assert.deepEqual(described.operating_guide, AGENT_BOOTSTRAP);
   assert.deepEqual(described.commands, COMMANDS);
+  assert.deepEqual(described.mutation_request, MUTATION_REQUEST_SCHEMA);
+  assert.deepEqual(described.mutation_inputs.put, PUT_INPUT_SCHEMA);
+  assert.deepEqual(described.mutation_inputs.delete, DELETE_INPUT_SCHEMA);
+  assert.equal(Object.hasOwn(described.read_operations, "decision.status"), false);
   for (const operation of ["put", "delete", ...Object.keys(MUTATION_INPUTS)]) {
     const branch = NATIVE_TOOLS[2].inputSchema.oneOf.find(
       ({ properties }) => properties.operation.const === operation,
@@ -84,7 +90,9 @@ test("the MCP stdio transport lists and executes the installed contract-5 runtim
   assert.deepEqual(replies[1].result.tools.map(({ name }) => name),
     ["lodestar_describe", "lodestar_read", "lodestar_mutate"]);
   assert.equal(replies[2].result.structuredContent.contract, 5);
-  assert.equal(replies[3].error.data.error.code, "database_not_found");
+  assert.equal(replies[3].result?.isError, true, "core execution errors must reach the model as tool results");
+  assert.equal(replies[3].result.structuredContent.error.code, "database_not_found");
+  assert.deepEqual(JSON.parse(replies[3].result.content[0].text), replies[3].result.structuredContent);
   assert.equal(replies[4].result.structuredContent.ok, true,
     "an ok contract envelope remains a native success when CLI status means attention");
   assert.equal(replies[4].result.structuredContent.data.verified, false);

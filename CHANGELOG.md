@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.1.1 - 2026-09-07
+
+- Share the read-operation declaration between CLI dispatch and MCP. Reject the
+  misleading decision.status read route, which could previously reach a mutation.
+- Publish the actual generic record and domain mutation schemas through JSON help
+  and native describe. Keep MCP input schemas valid for object-based tool clients;
+  return core execution failures as tool errors with complete recovery envelopes.
+- Route native domain writes through the checkout in their observed basis. Preserve
+  complete absence/conflict bases, including long valid identifiers.
+- Refresh local source evidence on ordinary get, find, and linked-record reads
+  without rewriting stored observations. Include source-root configuration in the
+  basis, and accept read-only freshness annotations in full-record round trips.
+- Report retired or wrong-checkout required dependencies as incomplete context;
+  filter inapplicable seeds before following their dependencies.
+- Make explicit canonical project mappings usable for fact correction, work, and
+  handoff updates while preserving origin scopes and rejecting unrelated projects.
+- Reject non-string data-removal keys before writes and preserve literal JSON
+  __proto__ keys during shallow data merges. Retain contract 5 and schema 5.
+
 ## 2.1.0 - 2026-09-07
 
 - Discover standard Windows/Git Bash and WSL launcher destinations during setup.

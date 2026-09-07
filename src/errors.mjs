@@ -12,6 +12,7 @@ const COMPLETE_IDENTIFIER_CODES = new Set([
   "migration_source_conflict",
   "missing_precondition",
   "record_requires_source_correction",
+  "record_not_found", // get supplies a reusable absence write_basis, not just diagnostic prose.
   "request_conflict",
   "revision_conflict",
   "subject_conflict",
@@ -131,10 +132,11 @@ export function decorateError(error, identifiers = {}) {
   if (!LODESTAR_ERRORS.has(error)) return error;
   const code = knownCode(error);
   if (!code) return error;
+  const identifiersFor = COMPLETE_IDENTIFIER_CODES.has(code) ? (value) => value ?? {} : boundedIdentifiers;
   return lodestarError(code, boundedText(property(error, "message"),
     "Lodestar could not complete the operation."), {
-    identifiers: { ...boundedIdentifiers(property(error, "identifiers")),
-      ...boundedIdentifiers(identifiers) },
+    identifiers: { ...identifiersFor(property(error, "identifiers")),
+      ...identifiersFor(identifiers) },
     action: property(error, "action"),
     cause: error,
   });

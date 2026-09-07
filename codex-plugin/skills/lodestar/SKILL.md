@@ -58,6 +58,10 @@ identity, or infer a decision from arbitrary prose.
   prepares conversion evidence, and `doctor --recovery-preflight --source <accepted.db>`
   proves that a separate recovered image contains the exact accepted logical state.
 
+Use `lodestar <command> --help` in JSON mode, or native `lodestar_describe`, for
+the complete mutation envelope and operation input schema. `decision show` reads
+the stream; `decision status` changes its status. Do not guess write fields.
+
 JSON is the default output. Add `--human` only for human-formatted output. Read
 only the reference needed for the current operation:
 

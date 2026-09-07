@@ -9,13 +9,13 @@ import { pendingList, pendingMutation } from "./pending.mjs";
 import { decorateError, lodestarError } from "./errors.mjs";
 import { canonicalStringify, parseJsonText, readStreamComplete, readTextFileComplete } from "./json.mjs";
 import { resolveInputPath } from "./paths.mjs";
-import { catalogProjection, catalogReconciliation, resolveIdentity, resolveProject, sameMachinePath, scope } from "./project.mjs";
+import { catalogProjection, catalogReconciliation, resolveIdentity, resolveProject, resolveProjectScope, sameMachinePath, scope } from "./project.mjs";
 import { exportRegistry, findRecords, linkedRecords, normalizedForRows } from "./queries.mjs";
-import { deleteRecord, getRecord, getRawRecord, getRecordHistory, normalizeRecord,
+import { deleteRecord, getRecord, getRecordById, getRawRecord, getRecordHistory, normalizeRecord,
   normalizeMutationRequest, putRecord, writeBasis } from "./records.mjs";
 import { currentRevision } from "./revisions.mjs";
 import { validateLimit } from "./validate.mjs";
-import { installationOptions } from "./cli-commands.mjs";
+import { installationOptions, MUTATION_INPUTS, READ_OPERATIONS } from "./cli-commands.mjs";
 import { installationStatus } from "./setup.mjs";
 export { normalizeMachinePath, resolveIdentity, resolveProject } from "./project.mjs";
 
@@ -78,7 +78,25 @@ function withBasis(db, record, project = null) {
     projectScope: project?.scope ?? applicability.project ?? record.scope,
     checkout: project?.checkout_root ?? applicability.checkout ?? null,
     targets: [{ kind: "record", id: record.id },
+      ...(record.sources.some(({ metadata }) => metadata?.locator?.base === "source_root")
+        ? [{ kind: "record", id: "config:lodestar:sources" }] : []),
       ...(project?.binding_preconditions ?? []).map(({ target }) => target)] }) };
+}
+function recordReadEvidence(db, records) {
+  return records.filter((record) => record.sources.some(({ metadata }) =>
+    ["local_file", "package_manifest"].includes(metadata?.kind))).map((record) => {
+    const locators = record.sources.map(({ metadata }) => metadata?.locator);
+    const applicability = record.semantics.applicability;
+    const project = locators.some((locator) => ["project_root", "checkout_root"].includes(locator?.base))
+      ? resolveProjectScope(db, applicability.project ?? record.scope, applicability.checkout) ?? {} : {};
+    if (project.id) {
+      const data = normalizeRecord(getRecordById(db, project.id)).data;
+      project.root = data.roots?.[0] ?? data.root;
+    }
+    const config = locators.some((locator) => locator?.base === "source_root") ? sourceConfiguration(db)?.data ?? {} : {};
+    const sourceRoots = Object.fromEntries((config.skill_source_roots ?? []).map(({ id, locator }) => [id, locator]));
+    return { record, project, sourceRoots };
+  });
 }
 function withProjectBoundary(db, cwdValue, identity, operation) {
   let project;
@@ -93,6 +111,8 @@ function withProjectBoundary(db, cwdValue, identity, operation) {
 }
 export function startProjection(db, project, identity, { topic = null } = {}) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
+  const appliesToCheckout = (record) => !record.semantics?.applicability?.checkout
+    || sameMachinePath(record.semantics.applicability.checkout, project.checkout_root);
   const selected = normalizedForRows(db, db.prepare("SELECT * FROM records WHERE (scope IN ("
     + scopes.map(() => "?").join(",") + ") OR (scope='global' AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN ("
     + scopes.map(() => "?").join(",") + "))) "
@@ -100,21 +120,25 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
     + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') IN ('current','unresolved') "
     + "AND type NOT IN ('mutation-receipt','migration-source','startup-snapshot','pending','decision-event','work-event','handoff-packet') "
     + "ORDER BY json_extract(content_json,'$._lodestar.priority') DESC,id").all(...scopes, ...scopes));
-  const context = new Map(selected.records.map((record) => [record.id, { ...record, selection_reason: "orientation" }]));
+  const context = new Map(selected.records.filter(appliesToCheckout)
+    .map((record) => [record.id, { ...record, selection_reason: "orientation" }]));
   const recordErrors = [...(project.record_errors ?? []), ...selected.record_errors];
   const dependencyTargets = new Map();
   if (topic) for (const projectScope of scopes) {
     const found = findRecords(db, topic, { scope: projectScope });
     recordErrors.push(...found.record_errors);
     for (const record of found.records) {
-      if (!context.has(record.id)) context.set(record.id, { ...record, selection_reason: "topic" });
+      if (appliesToCheckout(record) && !context.has(record.id)) {
+        context.set(record.id, { ...record, selection_reason: "topic" });
+      }
     }
   }
   if (topic) {
     const global = findRecords(db, topic, { scope: "global" });
     recordErrors.push(...global.record_errors);
     for (const record of global.records) {
-      if (!scopes.includes(record.semantics?.applicability?.project) || context.has(record.id)) continue;
+      if (!scopes.includes(record.semantics?.applicability?.project)
+        || !appliesToCheckout(record) || context.has(record.id)) continue;
       context.set(record.id, { ...record, selection_reason: "topic" });
     }
   }
@@ -130,12 +154,26 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
       message: "A required context dependency does not exist.",
       identifiers: { id: link.to_id, required_by: record.id },
       action: "Restore the named dependency or correct the explicit relationship." });
-    for (const peer of dependency.records) if (["current", "unresolved"].includes(peer.semantics.lifecycle)) {
+    for (const peer of dependency.records) {
+      if (!["current", "unresolved"].includes(peer.semantics.lifecycle)) {
+        recordErrors.push({ code: "required_dependency_unavailable",
+          message: "A required context dependency is not current or unresolved.",
+          identifiers: { id: peer.id, required_by: record.id, lifecycle: peer.semantics.lifecycle },
+          action: "Restore a current or unresolved dependency or correct the explicit relationship." });
+        continue;
+      }
+      if (!appliesToCheckout(peer)) {
+        recordErrors.push({ code: "required_dependency_unavailable",
+          message: "A required context dependency does not apply to this checkout.",
+          identifiers: { id: peer.id, required_by: record.id,
+            checkout: peer.semantics.applicability.checkout },
+          action: "Bind the dependency to this checkout or correct the explicit relationship." });
+        continue;
+      }
       context.set(peer.id, { ...peer, selection_reason: `dependency:${record.id}` });
     }
   }
-  const applicable = [...context.values()].filter((record) => !record.semantics?.applicability?.checkout
-    || sameMachinePath(record.semantics.applicability.checkout, project.checkout_root)).map((record) => withBasis(db, record, project));
+  const applicable = [...context.values()].map((record) => withBasis(db, record, project));
   const subjects = new Map();
   for (const record of applicable) if (record.semantics?.subject) {
     const members = subjects.get(record.semantics.subject) ?? [];
@@ -229,42 +267,54 @@ export async function dispatch(command, { options, positionals }, database, io) 
         { topic: options["--topic"] })), { read: true });
     return hydrateStart(result, identity, options);
   }
-  if (["get", "find", "links", "export"].includes(command)) return withDatabase(openReadDatabase, database, (db) => {
-    checkReadRevision(db, options);
-    if (command === "get") {
-      if (options["--raw"] && options["--history"]) throw lodestarError("invalid_input", "Choose raw inspection or history for one get.");
-      try {
-        const data = options["--raw"] ? getRawRecord(db, positionals[0]) : options["--history"]
-          ? getRecordHistory(db, positionals[0]) : withBasis(db, normalizeRecord(getRecord(db, positionals[0])));
-        return dbResult(db, data);
-      } catch (error) {
-        throw decorateError(error, { write_basis: writeBasis(db,
-          { targets: [{ kind: "record", id: positionals[0] }] }) });
+  if (["get", "find", "links", "export"].includes(command)) {
+    let evidence = [];
+    const result = await withDatabase(openReadDatabase, database, (db) => {
+      checkReadRevision(db, options);
+      if (command === "get") {
+        if (options["--raw"] && options["--history"]) throw lodestarError("invalid_input", "Choose raw inspection or history for one get.");
+        try {
+          const data = options["--raw"] ? getRawRecord(db, positionals[0]) : options["--history"]
+            ? getRecordHistory(db, positionals[0]) : withBasis(db, normalizeRecord(getRecord(db, positionals[0])));
+          if (!options["--raw"] && !options["--history"]) evidence = recordReadEvidence(db, [data]);
+          return dbResult(db, data);
+        } catch (error) {
+          throw decorateError(error, { write_basis: writeBasis(db,
+            { targets: [{ kind: "record", id: positionals[0] }] }) });
+        }
       }
-    }
-    if (command === "find") {
-      const result = findRecords(db, positionals[0], { scope: options["--scope"], type: options["--kind"],
-        limit: options["--limit"], offset: options["--offset"], history: options["--history"] ?? false });
-      result.records = result.records.map((record) => withBasis(db, record));
-      const revision = currentRevision(db);
-      return dbResult(db, { query: result.query, records: result.records, record_errors: result.record_errors,
-        complete: result.record_errors.length === 0 }, { more: result.truncated,
-        next: result.truncated ? [{ command: "find", args: [result.query,
-          ...(options["--scope"] === undefined ? [] : ["--scope", options["--scope"]]),
-          ...(options["--kind"] === undefined ? [] : ["--kind", options["--kind"]]),
-          ...(options["--history"] ? ["--history"] : []), "--limit", String(result.limit),
-          "--offset", String(result.offset + result.limit), "--at-revision", String(revision)] }] : [] });
-    }
-    if (command === "links") {
-      const result = linkedRecords(db, positionals[0], { limit: options["--limit"], offset: options["--offset"] });
-      const revision = currentRevision(db);
-      return dbResult(db, { id: result.id, links: result.links, record_errors: result.record_errors,
-        complete: result.record_errors.length === 0 }, { more: result.truncated,
-        next: result.truncated ? [{ command: "links", args: [positionals[0], "--limit", String(result.limit),
-          "--offset", String(result.offset + result.limit), "--at-revision", String(revision)] }] : [] });
-    }
-    return dbResult(db, exportRegistry(db).document);
-  }, { read: true });
+      if (command === "find") {
+        const result = findRecords(db, positionals[0], { scope: options["--scope"], type: options["--kind"],
+          limit: options["--limit"], offset: options["--offset"], history: options["--history"] ?? false });
+        result.records = result.records.map((record) => withBasis(db, record));
+        if (!options["--history"]) evidence = recordReadEvidence(db, result.records);
+        const revision = currentRevision(db);
+        return dbResult(db, { query: result.query, records: result.records, record_errors: result.record_errors,
+          complete: result.record_errors.length === 0 }, { more: result.truncated,
+          next: result.truncated ? [{ command: "find", args: [result.query,
+            ...(options["--scope"] === undefined ? [] : ["--scope", options["--scope"]]),
+            ...(options["--kind"] === undefined ? [] : ["--kind", options["--kind"]]),
+            ...(options["--history"] ? ["--history"] : []), "--limit", String(result.limit),
+            "--offset", String(result.offset + result.limit), "--at-revision", String(revision)] }] : [] });
+      }
+      if (command === "links") {
+        const result = linkedRecords(db, positionals[0], { limit: options["--limit"], offset: options["--offset"] });
+        for (const link of result.links) if (link.peer) link.peer = withBasis(db, link.peer);
+        evidence = recordReadEvidence(db, result.links.map(({ peer }) => peer).filter(Boolean));
+        const revision = currentRevision(db);
+        return dbResult(db, { id: result.id, links: result.links, record_errors: result.record_errors,
+          complete: result.record_errors.length === 0 }, { more: result.truncated,
+          next: result.truncated ? [{ command: "links", args: [positionals[0], "--limit", String(result.limit),
+            "--offset", String(result.offset + result.limit), "--at-revision", String(revision)] }] : [] });
+      }
+      return dbResult(db, exportRegistry(db).document);
+    }, { read: true });
+    const cache = new Map();
+    await Promise.all(evidence.map(async ({ record, project, sourceRoots }) => {
+      Object.assign(record, await checkRecordSources(record, { cache, project, sourceRoots }));
+    }));
+    return result;
+  }
   if (["put", "delete"].includes(command)) {
     const request = normalizeMutationRequest(await input(options, io, `${command}_input`));
     return withDatabase(openWriteDatabase, database, (db) => {
@@ -276,8 +326,12 @@ export async function dispatch(command, { options, positionals }, database, io) 
   }
   if (["work", "handoff", "decision", "pending"].includes(command)) {
     const action = positionals[0] ?? (command === "pending" ? "list" : "status");
-    const read = command === "decision" ? action === "show"
-      : ["status", "history", "list"].includes(action);
+    const operationName = `${command}.${action}`;
+    const read = Object.hasOwn(READ_OPERATIONS, operationName);
+    if (!read && !Object.hasOwn(MUTATION_INPUTS, operationName)) {
+      throw lodestarError("unknown_operation", "Unsupported domain operation.", { identifiers: { operation: operationName },
+        action: `Use lodestar ${command} --help for supported operations.` });
+    }
     const caller = callerIdentity(options);
     if (read) return withDatabase(openReadDatabase, database, (db) => {
       checkReadRevision(db, options);
