@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
+import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { LODESTAR_VERSION } from "../src/version.mjs";
+import { temporaryDirectory } from "./helpers/contract.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const NODE = process.execPath;
@@ -46,8 +46,7 @@ async function installPacked(directory) {
 test("the staged package installs and exercises the current one-shot contract", {
   timeout: 120_000,
 }, async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-2-installed-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const directory = await temporaryDirectory(t, "lodestar-2-installed-");
   const { packageRoot, entry } = await installPacked(directory);
   const database = path.join(directory, "state", "lodestar.db");
   const clientHome = path.join(directory, "client-home");

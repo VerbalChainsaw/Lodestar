@@ -19,3 +19,6 @@ See [installation](installation.md), [schema](schema.md), [limitations](limitati
 and the [2.1.2 release notes](releases/v2.1.2.md). JSON command help exposes complete
 mutation inputs. Ordinary local-source reads flag changed evidence without rewriting
 saved observations; explicit canonical project mappings preserve usable correction paths.
+
+Maintainers should use the [publishing guide](https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/publishing.md) for package release,
+landing-page deployment, and verification order.
