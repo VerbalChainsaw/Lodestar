@@ -16,7 +16,14 @@ import { prepareProjectRoots, resolveProjectScope, sameMachinePath, validateProj
 import { allocateRevision, currentRevision } from "./revisions.mjs";
 import { CONTRACT_VERSION } from "./schema.mjs";
 import {
+  CONTEXT_ROLES,
   FRESHNESS_STATES,
+  INSPECTION_STATES,
+  KNOWLEDGE_STATES,
+  SEMANTIC_BASES,
+  SEMANTIC_LIFECYCLES,
+  SOURCE_KINDS,
+  SOURCE_RELATIONS,
   validateContent,
   validateIdentifier,
   validatePutInput,
@@ -25,6 +32,155 @@ import {
   validateTimestamp,
 } from "./validate.mjs";
 const activeMutations = new WeakMap();
+const RECORD_FIELDS = Object.freeze(["id", "kind", "name", "scope", "availability", "priority",
+  "data", "aliases", "links", "sources", "semantics", "v", "revision",
+  "created_at", "updated_at", "write_basis", "current_source_status", "claim_status"]);
+const ASSOCIATION_FIELDS = Object.freeze(["aliases", "links", "sources"]);
+const REQUIRED_RECORD_FIELDS = Object.freeze(["id", "kind", "name", "scope", "data",
+  ...ASSOCIATION_FIELDS]);
+const UPDATE_SET_FIELDS = Object.freeze(["name", "availability", "priority", "data", "aliases",
+  "links", "sources", "semantics"]);
+const PUT_RECORD_FIELDS = Object.freeze(["mode", "record"]);
+const PUT_UPDATE_FIELDS = Object.freeze(["mode", "id", "set", "remove"]);
+const DELETE_INPUT_FIELDS = Object.freeze(["id", "reason"]);
+
+const nonemptyStringSchema = { type: "string", minLength: 1 };
+const nullableNonemptyStringSchema = { type: ["string", "null"], minLength: 1 };
+const linkSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["relationship", "to_id"],
+  properties: {
+    relationship: { ...nonemptyStringSchema, description: "Relationship name." },
+    to_id: { ...nonemptyStringSchema, description: "Exact target record ID." },
+  },
+};
+const sourceMetadataSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["kind", "relation"],
+  description: "Evidence metadata. Runtime validation enforces kind-specific locator, fingerprint, timestamp, and evidence requirements.",
+  properties: {
+    inspection: { enum: INSPECTION_STATES, default: "not_inspected",
+      description: "Inspection state; omitted values default to not_inspected." },
+    kind: { enum: SOURCE_KINDS, description: "Kind of evidence source." },
+    relation: { enum: SOURCE_RELATIONS, description: "How the source supports the record." },
+    locator: { type: "object", additionalProperties: false,
+      description: "Location of local_file or package_manifest evidence.",
+      properties: {
+        base: { enum: ["project_root", "checkout_root", "source_root", "absolute"] },
+        path: { type: "string", minLength: 1 },
+        source_id: { type: "string", minLength: 1 },
+      } },
+    observed_at: { type: "string",
+      description: "RFC3339 UTC timestamp with milliseconds when the source was observed." },
+    fingerprint: { type: "object", additionalProperties: false,
+      description: "Complete SHA-256 byte fingerprint for local evidence.",
+      required: ["algorithm", "value", "bytes"],
+      properties: {
+        algorithm: { const: "sha256" },
+        value: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        bytes: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+      } },
+    claim: { description: "Source-specific claim retained as JSON." },
+    evidence_ref: { type: ["string", "null"],
+      description: "Evidence reference required at runtime for runtime and external observations." },
+  },
+};
+const sourceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["origin", "freshness", "metadata"],
+  properties: {
+    origin: { ...nonemptyStringSchema, description: "Unique source origin within this record." },
+    freshness: { enum: FRESHNESS_STATES },
+    metadata: sourceMetadataSchema,
+  },
+};
+const semanticsObjectSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["lifecycle", "context_role", "basis", "applicability"],
+  properties: {
+    subject: { ...nonemptyStringSchema, description: "Optional semantic subject identity." },
+    lifecycle: { enum: SEMANTIC_LIFECYCLES },
+    context_role: { enum: CONTEXT_ROLES },
+    basis: { enum: SEMANTIC_BASES },
+    applicability: { type: "object", additionalProperties: false,
+      required: ["project", "checkout"], properties: {
+        project: { ...nullableNonemptyStringSchema, description: "Canonical project scope or null." },
+        checkout: { ...nullableNonemptyStringSchema, description: "Checkout identity/path or null." },
+      } },
+    provenance: { description: "Application-owned JSON provenance." },
+    reason: { description: "Application-owned JSON reason." },
+    supersedes: { description: "Application-owned JSON supersession reference." },
+    conditions: { description: "Application-owned JSON conditions." },
+    retirement_reason: { description: "Application-owned JSON retirement reason." },
+  },
+};
+const semanticsSchema = { anyOf: [semanticsObjectSchema, { type: "null" }],
+  description: "Semantic metadata; null uses the ordinary current/on-demand/asserted defaults." };
+const associationSchemas = {
+  aliases: { type: ["array", "null"], items: nonemptyStringSchema, default: [],
+    description: "Record aliases; null defaults to an empty array. Runtime validation rejects duplicates." },
+  links: { type: ["array", "null"], items: linkSchema, default: [],
+    description: "Outgoing links; null defaults to an empty array. Runtime validation rejects duplicates." },
+  sources: { type: ["array", "null"], items: sourceSchema, default: [],
+    description: "Evidence sources; null defaults to an empty array. Runtime validation requires unique origins." },
+};
+const recordProperties = {
+  id: { ...nonemptyStringSchema, description: "Stable record ID." },
+  kind: { ...nonemptyStringSchema, description: "Record kind; command-owned kinds are rejected at runtime." },
+  name: { ...nonemptyStringSchema, description: "Human-readable record name." },
+  scope: { ...nonemptyStringSchema, description: "Canonical record scope." },
+  availability: { anyOf: [{ enum: KNOWLEDGE_STATES }, { type: "null" }], default: "unknown",
+    description: "Knowledge availability; omitted or null values default to unknown." },
+  priority: { type: "integer", minimum: Number.MIN_SAFE_INTEGER,
+    maximum: Number.MAX_SAFE_INTEGER, default: 0 },
+  data: { description: "Application-owned JSON value. Update mode accepts only object data for shallow key changes." },
+  ...associationSchemas,
+  semantics: semanticsSchema,
+  v: { type: "integer", description: "Accepted normalized-record contract marker; ignored when writing." },
+  revision: { type: "integer", description: "Accepted normalized-record revision; ignored when writing." },
+  created_at: { type: "string", description: "Accepted normalized-record timestamp; ignored when writing." },
+  updated_at: { type: "string", description: "Accepted normalized-record timestamp; ignored when writing." },
+  write_basis: { type: "object", description: "Accepted normalized-record read basis; ignored when writing." },
+  current_source_status: { type: "array", readOnly: true, description: "Fresh read observations; ignored when writing." },
+  claim_status: { type: "string", readOnly: true, description: "Fresh read assessment; ignored when writing." },
+};
+const recordSchema = { type: "object", additionalProperties: false,
+  required: REQUIRED_RECORD_FIELDS, properties: recordProperties };
+const updateSetSchema = { type: "object", additionalProperties: false,
+  properties: {
+    name: recordProperties.name,
+    availability: recordProperties.availability,
+    priority: recordProperties.priority,
+    data: { type: "object",
+      description: "Top-level data members shallow-merged into the existing object." },
+    ...associationSchemas,
+    semantics: semanticsSchema,
+  } };
+const createInputSchema = { type: "object", additionalProperties: false,
+  required: ["mode", "record"], properties: { mode: { const: "create" }, record: recordSchema } };
+const updateInputSchema = { type: "object", additionalProperties: false,
+  required: ["mode", "id", "set", "remove"], properties: {
+    mode: { const: "update" }, id: nonemptyStringSchema, set: updateSetSchema,
+    remove: { type: "array", items: { type: "string" },
+      description: "Top-level keys removed from object data; keys also present in set.data are rejected." },
+  } };
+const replaceInputSchema = { type: "object", additionalProperties: false,
+  required: ["mode", "record"], properties: { mode: { const: "replace" },
+    record: { ...recordSchema, required: REQUIRED_RECORD_FIELDS } } };
+
+export const PUT_INPUT_SCHEMA = Object.freeze({ type: "object", additionalProperties: false,
+  properties: { mode: { enum: ["create", "update", "replace"] }, record: recordSchema,
+    id: nonemptyStringSchema, set: updateSetSchema, remove: updateInputSchema.properties.remove },
+  oneOf: [createInputSchema, updateInputSchema, replaceInputSchema] });
+export const DELETE_INPUT_SCHEMA = Object.freeze({ type: "object", additionalProperties: false,
+  required: ["id", "reason"], properties: {
+    id: { ...nonemptyStringSchema, description: "Exact record ID to retire." },
+    reason: { ...nonemptyStringSchema, description: "Reason stored in semantic retirement metadata." },
+  } });
 const identitySchema = { type: "string", pattern: "^[0-9a-f]{64}$" };
 const targetFields = { kind: { enum: ["record", "decision"] }, id: { type: "string", minLength: 1 },
   scope: { type: "string", minLength: 1 }, key: { type: "string", minLength: 1 } };
@@ -826,11 +982,8 @@ export function writeRecordSnapshot(db, value, {
 
 function internalRecord(value) {
   if (!plain(value)) invalidMutation("record must be an object.");
-  exactKeys(value, ["id", "kind", "name", "scope", "availability", "priority",
-    "data", "aliases", "links", "sources", "semantics", "v", "revision",
-    "created_at", "updated_at", "write_basis"], "record");
-  for (const field of ["id", "kind", "name", "scope", "data", "aliases",
-    "links", "sources"]) {
+  exactKeys(value, RECORD_FIELDS, "record");
+  for (const field of REQUIRED_RECORD_FIELDS) {
     if (!Object.hasOwn(value, field)) invalidMutation(`record.${field} is required.`);
   }
   return {
@@ -888,22 +1041,23 @@ function assertSubjectAvailable(db, record) {
 }
 
 function updateRecordValue(current, input) {
-  const allowedSet = ["name", "availability", "priority", "data", "aliases",
-    "links", "sources", "semantics"];
-  exactKeys(input, ["mode", "id", "set", "remove"], "input");
+  exactKeys(input, PUT_UPDATE_FIELDS, "input");
   if (!plain(input.set) || !Array.isArray(input.remove)) {
     invalidMutation("update requires object set and array remove fields.");
   }
-  exactKeys(input.set, allowedSet, "input.set");
+  exactKeys(input.set, UPDATE_SET_FIELDS, "input.set");
+  if (input.remove.some((key) => typeof key !== "string")) {
+    invalidMutation("input.remove must contain only string data keys.");
+  }
   const overlap = input.remove.filter((key) => Object.hasOwn(input.set.data ?? {}, key));
   if (overlap.length) invalidMutation("data set/remove fields overlap.", { overlap });
   if (!plain(current.data) && (Object.hasOwn(input.set, "data") || input.remove.length)) {
     invalidMutation("Targeted data updates require object data; use explicit replace for a scalar or array.");
   }
-  const data = plain(current.data) ? { ...current.data } : current.data;
+  let data = plain(current.data) ? { ...current.data } : current.data;
   if (Object.hasOwn(input.set, "data")) {
     if (!plain(input.set.data)) invalidMutation("input.set.data must be an object.");
-    Object.assign(data, input.set.data);
+    data = { ...data, ...input.set.data };
   }
   for (const key of input.remove) delete data[key];
   return internalRecord({
@@ -999,11 +1153,11 @@ export function applyPutInput(db, input, {
   if (mode === "update") {
     record = updateRecordValue(normalizeRecord(getRecordById(db, id)), input);
   } else {
-    exactKeys(input, ["mode", "record"], "input");
+    exactKeys(input, PUT_RECORD_FIELDS, "input");
     record = internalRecord(input.record);
-    if (mode === "replace" && (!Object.hasOwn(input.record, "aliases")
-      || !Object.hasOwn(input.record, "links")
-      || !Object.hasOwn(input.record, "sources"))) {
+    if (mode === "replace" && ASSOCIATION_FIELDS.some(
+      (field) => !Object.hasOwn(input.record, field),
+    )) {
       invalidMutation("replace requires complete aliases, links, and sources.");
     }
   }
@@ -1033,13 +1187,23 @@ export function applyPutInput(db, input, {
     }
   }
   const applicability = record.semantics?.applicability;
+  const applicabilityBinding = request.project_scope !== null && applicability?.project !== request.project_scope
+    ? resolveProjectScope(db, applicability?.project, request.checkout) : null;
   if (request.project_scope !== null
-    && applicability?.project !== request.project_scope) {
+    && applicability?.project !== request.project_scope && applicabilityBinding?.scope !== request.project_scope) {
     throw lodestarError("invalid_input",
       "Record applicability does not match the mutation project scope.", {
         identifiers: { id, expected: request.project_scope,
           actual: applicability?.project ?? null },
       });
+  }
+  if (applicabilityBinding) {
+    const supplied = new Set(request.preconditions.map(({ target }) => targetKey(target)));
+    const missing = applicabilityBinding.binding_preconditions.map(({ target }) => target)
+      .filter((target) => !supplied.has(targetKey(target)));
+    if (missing.length) throw lodestarError("missing_precondition", "The record's project mapping needs its observed revision.", {
+      identifiers: { required_basis: writeBasis(db, { projectScope: applicability.project, checkout: request.checkout, targets: missing }) },
+      action: "Read the record again and retain its complete mapping basis." });
   }
   if (applicability?.checkout !== null && applicability?.checkout !== undefined
     && (request.checkout === null || !sameMachinePath(applicability.checkout, request.checkout))) {
@@ -1083,7 +1247,7 @@ function countRows(db, sql, ...values) {
 
 export function deleteRecord(db, value, options = {}) {
   const input = value?.input;
-  exactKeys(input ?? {}, ["id", "reason"], "input");
+  exactKeys(input ?? {}, DELETE_INPUT_FIELDS, "input");
   validateIdentifier(input?.id, "input.id");
   validateIdentifier(input?.reason, "input.reason");
   return mutate(db, "delete", value, ({ revision, timestamp }) => {

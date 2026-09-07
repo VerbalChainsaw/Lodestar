@@ -63,7 +63,9 @@ export async function runInstalledLodestar(args, { input = "", env = process.env
   });
 }
 
-export function mutationCommand(operation) {
+export function mutationCommand(operation, request = {}) {
   const [family, subcommand] = operation.split(".");
-  return subcommand ? [family, subcommand] : [family];
+  const checkout = request.write_basis?.checkout ?? request.checkout;
+  return subcommand ? [family, subcommand,
+    ...(typeof checkout === "string" ? ["--cwd", checkout] : [])] : [family];
 }

@@ -3,7 +3,7 @@
 Install the supplied package with Node.js 24.15.0 or newer:
 
 ```text
-npm install --global ./lodestar-agent-context-2.1.0.tgz
+npm install --global ./lodestar-agent-context-2.1.1.tgz
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar skills verify --target all
@@ -173,3 +173,18 @@ infer missing context from a clipped display. A failed operation can leave an em
 or partial output file; without the success descriptor it is not verified output.
 If a mutation's response is lost after commit, retry the exact saved request to
 recover its receipt without duplicating the effect.
+
+## Agent contract discovery and recovery
+
+Use `lodestar <command> --help` in JSON mode, or native `lodestar_describe`, for
+the complete mutation envelope and operation input schema. `decision show` reads
+the stream; `decision status` changes its status. Do not guess write fields.
+
+CLI dispatch and MCP use the same read-operation declaration and mutation schemas.
+Native domain mutations use the checkout in the supplied write basis. Core execution
+errors arrive as MCP tool results with `isError: true` and the complete structured
+recovery envelope, so the caller can inspect and correct the request.
+
+An explicit project mapping keeps historical member records editable through their
+fresh canonical basis. Work events and handoff packets retain the original record
+scope. A changed binding invalidates a prior basis; reread before correcting it.

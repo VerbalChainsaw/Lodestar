@@ -1,4 +1,4 @@
-import { COMMANDS, hostOptions, installationOptions } from "./cli-commands.mjs";
+import { COMMANDS, hostOptions, installationOptions, MUTATION_INPUTS, READ_OPERATIONS } from "./cli-commands.mjs";
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { manageAgents } from "./agents.mjs";
@@ -14,6 +14,7 @@ import { manageSkills } from "./skills.mjs";
 import { setup } from "./setup.mjs";
 import { LODESTAR_VERSION } from "./version.mjs";
 import { CONTRACT_VERSION } from "./schema.mjs";
+import { MUTATION_REQUEST_SCHEMA, PUT_INPUT_SCHEMA, DELETE_INPUT_SCHEMA } from "./records.mjs";
 export { LODESTAR_VERSION } from "./version.mjs";
 const UNPAIRED_SURROGATE = /[\uD800-\uDFFF]/u;
 function helpData(command = null) {
@@ -32,6 +33,12 @@ function helpData(command = null) {
       command,
       usage: definition.usage,
       summary: definition.summary,
+      values: definition.values, booleans: definition.booleans, positionals: definition.positionals,
+      read_operations: Object.keys(READ_OPERATIONS).filter((operation) => operation.split(".")[0] === command),
+      mutation_inputs: Object.fromEntries(Object.entries({ put: PUT_INPUT_SCHEMA, delete: DELETE_INPUT_SCHEMA, ...MUTATION_INPUTS })
+        .filter(([operation]) => operation.split(".")[0] === command)),
+      mutation_request: ["put", "delete", "work", "handoff", "decision", "pending"].includes(command)
+        ? MUTATION_REQUEST_SCHEMA : null,
       output: "JSON is the default; --human requests formatted output.",
       transport: "Use --args-file <JSON-array-file> or --args-stdin for complete command arguments; --output <new-file> saves the complete response with a hash receipt.",
     };

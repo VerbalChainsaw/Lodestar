@@ -4,27 +4,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AGENT_BOOTSTRAP } from "../../src/bootstrap.mjs";
-import { COMMANDS, MUTATION_INPUTS } from "../../src/cli-commands.mjs";
+import { COMMANDS, MUTATION_INPUTS, READ_OPERATIONS } from "../../src/cli-commands.mjs";
 import { decodeUtf8, parseJsonText } from "../../src/json.mjs";
-import { MUTATION_REQUEST_SCHEMA } from "../../src/records.mjs";
+import { MUTATION_REQUEST_SCHEMA, PUT_INPUT_SCHEMA, DELETE_INPUT_SCHEMA } from "../../src/records.mjs";
 import { CONTRACT_VERSION } from "../../src/schema.mjs";
 import {
   mutationCommand, packageVersion, runInstalledLodestar,
 } from "./lodestar-runtime.mjs";
 
-const READ_COMMANDS = Object.freeze({
-  start: ["start"], get: ["get"], find: ["find"], links: ["links"],
-  doctor: ["doctor"], export: ["export"],
-  "work.status": ["work", "status"], "work.history": ["work", "history"],
-  "handoff.status": ["handoff", "status"], "handoff.history": ["handoff", "history"],
-  "decision.show": ["decision", "show"], "decision.status": ["decision", "status"],
-  "pending.list": ["pending", "list"],
-  "skills.verify": ["skills", "verify"], "agents.status": ["agents", "status"],
-  "agents.verify": ["agents", "verify"], "agents.template": ["agents", "template"],
-});
+const READ_COMMANDS = READ_OPERATIONS;
 const MUTATION_OPERATIONS = Object.freeze({
-  put: MUTATION_REQUEST_SCHEMA.properties.input,
-  delete: MUTATION_REQUEST_SCHEMA.properties.input,
+  put: PUT_INPUT_SCHEMA,
+  delete: DELETE_INPUT_SCHEMA,
   ...MUTATION_INPUTS,
 });
 
@@ -60,6 +51,7 @@ export const NATIVE_TOOLS = Object.freeze([
     name: "lodestar_mutate",
     description: "Apply one guarded contract-5 update using a read result's write_basis. Retry a lost response with the exact same request.",
     inputSchema: {
+      type: "object",
       oneOf: Object.entries(MUTATION_OPERATIONS).map(([operation, schema]) => ({
         type: "object", additionalProperties: false, required: ["operation", "request"],
         properties: {
@@ -78,6 +70,11 @@ function reply(id, result, error) {
       ...(error?.envelope ? { data: error.envelope } : {}) } }
     : { jsonrpc: "2.0", id, result };
   process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+function replyToolResult(id, value, isError = false) {
+  reply(id, { content: [{ type: "text", text: JSON.stringify(value) }],
+    structuredContent: value, isError });
 }
 
 function plainObject(value) {
@@ -165,6 +162,8 @@ export async function callNativeTool(name, input = {}) {
     package_version: packageVersion(),
     commands: COMMANDS,
     mutation_inputs: MUTATION_OPERATIONS,
+    mutation_request: MUTATION_REQUEST_SCHEMA,
+    read_operations: READ_OPERATIONS,
     operating_guide: AGENT_BOOTSTRAP,
   };
   if (name === "lodestar_read") {
@@ -176,7 +175,7 @@ export async function callNativeTool(name, input = {}) {
     if (!Object.hasOwn(MUTATION_OPERATIONS, input.operation)) {
       throw new Error(`Unknown mutation operation: ${input.operation}`);
     }
-    return await runInstalledLodestar(mutationCommand(input.operation), {
+    return await runInstalledLodestar(mutationCommand(input.operation, input.request), {
       input: `${JSON.stringify(input.request)}\n`,
     });
   }
@@ -206,12 +205,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       else if (message.method === "tools/list") reply(message.id, { tools: NATIVE_TOOLS });
       else if (message.method === "tools/call") {
         const result = await callNativeTool(message.params?.name, message.params?.arguments ?? {});
-        reply(message.id, { content: [{ type: "text", text: JSON.stringify(result) }],
-          structuredContent: result, isError: false });
+        replyToolResult(message.id, result);
       } else reply(message.id, null, new Error(`Method not found: ${message.method}`));
     } catch (error) {
       const id = typeof message?.id === "string" || typeof message?.id === "number" ? message.id : null;
-      reply(id, null, error);
+      // A valid tool invocation that fails in the core is an execution error.
+      // Keep its correction basis and next actions in model-visible tool content.
+      if (message?.method === "tools/call" && error?.envelope) replyToolResult(id, error.envelope, true);
+      else reply(id, null, error);
     }
   }
 }

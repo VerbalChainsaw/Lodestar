@@ -25,6 +25,7 @@ export function workStatus(db, project, history = false, limit = null) {
 export function workMutation(db, project, identity, action, request, options = {}) {
   const input = validateDomainInput(`work.${action}`, request?.input);
   if (!identity.actor) throw lodestarError("identity_required", "A work write needs the actual actor identity.");
+  const admittedScopes = new Set([project.scope, ...(project.historical_scopes ?? [])]);
   const ids = action === "expire" ? input.targets : [input.id];
   if (!ids.length || ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length) {
     throw lodestarError("invalid_input", "Work targets must be distinct exact IDs.");
@@ -33,11 +34,12 @@ export function workMutation(db, project, identity, action, request, options = {
     const changed = [], results = [];
     for (const [index, id] of ids.entries()) {
       const existing = optionalWork(db, id);
-      if (existing && (existing.type !== "work" || existing.scope !== project.scope)) {
+      if (existing && (existing.type !== "work" || !admittedScopes.has(existing.scope))) {
         throw lodestarError("work_conflict", "The target is not a work record in this project.", { identifiers: { id } });
       }
       if (!existing && action !== "start") throw lodestarError("work_not_found", "The work record does not exist.", { identifiers: { id } });
       const prior = existing?.content.value ?? {};
+      const originScope = existing?.scope ?? project.scope;
       const description = safeText(action === "expire" ? input.reason : input.description, "Work description");
       if (action === "start") {
         const data = { ...prior, status: "open", actor: identity.actor, agent: identity.agent,
@@ -45,7 +47,7 @@ export function workMutation(db, project, identity, action, request, options = {
           artifacts: input.artifacts ?? prior.artifacts ?? [], decision_ids: input.decision_ids ?? prior.decision_ids ?? [],
           checkout: project.checkout_root, started_at: prior.started_at ?? timestamp };
         if (canonicalStringify(data) === canonicalStringify(prior)) { results.push({ changed: false, record: normalizeRecord(existing) }); continue; }
-        writeRecordSnapshot(db, { ...recordInput(id, "work", description, project.scope, 0, data),
+        writeRecordSnapshot(db, { ...recordInput(id, "work", description, originScope, 0, data),
           ...(existing ? { aliases: existing.aliases, links: normalizeRecord(existing).links, sources: existing.sources, semantics: existing.semantics } : {}) },
         { createdAt: existing?.created_at ?? timestamp, updatedAt: timestamp, revision });
         changed.push(id); results.push({ changed: true, record: normalizeRecord(getRecordById(db, id)) });
@@ -63,13 +65,13 @@ export function workMutation(db, project, identity, action, request, options = {
         results.push({ changed: false, record: normalizeRecord(existing) }); continue;
       }
       const eventId = `work-event:${revision}:${index}`;
-      writeRecordSnapshot(db, recordInput(eventId, "work-event", description, project.scope, 0,
+      writeRecordSnapshot(db, recordInput(eventId, "work-event", description, originScope, 0,
         { ...event, observed_at: input.observed_at ?? null, recorded_at: timestamp,
           session: identity.session, event_sequence: index }),
       { createdAt: timestamp, updatedAt: timestamp, revision });
       const data = { ...prior, status: ["completed", "verified", "interrupted", "failed"].includes(outcome) ? "closed" : "open",
         description, last_outcome: event, last_event_id: eventId, last_seen_at: timestamp };
-      writeRecordSnapshot(db, { ...recordInput(id, "work", existing.name, project.scope, existing.priority, data),
+      writeRecordSnapshot(db, { ...recordInput(id, "work", existing.name, originScope, existing.priority, data),
         aliases: existing.aliases, links: normalizeRecord(existing).links, sources: existing.sources, semantics: existing.semantics },
       { createdAt: existing.created_at, updatedAt: timestamp, revision });
       changed.push(id, eventId); results.push({ changed: true, record: normalizeRecord(getRecordById(db, id)), event_id: eventId });

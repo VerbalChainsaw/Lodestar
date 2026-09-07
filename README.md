@@ -5,7 +5,7 @@ ships one executable, one contract-5 envelope, one current SQLite schema, and on
 guarded mutation path for facts, decisions, work outcomes, and continuity.
 
 ```text
-npm install --global .\lodestar-agent-context-2.1.0.tgz
+npm install --global .\lodestar-agent-context-2.1.1.tgz
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -13,7 +13,7 @@ lodestar start --cwd .
 ```
 
 The local tarball is the supplied release artifact. Use the registry package name
-only after version 2.1.0 has been published. Review the setup plan; existing locally
+only after version 2.1.1 has been published. Review the setup plan; existing locally
 changed or unowned skills require `--replace-local`, which preserves backups.
 Choose an individual `--target` to install only one host. See
 [installation and startup checks](docs/installation.md). `init` is explicit and idempotent for a
@@ -101,6 +101,11 @@ associations, and history.
 | `init` | Explicitly create, migrate, or promote a recovered store. |
 | `setup` | Plan or explicitly install native skills, preserving replaced content and recovering interrupted installs. |
 
+Ordinary `get`, `find`, and linked-peer reads compare local source evidence without
+rewriting the saved observation. Inspect claims marked `needs_reinspection` before
+depending on them. Invalid required dependencies identify incomplete context.
+
+JSON help and native `lodestar_describe` include complete operation input schemas.
 Run `lodestar --help` or `lodestar <command> --help` for the declarations used by
 the CLI and native adapter. JSON is the default. Success goes to stdout and failure
 to stderr using the same contract-5 envelope.

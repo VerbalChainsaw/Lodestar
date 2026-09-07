@@ -15,6 +15,20 @@ changes. Send a short contract-5 request containing `request_id`, `write_basis`,
 `input`; the core supplies incidental hashes and revision mechanics. Retire a subject
 through `delete` so current orientation omits it while exact history remains available.
 
+Ordinary `get`, `find`, and linked-peer reads refresh local file and package
+manifest evidence. `current_source_status` and `claim_status` are read-only
+annotations; stored source fingerprints and content remain the original observation.
+A `needs_reinspection` result calls for inspecting the affected source before relying
+on that claim. Raw reads, history, and exports preserve saved evidence exactly.
+
+Use `lodestar <command> --help` in JSON mode, or native `lodestar_describe`, for
+the complete mutation envelope and operation input schema. `decision show` reads
+the stream; `decision status` changes its status. Do not guess write fields.
+
+An explicit canonical project mapping allows corrections through a fresh returned
+basis while retaining the record's origin scope. Rebinding revisions are checked;
+knowing an unrelated project's record ID does not make its domain writes applicable.
+
 Source freshness is evidence, not age-based authority. Inspect and hash the same stable
 bytes, preserve prior observations, and mark an unstable or changed source for
 reinspection rather than claiming current verification.

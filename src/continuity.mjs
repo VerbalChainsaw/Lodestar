@@ -36,14 +36,16 @@ export function handoffMutation(db, project, identity, action, request, options 
   const input = validateDomainInput(`handoff.${action}`, request?.input);
   if (!identity.actor) throw lodestarError("identity_required", "Continuity writes require the actual actor identity.");
   if (input.checkpoint) validateHandoff(input.checkpoint);
+  const admittedScopes = new Set([project.scope, ...(project.historical_scopes ?? [])]);
   return mutate(db, `handoff.${action}`, request, ({ revision, timestamp }) => {
     const row = db.prepare("SELECT id FROM records WHERE id=?").get(input.id);
     const existing = row ? getRecordById(db, input.id) : null;
-    if (existing && (existing.type !== "handoff" || existing.scope !== project.scope)) {
+    if (existing && (existing.type !== "handoff" || !admittedScopes.has(existing.scope))) {
       throw lodestarError("handoff_conflict", "The target is not a current-contract transfer in this project.", { identifiers: { id: input.id } });
     }
     if (!existing && !["arm", "checkpoint"].includes(action)) throw lodestarError("handoff_not_found", "Read or create the checkpoint before this operation.", { identifiers: { id: input.id } });
     const prior = existing?.content.value ?? {};
+    const originScope = existing?.scope ?? project.scope;
     let data = { ...prior };
     const changed = [];
     if (["arm", "checkpoint"].includes(action)) {
@@ -54,7 +56,7 @@ export function handoffMutation(db, project, identity, action, request, options 
         return { data: { changed: false, record: normalizeRecord(existing) }, changed_ids: [] };
       }
       const packetId = `handoff-packet:${revision}`;
-      writeRecordSnapshot(db, recordInput(packetId, "handoff-packet", input.checkpoint.objective, project.scope, 0,
+      writeRecordSnapshot(db, recordInput(packetId, "handoff-packet", input.checkpoint.objective, originScope, 0,
         { checkpoint: input.checkpoint, transfer_id: input.id, previous_packet_id: prior.packet_id ?? null,
           actor: identity.actor, recorded_at: timestamp, reason: input.reason ?? null }),
       { createdAt: timestamp, updatedAt: timestamp, revision });
@@ -75,7 +77,7 @@ export function handoffMutation(db, project, identity, action, request, options 
       data = { ...prior, state: "cancelled", reason: input.reason };
     }
     if (canonicalStringify(data) === canonicalStringify(prior)) return { data: { changed: false, record: normalizeRecord(existing) }, changed_ids: [] };
-    writeRecordSnapshot(db, { ...recordInput(input.id, "handoff", data.checkpoint.objective, project.scope, 0, data),
+    writeRecordSnapshot(db, { ...recordInput(input.id, "handoff", data.checkpoint.objective, originScope, 0, data),
       ...(existing ? { aliases: existing.aliases, links: normalizeRecord(existing).links, sources: existing.sources, semantics: existing.semantics } : {}) },
     { createdAt: existing?.created_at ?? timestamp, updatedAt: timestamp, revision });
     changed.push(input.id);

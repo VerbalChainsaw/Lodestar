@@ -20,7 +20,7 @@ async function filesUnder(directory) {
 async function shippedDocuments() {
   const direct = ["README.md", "CHANGELOG.md", "SECURITY.md", "docs/README.md", "docs/agent-bootstrap.json",
     "docs/limitations.md", "docs/schema.md", "docs/releases/v2.0.0.md", "docs/releases/v2.0.1.md",
-    "docs/releases/v2.0.2.md", "docs/releases/v2.1.0.md", "docs/installation.md"].map((file) => path.join(root, file));
+    "docs/releases/v2.0.2.md", "docs/releases/v2.1.0.md", "docs/releases/v2.1.1.md", "docs/installation.md"].map((file) => path.join(root, file));
   const managed = (await filesUnder(path.join(root, "managed-assets")))
     .filter((file) => /\.(?:md|json)$/u.test(file));
   const plugin = (await filesUnder(path.join(root, "codex-plugin")))
