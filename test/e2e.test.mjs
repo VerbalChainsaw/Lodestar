@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { LODESTAR_VERSION } from "../src/version.mjs";
+import { smokePluginPackage } from "../scripts/smoke-plugin-package.mjs";
 import { temporaryDirectory } from "./helpers/contract.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -121,24 +122,9 @@ test("the staged package installs and exercises the current one-shot contract", 
   assert.equal(repeatedSetup.status, 0, repeatedSetup.stderr);
   assert.ok(repeatedSetup.value.data.results.every(({ action, backup }) => action === "current" && backup === null));
 
-  const mcp = path.join(packageRoot, "codex-plugin", "scripts", "lodestar-mcp.mjs");
-  const nativeRequest = { ...request, request_id: "installed-native-create",
-    write_basis: { ...basis, targets: [
-      { kind: "record", id: "fact:native", expected_revision: null },
-      { kind: "record", id: "project:test", expected_revision: null },
-    ] },
-    input: { ...request.input, record: { ...request.input.record,
-      id: "fact:native", name: "Native fact", aliases: [] } } };
-  const described = spawnSync(NODE, [mcp], {
-    cwd: directory, encoding: "utf8",
-    env: { ...process.env, LODESTAR_NODE: NODE, LODESTAR_ENTRY: entry, LODESTAR_DB: database },
-    input: `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
-      params: { name: "lodestar_mutate", arguments: { operation: "put", request: nativeRequest } } })}\n`,
+  const plugin = await smokePluginPackage(packageRoot, {
+    resolveCommand: (command) => command === "node" ? NODE : command,
   });
-  assert.equal(described.status, 0, described.stderr);
-  const response = JSON.parse(described.stdout);
-  assert.equal(response.result.structuredContent.v, 5);
-  assert.equal(response.result.structuredContent.data.id, "fact:native");
-  assert.equal(invoke(entry, ["get", "fact:native", "--db", database]).value.data.id,
-    "fact:native");
+  assert.equal(plugin.cached_whole_package, true);
+  assert.equal(plugin.declared_plugin_root, ".");
 });

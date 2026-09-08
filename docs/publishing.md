@@ -18,6 +18,11 @@ historical so they cannot be mistaken for operating instructions.
 5. Confirm the workflow completed, npm exposes the intended version, and the
    downloaded release tarball matches both registry integrity and the checksum.
 
+The plugin root is the complete package root, with `.codex-plugin/plugin.json`
+and `.mcp.json` at that level. The packed smoke must copy the declared plugin root
+to an isolated cache and execute its MCP requests without source/runtime overrides.
+Running the adapter inside the original npm tree does not prove cached installation.
+
 An existing npm version is accepted only when its integrity matches the newly
 packed artifact. A rerun must not replace a package with different bytes.
 

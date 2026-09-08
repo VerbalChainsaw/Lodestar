@@ -3,7 +3,7 @@
 For a new installation, use Node.js 24.15.0 or newer:
 
 ```text
-npm install --global lodestar-agent-context@2.1.3
+npm install --global lodestar-agent-context@2.1.4
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -15,7 +15,7 @@ lodestar start --cwd .
 Use `lodestar init` only when creating a new store. An existing store must pass
 the [migration/recovery procedure](../README.md#storage-and-recovery); setup never
 changes a database. You can also install the versioned tarball from the
-[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.1.3).
+[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.1.4).
 
 `setup` without `--apply` is a read-only plan. Choose codex, claude, opencode,
 hermes, or all. Missing skills are installed; unchanged owned copies upgrade
@@ -96,6 +96,41 @@ an upgrade, inspect the invocation policy in the installed metadata, verify the
 native loader reports Lodestar as enabled, then exercise a fresh relevant task
 without mentioning the skill. File and manifest verification alone cannot prove
 automatic selection.
+
+## Optional Codex plugin
+
+The skill and CLI work without the optional MCP plugin. `lodestar setup` installs
+native skills and launchers; it does not enable a plugin or modify Codex settings.
+To add the three structured tools, install the complete package through Codex:
+
+```text
+codex plugin marketplace add VerbalChainsaw/Lodestar --ref v2.1.4
+codex plugin add lodestar@lodestar
+```
+
+For a local package, add its root directory as a marketplace instead. The included
+`.agents/plugins/marketplace.json` points to the package root. This is also the root
+for custom marketplace entries. Node.js 24.15.0 or newer must be available to the
+host. Initialize or select the intended Lodestar store through the CLI first.
+
+For a Codex host running inside WSL, install the Windows CLI and its WSL launcher
+first, as described below. Both Linux Node for the MCP adapter and the `lodestar`
+WSL launcher must be on that host's PATH. The adapter delegates each operation to
+the launcher so SQLite stays on Windows; it does not create a separate Linux store.
+
+Version 2.1.4 moves `.codex-plugin/plugin.json` and `.mcp.json` to the package root.
+The old `codex-plugin/` directory alone omitted the shared core when Codex cached
+it, so plugin installation could report success while its server failed to start.
+Update custom marketplace paths to the complete package root and reinstall the
+plugin. A global npm upgrade cannot refresh a separately cached Codex plugin.
+
+Keep one active Lodestar plugin installation. Inspect existing plugin IDs before
+switching marketplaces and disable or remove an older plugin through Codex. Keep
+native skill enablement under your own host settings; installation does not
+override a disabled skill or remove user-owned instructions. Start a fresh task
+and verify `lodestar_describe`, `lodestar_read`, and `lodestar_mutate` are available.
+The release checks exercise the isolated cached runtime; actual model selection
+still depends on the task and host configuration.
 
 ## Windows and WSL
 

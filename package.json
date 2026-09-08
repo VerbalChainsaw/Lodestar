@@ -1,12 +1,15 @@
 {
   "name": "lodestar-agent-context",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "description": "Local contract-5 project context, evidence, decisions, work, and continuity",
   "type": "module",
   "bin": {
     "lodestar": "lodestar.mjs"
   },
   "files": [
+    ".codex-plugin/",
+    ".mcp.json",
+    ".agents/plugins/marketplace.json",
     "lodestar.mjs",
     "src/",
     "!src/continuity-schema.mjs",
@@ -23,6 +26,7 @@
     "docs/releases/v2.1.1.md",
     "docs/releases/v2.1.2.md",
     "docs/releases/v2.1.3.md",
+    "docs/releases/v2.1.4.md",
     "docs/installation.md",
     "README.md",
     "CHANGELOG.md",

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.4 - 2026-09-08
+
+- Fix Codex plugin startup after native installation by making the complete npm
+  package the plugin root. Keep the adapter and its single shared core together
+  when the host copies the plugin into its cache.
+- Ship root plugin/MCP manifests and a local marketplace entry; document migration
+  from the incomplete `codex-plugin/` source path and separate cached-plugin upgrades.
+- Route WSL-hosted plugin operations through the installed Windows-boundary
+  launcher, translating declared paths while retaining complete stdin transport.
+- Exercise the declared plugin from an isolated cache in package and release
+  checks, including durable writes, reads, retries, and rejected stale updates.
+- Retain the automatic invocation correction from 2.1.3. Contract 5 and schema 5
+  are unchanged; no data migration is required.
+
 ## 2.1.3 - 2026-09-08
 
 - Allow automatic Codex selection of Lodestar by correcting its native invocation
