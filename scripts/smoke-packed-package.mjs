@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { smokePluginPackage } from "./smoke-plugin-package.mjs";
+
 const entry = path.resolve(process.argv[2] ?? ".package-smoke/node_modules/lodestar-agent-context/lodestar.mjs");
 const temporaryRoot = path.resolve(os.tmpdir());
 const directory = await mkdtemp(path.join(temporaryRoot, "lodestar-packed-smoke-"));
@@ -77,10 +79,12 @@ try {
     write_basis: current.data.write_basis, input: { id: "smoke", reason: "Packed artifact verified" } });
   assert.equal(run(["get", "smoke"]).data.semantics.lifecycle, "historical");
   assert.equal(run(["find", "packed"]).data.records.length, 0);
+  const plugin = await smokePluginPackage(path.dirname(entry));
   console.log(JSON.stringify({ ok: true, contract: 5, checks, entry,
     explicit_initialization: true, observed_bases: true, exact_replay: true,
     unicode_and_line_endings: true, retirement: true,
-    packaged_codex_policy: true, native_settings_preserved: true, local_policy_edits_preserved: true }));
+    packaged_codex_policy: true, native_settings_preserved: true, local_policy_edits_preserved: true,
+    plugin_package: plugin }));
 } finally {
   assert.equal(path.dirname(path.resolve(directory)), temporaryRoot);
   assert.ok(path.basename(directory).startsWith("lodestar-packed-smoke-"));

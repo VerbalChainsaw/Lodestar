@@ -4,7 +4,7 @@
 
 ![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.1.3.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
+[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.1.4.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
 
 Lodestar keeps useful project context, decisions, and unfinished work in one local
 registry. Your coding agent can get its bearings, check what changed, and leave a
@@ -35,11 +35,11 @@ brings those changes into a public release with current documentation, artwork, 
 shared package-smoke checks in CI and release workflows. It also preserves typed
 busy recovery when contention occurs before a write transaction starts.
 
-**Version 2.1.3 fixes automatic Codex selection.** The previous package's native
-metadata disabled implicit invocation despite its automatic-use description.
-This patch corrects that policy and checks the installed metadata and preservation
-of user settings in the packed release. See the
-[release notes](docs/releases/v2.1.3.md) for upgrade details.
+**Version 2.1.4 fixes cached Codex plugin startup.** The plugin now installs the
+complete package, including the single shared runtime. Release checks run the
+declared plugin from an isolated cache and verify persisted mutations and rejected
+writes. The automatic-selection policy corrected in 2.1.3 remains enabled. See the
+[release notes](docs/releases/v2.1.4.md) for upgrade details.
 
 There is no daemon, telemetry, background indexer, or startup write. Missing optional
 context does not stop work whose required inputs are otherwise available. A source
@@ -50,7 +50,7 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 Requires **Node.js 24.15.0 or newer**. For a new installation:
 
 ```text
-npm install --global lodestar-agent-context@2.1.3
+npm install --global lodestar-agent-context@2.1.4
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -158,7 +158,7 @@ to stderr using the same contract-5 envelope.
 
 ## Native integration
 
-The optional [Codex plugin bundle](codex-plugin/.codex-plugin/plugin.json) provides the automatic
+The optional [Codex plugin bundle](.codex-plugin/plugin.json) provides the automatic
 Lodestar skill and three MCP tools:
 
 - `lodestar_describe` returns the maintained operating guide and installed command
@@ -166,6 +166,11 @@ Lodestar skill and three MCP tools:
 - `lodestar_read` invokes a declared read through the installed one-shot package.
 - `lodestar_mutate` accepts the same short request and operation-specific input
   schema used by the CLI.
+
+The **package root is the plugin root**. Codex caches that complete directory so
+the adapter and shared core remain together. Do not install `codex-plugin/` alone;
+that was the broken layout in 2.1.3 and earlier. Follow the
+[optional plugin installation](docs/installation.md#optional-codex-plugin) steps.
 
 The adapter does not maintain hooks, a session cache, a receipt store, or its own
 authority rules. It passes actor identity only when an actual host invocation can
