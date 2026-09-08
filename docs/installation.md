@@ -83,6 +83,20 @@ Legacy instructions can still demand retired commands even when skills are curre
 Replace only the stale owning passages, preserving unrelated user instructions.
 Do not enable an old Lodestar plugin alongside the current native skill.
 
+Lodestar's Codex metadata explicitly sets `policy.allow_implicit_invocation: true`
+in `agents/openai.yaml`. This makes the skill eligible for automatic selection on
+relevant project work. It does not launch a background service or guarantee that
+every prompt invokes Lodestar. A host-level disabled skill remains disabled.
+Native instructions such as `AGENTS.md` still apply alongside Lodestar's context.
+
+Version 2.1.2 shipped with `allow_implicit_invocation: false`, despite the skill's
+automatic-use description. That prevented implicit Codex invocation. Restarting
+or reinstalling that uncorrected package does not change its policy. When checking
+an upgrade, inspect the invocation policy in the installed metadata, verify the
+native loader reports Lodestar as enabled, then exercise a fresh relevant task
+without mentioning the skill. File and manifest verification alone cannot prove
+automatic selection.
+
 ## Windows and WSL
 
 The package manager installs the Windows CLI. Setup discovers the standard launcher
