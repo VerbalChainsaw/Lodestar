@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { COMMANDS, HOST_OPTIONS, PATH_OPTIONS } from "../../src/cli-commands.mjs";
@@ -37,15 +37,16 @@ function wslWindowsPath(value, env) {
 
 function resolvedWslLauncher(command, env) {
   if (command.includes("/")) return path.resolve(command);
-  const result = spawnSync("bash", ["-c", 'command -v -- "$1"', "bash", command], {
-    encoding: "utf8", env, windowsHide: true,
-  });
-  if (result.error) throw result.error;
-  const selected = stripTerminalNewline(result.stdout);
-  if (result.status !== 0 || !selected) {
-    throw new Error(`The selected WSL Lodestar launcher is unavailable: ${command}.`);
+  for (const entry of (env.PATH ?? "").split(path.delimiter)) {
+    const candidate = path.resolve(entry || process.cwd(), command);
+    try {
+      accessSync(candidate, constants.X_OK);
+      if (statSync(candidate).isFile()) return candidate;
+    } catch (error) {
+      if (!["EACCES", "ENOENT", "ENOTDIR"].includes(error.code)) throw error;
+    }
   }
-  return selected;
+  throw new Error(`The selected WSL Lodestar launcher is unavailable: ${command}.`);
 }
 
 function rejectLinuxDatabase(option, value) {
