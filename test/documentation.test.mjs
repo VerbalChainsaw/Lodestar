@@ -19,13 +19,15 @@ async function filesUnder(directory) {
 
 async function shippedDocuments() {
   const direct = ["README.md", "CHANGELOG.md", "SECURITY.md", "docs/README.md", "docs/agent-bootstrap.json",
-    "docs/limitations.md", "docs/schema.md", "docs/releases/v2.0.0.md", "docs/releases/v2.0.1.md",
-    "docs/releases/v2.0.2.md", "docs/releases/v2.1.0.md", "docs/releases/v2.1.1.md", "docs/releases/v2.1.2.md", "docs/installation.md"].map((file) => path.join(root, file));
+    "docs/limitations.md", "docs/schema.md", "docs/installation.md"].map((file) => path.join(root, file));
+  const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const releases = packageJson.files.filter((file) => /^docs\/releases\/[^/]+\.md$/u.test(file))
+    .map((file) => path.join(root, file));
   const managed = (await filesUnder(path.join(root, "managed-assets")))
     .filter((file) => /\.(?:md|json)$/u.test(file));
   const plugin = (await filesUnder(path.join(root, "codex-plugin")))
     .filter((file) => /\.(?:md|json)$/u.test(file));
-  return [...direct, ...managed, ...plugin];
+  return [...direct, ...releases, ...managed, ...plugin];
 }
 
 function jsonFences(text) {

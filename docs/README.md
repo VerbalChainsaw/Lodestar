@@ -16,7 +16,7 @@ same command, mutation-input, request, and contract declarations as the CLI. The
 adapter spawns the installed package for each call and owns no durable state.
 
 See [installation](installation.md), [schema](schema.md), [limitations](limitations.md),
-and the [2.1.2 release notes](releases/v2.1.2.md). JSON command help exposes complete
+and the [2.1.3 release notes](releases/v2.1.3.md). JSON command help exposes complete
 mutation inputs. Ordinary local-source reads flag changed evidence without rewriting
 saved observations; explicit canonical project mappings preserve usable correction paths.
 
