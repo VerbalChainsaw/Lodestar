@@ -14,6 +14,15 @@ import { fixture } from "./helpers/contract.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+test("Lodestar's native and plugin metadata permit automatic Codex invocation", async () => {
+  for (const directory of ["managed-assets/skills/lodestar", "codex-plugin/skills/lodestar"]) {
+    const metadata = await readFile(path.join(root, directory, "agents/openai.yaml"), "utf8");
+    assert.match(metadata, /^policy:\r?\n[ \t]+allow_implicit_invocation:[ \t]+true[ \t]*$/mu,
+      `${directory} must permit automatic invocation; matching installed bytes alone cannot establish this`);
+  }
+});
+
 async function invoke(args, input = "") {
   let output = "", error = "";
   const code = await runCli(args, { stdin: Readable.from([input]),

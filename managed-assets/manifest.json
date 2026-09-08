@@ -211,14 +211,14 @@
       "source_entrypoint": "skills/lodestar/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "06d1b3a62061ec7f35f91fc47456d69054d5a77abcccc5f49629c606e8bc34ef"
+        "value": "9d473a5fa92c051a9d35d062f4fba21ea58c1ffba7663c9c48ab83ec30352a9d"
       },
       "payload_root": "skills/lodestar",
       "files": [
         {
           "path": "agents/openai.yaml",
-          "bytes": 241,
-          "sha256": "bb4dc921e7ba318b94b14d444598607bfc1159e43bf59a35fe52f9dd969ef5ed"
+          "bytes": 240,
+          "sha256": "9aea211cb4fc4cae985e7546f4d16d96265e5634afc86293b6a7a571dfc25fba"
         },
         {
           "path": "assets/templates/_stub-pattern.AGENTS.md",

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Allow automatic Codex selection of Lodestar by correcting its native invocation
+  policy. Version 2.1.2's explicit-only metadata contradicted its automatic-use
+  description. Check both maintained and plugin metadata in regression tests.
+- Clarify the difference between installed file integrity, native skill discovery,
+  and automatic selection during a model task.
+
 ## 2.1.2 - 2026-09-07
 
 - Publish current product documentation and a static landing page with shared hero artwork.
