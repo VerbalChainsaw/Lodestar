@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 2.1.3 - 2026-09-08
 
 - Allow automatic Codex selection of Lodestar by correcting its native invocation
   policy. Version 2.1.2's explicit-only metadata contradicted its automatic-use
   description. Check both maintained and plugin metadata in regression tests.
 - Clarify the difference between installed file integrity, native skill discovery,
   and automatic selection during a model task.
+- Exercise native setup, installed invocation policy, plugin parity, and preservation
+  of user settings and locally edited policy in the packed release checks.
+- Automatically include new release notes in documentation checks and verify that
+  the plugin version and packaged release notes match the package version.
 
 ## 2.1.2 - 2026-09-07
 

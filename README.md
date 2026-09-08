@@ -4,7 +4,7 @@
 
 ![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.1.2.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
+[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.1.3.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
 
 Lodestar keeps useful project context, decisions, and unfinished work in one local
 registry. Your coding agent can get its bearings, check what changed, and leave a
@@ -17,7 +17,7 @@ keep authority over the work.
 
 ## What is better in 2.1
 
-The 2.1.2 public release replaces the older 1.6 workflow with one contract for CLI
+The 2.x releases replace the older 1.6 workflow with one contract for CLI
 and native tools, explicit installation ownership, and read-only startup.
 
 | Everyday problem | What Lodestar does |
@@ -33,8 +33,13 @@ The 2.1.1 repairs also close a native read/write routing error, incomplete depen
 reporting, clipped recovery bases, and JSON data-key handling defects. Version 2.1.2
 brings those changes into a public release with current documentation, artwork, and
 shared package-smoke checks in CI and release workflows. It also preserves typed
-busy recovery when contention occurs before a write transaction starts. See the
-[release notes](docs/releases/v2.1.2.md) for upgrade details.
+busy recovery when contention occurs before a write transaction starts.
+
+**Version 2.1.3 fixes automatic Codex selection.** The previous package's native
+metadata disabled implicit invocation despite its automatic-use description.
+This patch corrects that policy and checks the installed metadata and preservation
+of user settings in the packed release. See the
+[release notes](docs/releases/v2.1.3.md) for upgrade details.
 
 There is no daemon, telemetry, background indexer, or startup write. Missing optional
 context does not stop work whose required inputs are otherwise available. A source
@@ -45,7 +50,7 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 Requires **Node.js 24.15.0 or newer**. For a new installation:
 
 ```text
-npm install --global lodestar-agent-context@2.1.2
+npm install --global lodestar-agent-context@2.1.3
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
