@@ -46,7 +46,7 @@ test("native tools derive the installed command and mutation contract", async ()
 
 test("the plugin declares MCP and skill capabilities without hooks", async () => {
   const plugin = JSON.parse(await readFile(path.join(ROOT,
-    "codex-plugin", ".codex-plugin", "plugin.json"), "utf8"));
+    ".codex-plugin", "plugin.json"), "utf8"));
   assert.equal(plugin.version, LODESTAR_VERSION);
   assert.deepEqual(plugin.interface.capabilities, ["skills", "MCP tools"]);
   assert.equal(Object.hasOwn(plugin, "hooks"), false);

@@ -59,7 +59,7 @@ test("release metadata and publication workflow agree on the package version", a
     await readFile(path.join(ROOT, "package.json"), "utf8"),
   );
   const version = packageJson.version;
-  const plugin = JSON.parse(await readFile(path.join(ROOT, "codex-plugin", ".codex-plugin", "plugin.json"), "utf8"));
+  const plugin = JSON.parse(await readFile(path.join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
   assert.equal(plugin.version, version, "the distributed plugin version must match its package");
   assert.ok(packageJson.files.includes(`docs/releases/v${version}.md`), "the current release notes must ship in the package");
   const changelog = await readFile(path.join(ROOT, "CHANGELOG.md"), "utf8");
