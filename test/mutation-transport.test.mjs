@@ -149,7 +149,18 @@ test("MCP framing rejects invalid UTF-8, duplicate keys, lossy decimals, and und
   const replies = stdout.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(replies.length, 7);
   assert.deepEqual(replies.map((reply) => reply.id), [null, null, null, 4, 5, null, 6]);
-  assert.ok(replies.slice(0, 6).every((reply) => reply.error));
+  const diagnostics = [
+    /mcp_message is not valid UTF-8/u,
+    /duplicate member names/u,
+    /outside the supported numeric domain/u,
+    /MCP message contains undeclared fields: undeclared/u,
+    /lodestar_describe input contains undeclared fields: undeclared/u,
+    /MCP message must be a JSON object/u,
+  ];
+  for (const [index, expected] of diagnostics.entries()) {
+    assert.match(replies[index].error?.message ?? "", expected,
+      `malformed frame ${index} must explain its actual refusal`);
+  }
   assert.equal(replies[6].result.structuredContent.contract, 5);
   for (const id of ["fact:mcp-utf8", "fact:mcp-duplicate", "fact:mcp-decimal"]) {
     assert.equal((await f.cli(["get", id])).value.error.code, "record_not_found");

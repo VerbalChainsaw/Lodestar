@@ -1,0 +1,15 @@
+{
+  "name": "lodestar",
+  "interface": {
+    "displayName": "Lodestar"
+  },
+  "plugins": [
+    {
+      "name": "lodestar",
+      "source": {
+        "source": "local",
+        "path": "./"
+      }
+    }
+  ]
+}
