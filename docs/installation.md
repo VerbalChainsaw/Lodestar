@@ -3,7 +3,7 @@
 For a new installation, use Node.js 24.15.0 or newer:
 
 ```text
-npm install --global lodestar-agent-context@2.1.2
+npm install --global lodestar-agent-context@2.1.3
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -15,7 +15,7 @@ lodestar start --cwd .
 Use `lodestar init` only when creating a new store. An existing store must pass
 the [migration/recovery procedure](../README.md#storage-and-recovery); setup never
 changes a database. You can also install the versioned tarball from the
-[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.1.2).
+[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.1.3).
 
 `setup` without `--apply` is a read-only plan. Choose codex, claude, opencode,
 hermes, or all. Missing skills are installed; unchanged owned copies upgrade
@@ -89,7 +89,7 @@ relevant project work. It does not launch a background service or guarantee that
 every prompt invokes Lodestar. A host-level disabled skill remains disabled.
 Native instructions such as `AGENTS.md` still apply alongside Lodestar's context.
 
-Version 2.1.2 shipped with `allow_implicit_invocation: false`, despite the skill's
+Version 2.1.3 corrects a policy defect: 2.1.2 shipped with `allow_implicit_invocation: false`, despite the skill's
 automatic-use description. That prevented implicit Codex invocation. Restarting
 or reinstalling that uncorrected package does not change its policy. When checking
 an upgrade, inspect the invocation policy in the installed metadata, verify the
