@@ -11,8 +11,11 @@ preserves exact evidence for a malformed legacy numeric row that cannot safely e
 JavaScript's normalized number domain.
 
 During authorized work, update an existing subject once when its meaning or evidence
-changes. Send a short contract-5 request containing `request_id`, `write_basis`, and
-`input`; the core supplies incidental hashes and revision mechanics. Retire a subject
+changes. Send a complete contract-5 request containing `v: 5`, `request_id`,
+`write_basis`, and `input`; the core supplies incidental hashes and revision mechanics.
+For `input.mode: "update"`, both an object `set` and an array `remove` are required;
+use `remove: []` when removing nothing. Validate the envelope and mode-specific
+required fields against `lodestar put --help` before submission. Retire a subject
 through `delete` so current orientation omits it while exact history remains available.
 
 Ordinary `get`, `find`, and linked-peer reads refresh local file and package
@@ -20,6 +23,13 @@ manifest evidence. `current_source_status` and `claim_status` are read-only
 annotations; stored source fingerprints and content remain the original observation.
 A `needs_reinspection` result calls for inspecting the affected source before relying
 on that claim. Raw reads, history, and exports preserve saved evidence exactly.
+
+For contract-5 `put` updates, include both an object `set` and an array `remove`
+(use `remove: []` when no data keys are removed). The runtime requires both even
+when the help schema does not make that obvious. `get` returns the record directly
+under envelope `data`, not `data.record`. Use the process working directory for
+ordinary `get`/`find`; do not copy `start --cwd` onto commands that do not advertise
+that option. Filter large `find` responses before printing them.
 
 Use `lodestar <command> --help` in JSON mode, or native `lodestar_describe`, for
 the complete mutation envelope and operation input schema. `decision show` reads
