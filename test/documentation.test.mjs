@@ -34,7 +34,7 @@ function jsonFences(text) {
   return [...text.matchAll(/```json\s*\r?\n([\s\S]*?)\r?\n```/gu)].map((match) => match[1]);
 }
 
-test("every shipped JSON example parses and documented put input matches the current contract", async () => {
+test("every shipped JSON example parses and documented put inputs match the current contract", async () => {
   const documents = await shippedDocuments();
   const examples = [];
   for (const file of documents) {
@@ -44,8 +44,21 @@ test("every shipped JSON example parses and documented put input matches the cur
   assert.ok(examples.length > 0, "at least one shipped JSON example is required");
   const mutations = examples.filter(({ value }) => value?.v === 5 && value?.write_basis && value?.input);
   assert.ok(mutations.length > 0, "at least one complete mutation example is required");
+  let updateExamples = 0;
   for (const { value } of mutations) {
     const request = normalizeMutationRequest(value);
+    if (request.input.mode === "update") {
+      updateExamples += 1;
+      assert.equal(typeof request.input.id, "string");
+      assert.ok(request.input.set !== null && typeof request.input.set === "object"
+        && !Array.isArray(request.input.set)
+        && Object.getPrototypeOf(request.input.set) === Object.prototype,
+        "update examples carry a plain-object set");
+      assert.ok(Array.isArray(request.input.remove)
+        && request.input.remove.every((key) => typeof key === "string"),
+        "update examples carry an array remove of string keys");
+      continue;
+    }
     assert.equal(request.input.mode, "create");
     const record = request.input.record;
     validatePutInput({ id: record.id, type: record.kind, name: record.name, scope: record.scope,
@@ -53,6 +66,7 @@ test("every shipped JSON example parses and documented put input matches the cur
         _lodestar: { priority: record.priority ?? 0, revision: 1, semantics: record.semantics } },
       aliases: record.aliases, links: record.links, sources: record.sources });
   }
+  assert.ok(updateExamples >= 1, "at least one shipped update example is required");
 });
 
 test("shipped command examples use current command families and the local release artifact", async () => {

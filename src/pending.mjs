@@ -64,7 +64,9 @@ export function pendingMutation(db, project, identity, action, request, options 
       if (destination.operation === "put") {
         const destinationId = destination.input.id ?? destination.input.record?.id;
         const destinationScope = destination.input.record?.scope ?? db.prepare("SELECT scope FROM records WHERE id=?").get(destinationId)?.scope;
-        if (destinationScope !== project.scope) throw lodestarError("project_binding_conflict", "Promotion must target this canonical project.");
+        if (destinationScope !== project.scope) throw lodestarError("project_binding_conflict", "Promotion must target this canonical project.",
+          { identifiers: { destination: destinationId, destination_scope: destinationScope, project: project.scope },
+            action: "Promote into this project's scope or run promotion from the destination project's checkout." });
         promoted = applyPutInput(db, destination.input, { ...context, ...putEvidence });
         if (promoted.revision === revision) changed.push(promoted.id);
       } else {

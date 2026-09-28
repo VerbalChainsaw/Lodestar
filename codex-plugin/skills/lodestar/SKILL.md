@@ -81,7 +81,7 @@ separate by using its `--file` option when the argument array also uses stdin.
 For Windows-core argument files invoked from WSL, use Windows-visible absolute
 paths from Lodestar's responses, including WSL UNC paths.
 
-When a host clips a response, repeat the read with `--output <new-file>` and
+When a response is large or a host clips it, repeat the read with `--output <new-file>` and
 verify the returned byte count and SHA-256 before reading the complete UTF-8
 envelope. Output files are created without overwriting existing files. A lost
 mutation response requires the exact same request body and ID; never repeat an

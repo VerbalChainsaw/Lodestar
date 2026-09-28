@@ -1,3 +1,9 @@
+// Managed-asset integrity build (see AGENTS.md "Repository verification invariants").
+//   default --check: verify skill payloads, Golden mirrors, bootstrap stub/docs, and the byte manifest.
+//   --write: regenerate generated copies; requires --source-root <golden-rules-root>.
+// After editing managed-assets/skills/**, run:
+//   npm run assets:build -- --source-root "<Golden-Rules-root>"
+
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
