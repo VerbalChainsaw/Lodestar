@@ -38,3 +38,17 @@ If recovery requires another independent subsystem, preserve WIP and split the w
 
 The accepted runtime has no service/client/discovery/serve/bootstrap-server
 surface. Preserve the one-shot boundary unless concrete evidence invalidates it.
+
+## Repository verification invariants
+
+Managed skill payloads are byte-verified: the exact bytes under
+`managed-assets/skills/**` are recorded in `managed-assets/manifest.json`, and
+`npm test` (CI) fails on a stale manifest. After editing any managed skill
+file, regenerate with
+`npm run assets:build -- --source-root "<Golden-Rules-root>"` (write mode
+requires the explicit Golden source root; `--check` runs without one), review
+the generated diffs (manifest, Codex plugin mirror, bootstrap stub,
+`docs/agent-bootstrap.json`), then run `npm test`. Five Golden-owned skills
+mirror the Golden Rules source; `lodestar` and `adderall` skill payloads are
+repository-owned. Bootstrap parity (bootstrap.json ↔ stub ↔ documented copy)
+is verified separately from the skill payload manifest.
