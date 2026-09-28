@@ -388,3 +388,13 @@ test('the CLI delivers required source bytes beyond the former output ceiling', 
   assert.equal(source.text.length, content.length);
   assert.equal(source.sha256, createHash('sha256').update(content).digest('hex'));
 });
+
+test('an occupied --output path fails with a typed conflict and preserves the file', async (t) => {
+  const f = await fixture(t);
+  const target = path.join(f.root, 'occupied.json');
+  await writeFile(target, '{"keep":true}');
+  const result = await invoke(['version', '--output', target], '{}');
+  assert.equal(result.exitCode, 3);
+  assert.equal(JSON.parse(result.stderr).error.code, 'output_conflict');
+  assert.equal(await readFile(target, 'utf8'), '{"keep":true}');
+});

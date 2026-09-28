@@ -34,7 +34,9 @@ export function handoffStatus(db, project, identity = {}, { history = false } = 
 }
 export function handoffMutation(db, project, identity, action, request, options = {}) {
   const input = validateDomainInput(`handoff.${action}`, request?.input);
-  if (!identity.actor) throw lodestarError("identity_required", "Continuity writes require the actual actor identity.");
+  if (!identity.actor) throw lodestarError("identity_required", "Continuity writes require the actual actor identity.", {
+    action: "Run the write under the Lodestar plugin, or pass the session and actor identity the host exposes (see lodestar handoff --help), then retry.",
+  });
   if (input.checkpoint) validateHandoff(input.checkpoint);
   const admittedScopes = new Set([project.scope, ...(project.historical_scopes ?? [])]);
   return mutate(db, `handoff.${action}`, request, ({ revision, timestamp }) => {

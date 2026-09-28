@@ -202,6 +202,26 @@ export async function migrateDatabase(file, { request, now = () => new Date() } 
       }
       return { ...provenance.result, replayed: true };
     }
+    let restoredBackup;
+    try {
+      restoredBackup = await migrationPreflight(accepted.backup.path);
+    } catch (error) {
+      throw lodestarError("migration_source_conflict",
+        "The backup could not be opened or restore-tested.", {
+          identifiers: { backup: accepted.backup.path ?? null,
+            cause: typeof error?.message === "string" ? error.message.slice(0, 200) : null },
+          action: "Create and restore-test a fresh backup from the preflight source.",
+        });
+    }
+    if (restoredBackup.logical_digest !== accepted.backup.logical_digest) {
+      throw lodestarError("migration_source_conflict",
+        "The backup on disk does not match the supplied backup evidence.", {
+          identifiers: { backup: accepted.backup.path ?? null,
+            expected_digest: accepted.backup.logical_digest,
+            actual_digest: restoredBackup.logical_digest ?? null },
+          action: "Create and restore-test a fresh backup from the preflight source.",
+        });
+    }
     return admittedTransaction(db, () => {
       const actual = inspectV4Connection(db, file);
       const expected = accepted.preflight;

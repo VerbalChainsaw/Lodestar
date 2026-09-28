@@ -15,6 +15,11 @@
   directing callers to `--output` capture before a host truncates.
 - Document the repository verification invariants in the managed-assets build
   script docblock.
+- Verify migration backup evidence on disk: the claimed backup is opened and
+  restore-tested before conversion, and a missing or changed backup is refused.
+- Match rejection-advisory subjects with Unicode-aware case folding, never split
+  code points when trimming stored reasons, and answer an occupied `--output`
+  path with a typed `output_conflict`.
 - Retain the 2.1.4 plugin packaging and invocation corrections. Contract 5 and
   schema 5 are unchanged; no data migration is required.
 
