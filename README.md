@@ -4,7 +4,7 @@
 
 ![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.1.4.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
+[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.2.0.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
 
 Lodestar keeps useful project context, decisions, and unfinished work in one local
 registry. Your coding agent can get its bearings, check what changed, and leave a
@@ -20,6 +20,13 @@ keep authority over the work.
 The 2.x releases replace the older 1.6 workflow with one contract for CLI
 and native tools, explicit installation ownership, and read-only startup.
 
+**Version 2.2.0 adds the rejection register.** Record an approach the project
+has settled against — a model, a data set, an architecture — and future sessions
+meet it during orientation, during search, and at the moment of a write, with a
+non-blocking advisory that replays exactly on retry. Conflict failures now name
+their exact repair, and large reads point to `--output` capture. Contract 5 and
+schema 5 are unchanged. See the [2.2.0 release notes](docs/releases/v2.2.0.md).
+
 | Everyday problem | What Lodestar does |
 | --- | --- |
 | A new session starts from scratch. | Returns relevant saved context, decisions, and work for the current project and checkout. |
@@ -28,6 +35,7 @@ and native tools, explicit installation ownership, and read-only startup.
 | Two updates collide, or a response is lost. | Checks observed revisions, preserves history, and makes exact request retries safe for database effects. |
 | Native skill copies drift. | Plans owned updates, preserves displaced bytes, verifies installed files, and reports local conflicts. |
 | Project identity changes. | Keeps explicitly mapped member records usable while retaining their origin and history. |
+| An agent re-proposes something already settled. | The rejection register surfaces settled subjects in orientation and search, with an advisory at write time — never a refusal. |
 
 The 2.1.1 repairs also close a native read/write routing error, incomplete dependency
 reporting, clipped recovery bases, and JSON data-key handling defects. Version 2.1.2
@@ -50,7 +58,7 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 Requires **Node.js 24.15.0 or newer**. For a new installation:
 
 ```text
-npm install --global lodestar-agent-context@2.1.4
+npm install --global lodestar-agent-context@2.2.0
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
