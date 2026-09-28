@@ -60,7 +60,8 @@ A note on the 1.0 rewrite, since it is relevant to the rules in this repo. The o
 
 ## center-geo, layer 7, survey
 
-Ships in the canonical `managed-assets/skills/center-multigeometry` bundle.
+Distributed independently by the canonical `center-geo` skill bundle. Lodestar
+does not install, verify, or receipt this external skill.
 
 A deterministic structural risk scanner. It reads a codebase as a graph and traverses it under six geometries (radial, cycle, boundary, anomaly, convergent, path), then fuses the signals into ranked hypotheses with anchors.
 

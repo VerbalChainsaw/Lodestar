@@ -109,29 +109,6 @@
       "distribution_owner": "npm:lodestar-agent-context"
     },
     {
-      "name": "center-multigeometry",
-      "source_id": "golden-rules:center-multigeometry",
-      "source_entrypoint": "skills/center-multigeometry/SKILL.md",
-      "source_identity": {
-        "algorithm": "sha256",
-        "value": "83f6a9193fba35bf70cc6c1201a437109eb7bb5df451b703149b3b731c1d26c8"
-      },
-      "payload_root": "skills/center-multigeometry",
-      "files": [
-        {
-          "path": "LICENSE",
-          "bytes": 1069,
-          "sha256": "702ab85bb649424b323bada15b0e37c41d180ba97eff5c0932e04da4e75cd3d4"
-        },
-        {
-          "path": "SKILL.md",
-          "bytes": 10298,
-          "sha256": "598acdbd464f2f72331c6e0165d39a730d0a3c30fa3b61c5935f73f775972a6b"
-        }
-      ],
-      "distribution_owner": "npm:lodestar-agent-context"
-    },
-    {
       "name": "codeplan",
       "source_id": "golden-rules:codeplan",
       "source_entrypoint": "skills/codeplan/SKILL.md",
@@ -211,7 +188,7 @@
       "source_entrypoint": "skills/lodestar/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "fe2de9b26407c6ff8aac75525ce0f2b433dab3d4c2409ab057b55264ebebc934"
+        "value": "4474f5eb568b8f0e00cabc23fca71404eb06eb8b3379c5776d4718686f5d4a17"
       },
       "payload_root": "skills/lodestar",
       "files": [
@@ -267,8 +244,8 @@
         },
         {
           "path": "references/toolchain.md",
-          "bytes": 7601,
-          "sha256": "747a2e6b7820decbfc59c93e71df9bef37d1785bd9973a81b76320348c02b677"
+          "bytes": 7662,
+          "sha256": "bc6bb523206c8e7c6c9f1405e6d4c5f19eafe86e53bae6f304478faf45bed82e"
         },
         {
           "path": "references/work-presence.md",

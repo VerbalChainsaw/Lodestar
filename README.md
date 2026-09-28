@@ -188,12 +188,15 @@ never open SQLite from WSL.
 
 ## Skills and package integrity
 
-The package retains seven complete skills: `director-protocol`, `codeplan`,
-`center-multigeometry`, `center-audit`, `ladder-audit`, `lodestar`, and `adderall`.
+The package retains six complete skills: `director-protocol`, `codeplan`,
+`center-audit`, `ladder-audit`, `lodestar`, and `adderall`.
 [`managed-assets/manifest.json`](managed-assets/manifest.json) names each maintained
 source, entrypoint, distribution owner, source identity, and every payload file's raw
 byte length and SHA-256. It is tied directly to contract 5; there is no second
 manifest protocol. Private Golden Rules content is not bundled.
+
+`center-multigeometry` is distributed independently by the canonical `center-geo`
+skill bundle. Lodestar does not install, verify, or receipt that external skill.
 
 `lodestar skills verify` is read-only. `lodestar setup` plans native installation;
 `--apply` performs it. Both share the package manifest and host discovery resolver.

@@ -22,6 +22,18 @@ export const DATABASE_BUSY_TIMEOUT_MS = 0;
 
 const connectionState = new WeakMap();
 
+const SQLITE_NATIVE_CODE = /^(?:ERR_SQLITE_ERROR|SQLITE_[A-Z0-9_]{1,64})$/u;
+const SQLITE_FAILURE_CLASSES = Object.freeze([
+  { primaryCode: 3, result: "SQLITE_PERM", category: "permission" },
+  { primaryCode: 5, result: "SQLITE_BUSY", category: "busy" },
+  { primaryCode: 6, result: "SQLITE_LOCKED", category: "busy" },
+  { primaryCode: 8, result: "SQLITE_READONLY", category: "read_only" },
+  { primaryCode: 10, result: "SQLITE_IOERR", category: "input_output" },
+  { primaryCode: 11, result: "SQLITE_CORRUPT", category: "integrity" },
+  { primaryCode: 14, result: "SQLITE_CANTOPEN", category: "open" },
+  { primaryCode: 26, result: "SQLITE_NOTADB", category: "integrity" },
+]);
+
 function stateFor(db) {
   const state = connectionState.get(db);
   if (!state) {
@@ -47,24 +59,56 @@ function ownDataProperty(value, key) {
   }
 }
 
-export function normalizeDatabaseBusyError(error, file = null) {
+function nativeSqliteFailure(error) {
   const rawCode = ownDataProperty(error, "code");
-  const code = typeof rawCode === "string" ? rawCode : "";
+  const code = typeof rawCode === "string" && SQLITE_NATIVE_CODE.test(rawCode)
+    ? rawCode
+    : null;
   const rawErrorCode = ownDataProperty(error, "errcode");
-  const primaryCode = Number.isInteger(rawErrorCode)
-    ? rawErrorCode & 0xff
+  const errcode = Number.isInteger(rawErrorCode)
+    && rawErrorCode >= 0
+    && rawErrorCode <= 0x7fffffff
+    ? rawErrorCode
     : null;
   const nativeSqliteError = code === "ERR_SQLITE_ERROR"
-    || code.startsWith("SQLITE_");
-  if (
-    nativeSqliteError
-    && (
-      code.includes("SQLITE_BUSY")
-      || code.includes("SQLITE_LOCKED")
-      || primaryCode === 5
-      || primaryCode === 6
-    )
-  ) {
+    || code?.startsWith("SQLITE_") === true;
+  if (!nativeSqliteError) return null;
+
+  const primaryCode = errcode === null ? null : errcode & 0xff;
+  const symbolicClass = SQLITE_FAILURE_CLASSES.find(({ result }) =>
+    code === result || code?.startsWith(`${result}_`) === true) ?? null;
+  const numericClass = SQLITE_FAILURE_CLASSES.find(({ primaryCode: candidate }) =>
+    primaryCode === candidate) ?? null;
+  // A named result must agree with every available numeric primary code.
+  // Unknown symbolic families retain raw identifiers without borrowing a diagnosis.
+  const failureClass = code === "ERR_SQLITE_ERROR"
+    ? numericClass
+    : symbolicClass && (primaryCode === null || primaryCode === symbolicClass.primaryCode)
+      ? symbolicClass
+      : null;
+  return {
+    code,
+    errcode,
+    primaryCode,
+    result: failureClass?.result ?? null,
+    category: failureClass?.category ?? null,
+  };
+}
+
+function nativeSqliteIdentifiers(error) {
+  const native = nativeSqliteFailure(error);
+  if (!native) return {};
+  return {
+    ...(native.category ? { native_category: native.category } : {}),
+    ...(native.code ? { native_code: native.code } : {}),
+    ...(native.result ? { native_result: native.result } : {}),
+    ...(native.errcode === null ? {} : { native_errcode: native.errcode }),
+  };
+}
+
+export function normalizeDatabaseBusyError(error, file = null) {
+  const native = nativeSqliteFailure(error);
+  if (native?.category === "busy") {
     return lodestarError(
       "database_busy",
       "The Lodestar database is busy.",
@@ -81,16 +125,8 @@ export function normalizeDatabaseBusyError(error, file = null) {
 function sqliteError(error, file) {
   const busyError = normalizeDatabaseBusyError(error, file);
   if (busyError !== error) return busyError;
-  const code = String(error?.code ?? "");
-  const primaryCode = Number.isInteger(error?.errcode)
-    ? error.errcode & 0xff
-    : null;
-  if (
-    code.includes("SQLITE_CORRUPT")
-    || code.includes("SQLITE_NOTADB")
-    || primaryCode === 11
-    || primaryCode === 26
-  ) {
+  const native = nativeSqliteFailure(error);
+  if (native?.category === "integrity") {
     return lodestarError(
       "database_integrity",
       "The database is corrupt or is not a SQLite database.",
@@ -106,7 +142,10 @@ function sqliteError(error, file) {
     "database_error",
     "SQLite could not complete the database operation.",
     {
-      identifiers: { database: file },
+      identifiers: {
+        database: file,
+        ...nativeSqliteIdentifiers(error),
+      },
       action: "Run lodestar doctor for a structured diagnosis.",
     },
   );

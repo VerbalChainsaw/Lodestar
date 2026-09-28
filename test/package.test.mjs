@@ -11,6 +11,29 @@ import { LODESTAR_VERSION } from "../src/cli.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
+function parsePackageArtifact(stdout) {
+  const result = JSON.parse(stdout);
+  const name = "lodestar-agent-context";
+  let artifact;
+  if (Array.isArray(result)) {
+    assert.equal(result.length, 1, "npm must report exactly one package");
+    [artifact] = result;
+  } else {
+    assert.ok(result && typeof result === "object", "npm package output must be an array or keyed object");
+    assert.deepEqual(Object.keys(result), [name], "npm must report only the expected package");
+    artifact = result[name];
+  }
+  assert.equal(artifact?.name, name);
+  assert.equal(artifact?.version, LODESTAR_VERSION);
+  assert.equal(artifact?.id, `${name}@${LODESTAR_VERSION}`);
+  assert.ok(Array.isArray(artifact.files) && artifact.files.length > 0, "npm package file inventory is required");
+  for (const file of artifact.files) {
+    assert.ok(file && typeof file.path === "string" && file.path.length > 0);
+    assert.ok(Number.isSafeInteger(file.size) && file.size >= 0);
+  }
+  return artifact;
+}
+
 function packageArtifact() {
   const npmCli = process.env.npm_execpath;
   const command = npmCli
@@ -29,8 +52,23 @@ function packageArtifact() {
     },
   );
   assert.equal(packed.status, 0, packed.stderr || packed.error?.stack);
-  return JSON.parse(packed.stdout)[0];
+  return parsePackageArtifact(packed.stdout);
 }
+
+test("package evidence accepts one exact package in npm array or keyed output and rejects ambiguous evidence", () => {
+  const name = "lodestar-agent-context";
+  const artifact = { name, version: LODESTAR_VERSION, id: `${name}@${LODESTAR_VERSION}`, files: [{ path: "lodestar.mjs", size: 1 }] };
+  for (const output of [[artifact], { [name]: artifact }]) {
+    assert.deepEqual(parsePackageArtifact(JSON.stringify(output)), artifact);
+  }
+  for (const output of [null, [], [artifact, artifact], {}, { other: artifact },
+    { [name]: artifact, other: artifact }, [{ ...artifact, version: "unexpected" }],
+    [{ ...artifact, name: "other" }], [{ ...artifact, id: "other@1" }],
+    [{ ...artifact, files: [] }], [{ ...artifact, files: [{ path: "", size: 1 }] }],
+    [{ ...artifact, files: [{ path: "lodestar.mjs", size: -1 }] }]]) {
+    assert.throws(() => parsePackageArtifact(JSON.stringify(output)));
+  }
+});
 
 function relativeMarkdownTargets(text) {
   const targets = [];
@@ -65,7 +103,7 @@ test("the package publishes one executable and the canonical managed assets", as
   ]) assert.ok(files.has(required), `missing packaged canonical file: ${required}`);
   const manifest = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "manifest.json"), "utf8"));
   assert.equal(manifest.contract, 5);
-  assert.equal(manifest.skills.length, 7);
+  assert.equal(manifest.skills.length, 6);
   for (const skill of manifest.skills) {
     assert.ok(files.has(`managed-assets/${skill.source_entrypoint}`), `missing maintained skill: ${skill.name}`);
     for (const payload of skill.files) {
@@ -191,9 +229,10 @@ test("the contract-5 manifest verifies raw bytes and complete skill membership",
   const manifest = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "manifest.json"), "utf8"));
   assert.equal(manifest.contract, 5);
   assert.deepEqual(manifest.skills.map(({ name }) => name).sort(), [
-    "adderall", "center-audit", "center-multigeometry", "codeplan",
-    "director-protocol", "ladder-audit", "lodestar",
+    "adderall", "center-audit", "codeplan", "director-protocol",
+    "ladder-audit", "lodestar",
   ]);
+  assert.ok(!manifest.skills.some(({ name }) => name === "center-multigeometry"));
   for (const skill of manifest.skills) {
     assert.match(skill.source_id, /^(?:golden-rules|lodestar-repository):/u);
     assert.equal(skill.distribution_owner, "npm:lodestar-agent-context");
@@ -210,6 +249,7 @@ test("the contract-5 manifest verifies raw bytes and complete skill membership",
   assert.doesNotMatch(runtimeSkills, /skills-payload\.json/u);
   assert.match(runtimeSkills, /\.\.\/managed-assets/u);
   const builder = await readFile(path.join(ROOT, "scripts", "build-managed-assets.mjs"), "utf8");
+  assert.doesNotMatch(builder, /["']center-multigeometry["']\s*:/u);
   assert.doesNotMatch(builder, /historical-source-transformations|entry\.action\s*=|skills-payload\.json/u);
   assert.match(builder, /writeFile\(destination, file\.content\)/u);
   assert.doesNotMatch(builder, /replaceAll\(["']\\r\\n/u);

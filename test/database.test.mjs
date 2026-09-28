@@ -24,6 +24,7 @@ import {
   normalizeDatabaseBusyError,
   transaction,
 } from "../src/database.mjs";
+import { errorEnvelope } from "../src/errors.mjs";
 import {
   defaultDatabasePath,
   resolveDatabasePath,
@@ -83,6 +84,199 @@ test("database busy normalization does not invoke hostile getters or propagate d
     },
   });
   assert.equal(normalizeDatabaseBusyError(descriptorTrap, "test.db"), descriptorTrap);
+});
+
+test("database errors expose bounded native SQLite classification without raw cause data", () => {
+  const cases = [
+    {
+      raw: Object.assign(new Error("secret permission detail"), { code: "SQLITE_PERM" }),
+      expected: { native_category: "permission", native_code: "SQLITE_PERM", native_result: "SQLITE_PERM" },
+    },
+    {
+      raw: Object.assign(new Error("secret readonly detail"), { code: "SQLITE_READONLY_DBMOVED" }),
+      expected: { native_category: "read_only", native_code: "SQLITE_READONLY_DBMOVED", native_result: "SQLITE_READONLY" },
+    },
+    {
+      raw: Object.assign(new Error("secret I/O detail"), { code: "ERR_SQLITE_ERROR", errcode: 10 | (3 << 8) }),
+      expected: {
+        native_category: "input_output",
+        native_code: "ERR_SQLITE_ERROR",
+        native_result: "SQLITE_IOERR",
+        native_errcode: 778,
+      },
+    },
+    {
+      raw: Object.assign(new Error("secret open detail"), { code: "ERR_SQLITE_ERROR", errcode: 14 }),
+      expected: {
+        native_category: "open",
+        native_code: "ERR_SQLITE_ERROR",
+        native_result: "SQLITE_CANTOPEN",
+        native_errcode: 14,
+      },
+    },
+  ];
+
+  for (const { raw, expected } of cases) {
+    assert.throws(
+      () => beginImmediate({ exec() { throw raw; } }, "test.db"),
+      (error) => {
+        assert.equal(error.code, "database_error");
+        assert.deepEqual({ ...error.identifiers }, { database: "test.db", ...expected });
+        assert.deepEqual({ ...errorEnvelope(error).error.identifiers }, {
+          database: "test.db",
+          ...expected,
+        });
+        assert.doesNotMatch(JSON.stringify(errorEnvelope(error)), /secret/u);
+        return true;
+      },
+    );
+  }
+});
+
+test("actual Node SQLite CANTOPEN errors remain open failures rather than permission claims", () => {
+  const file = path.join(
+    os.tmpdir(),
+    `lodestar-missing-${process.pid}-${Date.now()}`,
+    "state.db",
+  );
+  assert.throws(
+    () => openConnection(file, { readOnly: true }),
+    (error) => {
+      assert.equal(error.code, "database_error");
+      assert.equal(error.identifiers.database, file);
+      assert.equal(error.identifiers.native_category, "open");
+      assert.equal(error.identifiers.native_code, "ERR_SQLITE_ERROR");
+      assert.equal(error.identifiers.native_result, "SQLITE_CANTOPEN");
+      assert.equal(error.identifiers.native_errcode & 0xff, 14);
+      assert.notEqual(error.identifiers.native_category, "permission");
+      return true;
+    },
+  );
+});
+
+test("contradictory symbolic and numeric SQLite classes omit inferred diagnosis", () => {
+  for (const code of ["SQLITE_CANTOPEN", "SQLITE_IOERR"]) {
+    const raw = Object.assign(new Error("private conflicting detail"), {
+      code,
+      errcode: 3,
+    });
+    assert.throws(
+      () => beginImmediate({ exec() { throw raw; } }, "test.db"),
+      (error) => {
+        assert.equal(error.code, "database_error");
+        assert.deepEqual({ ...error.identifiers }, {
+          database: "test.db",
+          native_code: code,
+          native_errcode: 3,
+        });
+        assert.equal(error.identifiers.native_category, undefined);
+        assert.equal(error.identifiers.native_result, undefined);
+        assert.doesNotMatch(JSON.stringify(errorEnvelope(error)), /private/u);
+        return true;
+      },
+    );
+  }
+});
+
+test("compatible symbolic and numeric SQLite classes retain inferred diagnosis", () => {
+  for (const [code, errcode, nativeCategory, nativeResult] of [
+    ["SQLITE_CANTOPEN_ISDIR", 14 | (2 << 8), "open", "SQLITE_CANTOPEN"],
+    ["SQLITE_IOERR_WRITE", 10 | (3 << 8), "input_output", "SQLITE_IOERR"],
+  ]) {
+    assert.throws(
+      () => beginImmediate({ exec() { throw Object.assign(new Error("private"), { code, errcode }); } }, "test.db"),
+      (error) => {
+        assert.equal(error.code, "database_error");
+        assert.deepEqual({ ...error.identifiers }, {
+          database: "test.db",
+          native_category: nativeCategory,
+          native_code: code,
+          native_result: nativeResult,
+          native_errcode: errcode,
+        });
+        return true;
+      },
+    );
+  }
+});
+
+test("all public SQLite diagnoses reject conflicting and unknown symbolic evidence", () => {
+  for (const [code, errcode] of [
+    ["SQLITE_BUSY", 14], ["SQLITE_LOCKED", 3],
+    ["SQLITE_CORRUPT", 3], ["SQLITE_NOTADB", 5],
+    ["SQLITE_PERM", 5], ["SQLITE_CANTOPEN", 11],
+    ["SQLITE_BUSY", 99], ["SQLITE_IOERR", 99],
+    ["SQLITE_UNKNOWN", 5], ["SQLITE_BUSYISH", 5],
+    ["SQLITE_CORRUPTION", 11],
+  ]) {
+    const raw = Object.assign(new Error("private diagnostic"), { code, errcode });
+    assert.equal(normalizeDatabaseBusyError(raw, "test.db"), raw);
+    assert.throws(() => beginImmediate({ exec() { throw raw; } }, "test.db"), (error) => {
+      assert.equal(error.code, "database_error", `${code}/${errcode}`);
+      assert.deepEqual({ ...error.identifiers }, {
+        database: "test.db", native_code: code, native_errcode: errcode,
+      });
+      assert.doesNotMatch(JSON.stringify(errorEnvelope(error)), /private/u);
+      return true;
+    });
+  }
+});
+
+test("agreed and numeric-only native SQLite busy and integrity diagnoses remain stable", () => {
+  for (const [code, errcode, expected] of [
+    ["SQLITE_BUSY_RECOVERY", 5 | (1 << 8), "database_busy"],
+    ["SQLITE_LOCKED_SHAREDCACHE", 6 | (1 << 8), "database_busy"],
+    ["SQLITE_CORRUPT", 11, "database_integrity"],
+    ["SQLITE_NOTADB", 26, "database_integrity"],
+    ["ERR_SQLITE_ERROR", 5, "database_busy"],
+    ["ERR_SQLITE_ERROR", 26, "database_integrity"],
+  ]) {
+    const raw = Object.assign(new Error("private diagnostic"), { code, errcode });
+    assert.throws(() => beginImmediate({ exec() { throw raw; } }, "test.db"), (error) => {
+      assert.equal(error.code, expected, `${code}/${errcode}`);
+      assert.equal(error.cause, raw);
+      assert.doesNotMatch(JSON.stringify(errorEnvelope(error)), /private/u);
+      return true;
+    });
+  }
+});
+
+test("database classification ignores malformed native data and never evaluates arbitrary getters", () => {
+  let getterReads = 0;
+  const hostile = {};
+  for (const key of ["code", "errcode", "errstr", "message", "cause"]) {
+    Object.defineProperty(hostile, key, {
+      get() {
+        getterReads += 1;
+        throw new Error("hostile getter");
+      },
+    });
+  }
+  assert.throws(
+    () => beginImmediate({ exec() { throw hostile; } }, "test.db"),
+    (error) => {
+      assert.equal(error.code, "database_error");
+      assert.deepEqual({ ...error.identifiers }, { database: "test.db" });
+      return true;
+    },
+  );
+  assert.equal(getterReads, 0);
+
+  for (const [raw, expected] of [
+    [Object.assign(new Error("oversized"), { code: `SQLITE_${"X".repeat(5000)}` }), {}],
+    [Object.assign(new Error("negative"), { code: "ERR_SQLITE_ERROR", errcode: -1 }), { native_code: "ERR_SQLITE_ERROR" }],
+    [Object.assign(new Error("fraction"), { code: "ERR_SQLITE_ERROR", errcode: 10.5 }), { native_code: "ERR_SQLITE_ERROR" }],
+    [new Error("ordinary failure"), {}],
+  ]) {
+    assert.throws(
+      () => beginImmediate({ exec() { throw raw; } }, "test.db"),
+      (error) => {
+        assert.equal(error.code, "database_error");
+        assert.deepEqual({ ...error.identifiers }, { database: "test.db", ...expected });
+        return true;
+      },
+    );
+  }
 });
 
 test("initializes the universal-record schema and is read-only when repeated", async (t) => {

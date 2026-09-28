@@ -21,7 +21,6 @@ const DISTRIBUTION_OWNER = "npm:lodestar-agent-context";
 const SOURCE_IDS = Object.freeze({
   "director-protocol": "golden-rules:director-protocol",
   codeplan: "golden-rules:codeplan",
-  "center-multigeometry": "golden-rules:center-multigeometry",
   "center-audit": "golden-rules:center-audit",
   "ladder-audit": "golden-rules:ladder-audit",
   lodestar: "lodestar-repository:lodestar",
