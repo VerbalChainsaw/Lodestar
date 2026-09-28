@@ -262,3 +262,24 @@ test("subject matching folds case and script without truncating code points", as
   assert.ok(created.value.next.some((line) => line.includes("rejection:elan")),
     JSON.stringify(created.value));
 });
+
+test("a rejection under a historical member scope still advises through the canonical project", async (t) => {
+  const f = await registerFixture(t);
+  await f.create("project:old", "project", { roots: [] }, "project:old");
+  const rejection = rejectionRecord({ scope: "project:old", aliases: [],
+    semantics: { subject: "rejection:old-scope", basis: "asserted", lifecycle: "current",
+      context_role: "orientation", applicability: { project: "project:old", checkout: null } } });
+  const registration = await f.request({ mode: "create", record: rejection },
+    [{ kind: "record", id: rejection.id }], "project:old");
+  assert.equal((await f.cli(["put"], registration)).code, 0);
+  const mapping = await f.request({ mode: "update", id: "project:old",
+    set: { data: { canonical_project_id: "project:test" },
+      links: [{ relationship: "canonical-project", to_id: "project:test" }] }, remove: [] },
+    [{ kind: "record", id: "project:old" }, { kind: "record", id: "project:test" }], "project:old");
+  assert.equal((await f.cli(["put"], mapping)).code, 0);
+  const note = noteRecord({ id: "note:historical", aliases: [],
+    data: { subject: "materialized views", text: "x" } });
+  const created = await putCreate(f, note.id, note);
+  assert.ok(created.value.next?.some((line) => line.includes("rejection:materialized-views")),
+    JSON.stringify(created.value));
+});

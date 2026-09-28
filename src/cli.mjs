@@ -34,6 +34,8 @@ function helpData(command = null) {
       usage: definition.usage,
       summary: definition.summary,
       values: definition.values, booleans: definition.booleans, positionals: definition.positionals,
+      global_values: ["--db <path>", "--output <new-file>", "--args-file <path>", "--args-stdin"],
+      global_booleans: ["--human"],
       read_operations: Object.keys(READ_OPERATIONS).filter((operation) => operation.split(".")[0] === command),
       mutation_inputs: Object.fromEntries(Object.entries({ put: PUT_INPUT_SCHEMA, delete: DELETE_INPUT_SCHEMA, ...MUTATION_INPUTS })
         .filter(([operation]) => operation.split(".")[0] === command)),

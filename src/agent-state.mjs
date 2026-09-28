@@ -342,7 +342,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
           : command === "work" ? workStatus(db, project, action === "history", limit)
             : command === "handoff" ? handoffStatus(db, project, caller, { history: action === "history" })
               : pendingList(db, project, limit);
-        return dbResult(db, data, { scope: scope(project, caller) });
+        return dbResult(db, data, { scope: scope(project, caller), more: data?.more === true });
       });
     }, { read: true });
     const request = normalizeMutationRequest(await input(options, io, `${command}_${action}_input`), { actor: actorRecord(caller) });

@@ -14,6 +14,7 @@ export function pendingList(db, project, limit = null) {
     + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
   return { count: result.records.length,
     records: limit === null ? result.records : result.records.slice(0, limit),
+    more: limit !== null && result.records.length > limit,
     record_errors: result.record_errors, complete: result.record_errors.length === 0,
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
       targets: [...result.records.map(({ id }) => ({ kind: "record", id })),
