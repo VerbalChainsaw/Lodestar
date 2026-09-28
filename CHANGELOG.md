@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2.1 - 2026-09-28
+
+- Cover historical member scopes in the rejection advisory so a rebinding
+  project still intercepts settled subjects.
+- Signal omitted records: limited `work` and `pending` reads now set envelope
+  `more`; JSON help declares nested input shapes, global options, and that
+  read-only options do not guard mutations.
+- Report Git discovery execution failures as typed `project_discovery_failed`
+  instead of silently deriving a working-directory identity.
+- Document the managed-asset verification invariants in AGENTS.md.
+
 ## 2.2.0 - 2026-09-28
 
 - Add guided corrective actions to conflict failures. Update-mode `set`/`remove`

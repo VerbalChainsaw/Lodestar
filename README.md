@@ -4,7 +4,7 @@
 
 ![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.2.0.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
+[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.2.1.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
 
 Lodestar keeps useful project context, decisions, and unfinished work in one local
 registry. Your coding agent can get its bearings, check what changed, and leave a
@@ -58,7 +58,7 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 Requires **Node.js 24.15.0 or newer**. For a new installation:
 
 ```text
-npm install --global lodestar-agent-context@2.2.0
+npm install --global lodestar-agent-context@2.2.1
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
