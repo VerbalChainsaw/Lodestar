@@ -20,6 +20,10 @@
 - Match rejection-advisory subjects with Unicode-aware case folding, never split
   code points when trimming stored reasons, and answer an occupied `--output`
   path with a typed `output_conflict`.
+- Keep advisory generation best-effort so unreadable rows can never block an
+  accepted write, follow the normalized request inside `put`, reject forbidden
+  async transaction callbacks without unhandled rejections, and name the
+  pending default read `pending.list` in envelopes.
 - Retain the 2.1.4 plugin packaging and invocation corrections. Contract 5 and
   schema 5 are unchanged; no data migration is required.
 
