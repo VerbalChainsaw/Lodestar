@@ -1140,13 +1140,13 @@ export function putRecord(db, value, options = {}) {
   const id = mode === "update" ? input.id : input?.record?.id;
   validateIdentifier(id, "input.id");
   const prepared = preparePutEvidence(db, input, value);
-  return mutate(db, "put", value, ({ revision, timestamp }) => {
+  return mutate(db, "put", value, ({ request, revision, timestamp }) => {
     const data = applyPutInput(db, input, { revision, timestamp, ...prepared });
     // Non-blocking rediscovery interception for direct put create/update only
     // (rejection register contract: references/knowledge.md "Settled rejections").
     // Computed at acceptance so the stored receipt replays its advisory exactly.
     const next = (data.kind ?? data.type) === "rejection"
-      ? [] : rejectionAdvisories(db, data, value.project_scope ?? null, value.checkout ?? null);
+      ? [] : rejectionAdvisories(db, data, request.project_scope ?? null, request.checkout ?? null);
     return { data, changed_ids: data.revision === revision ? [id] : [],
       ...(next.length ? { next } : {}) };
   }, { ...options, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
@@ -1156,36 +1156,43 @@ function rejectionAdvisories(db, record, projectScope, requestCheckout) {
   const subject = record?.data?.subject;
   if (typeof projectScope !== "string" || typeof subject !== "string"
     || subject.length === 0) return [];
-  const fold = (value) => typeof value === "string" ? value.normalize("NFC").toLowerCase() : null;
-  const foldPath = (value) => typeof value === "string" ? fold(value.replace(/\\/g, "/")) : null;
-  const wanted = fold(subject);
-  const rows = db.prepare(
-    "SELECT id, json_extract(content_json,'$.value.subject') AS subject, "
-      + "json_extract(content_json,'$.value.reason') AS reason, "
-      + "json_extract(content_json,'$._lodestar.semantics.applicability.checkout') AS checkout "
-      + "FROM records WHERE type='rejection' AND id<>? "
-      + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current')='current' "
-      + "AND (scope=? OR (scope='global' "
-      + "AND json_extract(content_json,'$._lodestar.semantics.applicability.project')=?)) "
-      + "ORDER BY id",
-  ).all(record.id, projectScope, projectScope);
-  const matching = rows.filter(({ subject: candidate, checkout }) => fold(candidate) === wanted
-    && (typeof checkout !== "string" || (typeof requestCheckout === "string"
-      && foldPath(checkout) === foldPath(requestCheckout))));
-  const lines = matching.slice(0, 3).map(({ id, reason }) => {
-    const text = typeof reason === "string" ? reason.trim() : "";
-    const points = [...text];
-    const summary = points.length > 140 ? `${points.slice(0, 137).join("")}...` : text;
-    return summary.length
-      ? `Settled rejection covers this subject: ${id} — ${summary} Read it before proceeding.`
-      : `Settled rejection covers this subject: ${id}. Read it before proceeding.`;
-  });
-  if (matching.length > 3) {
-    const extra = matching.length - 3;
-    lines.push(`${extra} more current rejection${extra === 1 ? "" : "s"} share${extra === 1 ? "s" : ""} this subject; run lodestar find "${subject}".`);
+  try {
+    const fold = (value) => typeof value === "string" ? value.normalize("NFC").toLowerCase() : null;
+    const foldPath = (value) => typeof value === "string" ? fold(value.replace(/\\/g, "/")) : null;
+    const wanted = fold(subject);
+    const rows = db.prepare(
+      "SELECT id, json_extract(content_json,'$.value.subject') AS subject, "
+        + "json_extract(content_json,'$.value.reason') AS reason, "
+        + "json_extract(content_json,'$._lodestar.semantics.applicability.checkout') AS checkout "
+        + "FROM records WHERE type='rejection' AND id<>? "
+        + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current')='current' "
+        + "AND (scope=? OR (scope='global' "
+        + "AND json_extract(content_json,'$._lodestar.semantics.applicability.project')=?)) "
+        + "ORDER BY id",
+    ).all(record.id, projectScope, projectScope);
+    const matching = rows.filter(({ subject: candidate, checkout }) => fold(candidate) === wanted
+      && (typeof checkout !== "string" || (typeof requestCheckout === "string"
+        && foldPath(checkout) === foldPath(requestCheckout))));
+    const lines = matching.slice(0, 3).map(({ id, reason }) => {
+      const text = typeof reason === "string" ? reason.trim() : "";
+      const points = [...text];
+      const summary = points.length > 140 ? `${points.slice(0, 137).join("")}...` : text;
+      return summary.length
+        ? `Settled rejection covers this subject: ${id} — ${summary} Read it before proceeding.`
+        : `Settled rejection covers this subject: ${id}. Read it before proceeding.`;
+    });
+    if (matching.length > 3) {
+      const extra = matching.length - 3;
+      lines.push(`${extra} more current rejection${extra === 1 ? "" : "s"} share${extra === 1 ? "s" : ""} this subject; run lodestar find "${subject}".`);
+    }
+    return lines;
+  } catch {
+    // Advisory generation is best-effort: unreadable rejection rows must never
+    // abort an otherwise accepted write.
+    return [];
   }
-  return lines;
 }
+
 
 export function applyPutInput(db, input, {
   revision,

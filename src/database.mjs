@@ -221,6 +221,7 @@ export function transaction(db, operation, file = null) {
   if (db.isTransaction === true) {
     const nested = operation();
     if (nested && typeof nested.then === "function") {
+      try { Promise.resolve(nested).catch(() => {}); } catch { /* hostile thenable */ }
       throw lodestarError(
         "invalid_transaction",
         "Synchronous SQLite transactions cannot accept an async callback.",
@@ -233,6 +234,7 @@ export function transaction(db, operation, file = null) {
   try {
     result = operation();
     if (result && typeof result.then === "function") {
+      try { Promise.resolve(result).catch(() => {}); } catch { /* hostile thenable */ }
       throw lodestarError(
         "invalid_transaction",
         "Synchronous SQLite transactions cannot accept an async callback.",
