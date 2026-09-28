@@ -273,7 +273,16 @@ export async function runCli(
       const destination = resolveInputPath(global.output);
       // Reserve before dispatch: an unavailable/existing output must never hide
       // an already committed mutation. A completed response carries its hash.
-      outputHandle = await open(destination, "wx");
+      try {
+        outputHandle = await open(destination, "wx");
+      } catch (error) {
+        if (error?.code === "EEXIST") throw lodestarError("output_conflict",
+          "The --output path already exists.", {
+            identifiers: { output: destination },
+            action: "Choose a new --output file path; existing files are never overwritten.",
+          });
+        throw error;
+      }
       io = { ...io, outputFile: { path: destination, handle: outputHandle } };
     }
     const command = rest[0] ?? null;

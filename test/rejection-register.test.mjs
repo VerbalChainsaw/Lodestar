@@ -247,3 +247,18 @@ test("rejection writes themselves receive no advisory", async (t) => {
   assert.equal(result.code, 0, JSON.stringify(result.value));
   assert.ok(!JSON.stringify(result.value).includes("Settled rejection"), JSON.stringify(result.value));
 });
+
+test("subject matching folds case and script without truncating code points", async (t) => {
+  const f = await registerFixture(t);
+  const record = rejectionRecord({ id: "rejection:elan", name: "Élan rejected",
+    data: { subject: "ÉLAN design", verdict: "never-revisit", reason: "Ünïcode reasons matter." },
+    aliases: [],
+    semantics: { subject: "rejection:elan", basis: "asserted", lifecycle: "current",
+      context_role: "orientation", applicability: { project: "project:test", checkout: null } } });
+  assert.equal((await putCreate(f, record.id, record)).code, 0);
+  const note = noteRecord({ id: "note:elan", aliases: [], data: { subject: "élan design", text: "x" } });
+  const created = await putCreate(f, note.id, note);
+  assert.equal(created.code, 0, JSON.stringify(created.value));
+  assert.ok(created.value.next.some((line) => line.includes("rejection:elan")),
+    JSON.stringify(created.value));
+});

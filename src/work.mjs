@@ -24,7 +24,9 @@ export function workStatus(db, project, history = false, limit = null) {
 }
 export function workMutation(db, project, identity, action, request, options = {}) {
   const input = validateDomainInput(`work.${action}`, request?.input);
-  if (!identity.actor) throw lodestarError("identity_required", "A work write needs the actual actor identity.");
+  if (!identity.actor) throw lodestarError("identity_required", "A work write needs the actual actor identity.", {
+    action: "Run the write under the Lodestar plugin, or pass the session and actor identity the host exposes (see lodestar work start --help), then retry.",
+  });
   const admittedScopes = new Set([project.scope, ...(project.historical_scopes ?? [])]);
   const ids = action === "expire" ? input.targets : [input.id];
   if (!ids.length || ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length) {

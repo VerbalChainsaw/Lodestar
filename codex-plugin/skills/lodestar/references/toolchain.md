@@ -13,15 +13,15 @@ are read-only. Native environments retain ownership of their settings and instru
 `lodestar-agent-context` · [github.com/VerbalChainsaw/Lodestar](https://github.com/VerbalChainsaw/Lodestar) · MIT · Node 24.15+
 
 ```bash
-npm install --global ./lodestar-agent-context-2.0.1.tgz
+npm install --global lodestar-agent-context@2.2.0
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
 lodestar skills verify --target all
 ```
 
-This release uses the supplied local tarball until 2.0.1 is published to the package
-registry.
+Install the published package from the npm registry; `setup` plans owned payload
+changes before `--apply` performs them.
 
 Review the setup plan before applying it. Existing locally changed or unowned
 content requires explicit `--replace-local`, which retains backups. Setup and
@@ -96,7 +96,9 @@ Run center-geo to pick a hypothesis. Run center-audit to prove or kill it. Then 
 
 ## Active context and state
 
-Lodestar is the active authority for its own context database. It does not distribute or modify skill directories or agent-instruction files.
+Lodestar is the active authority for its own context database. Ordinary reads
+never modify installed skill directories or agent-instruction files; only an
+explicit `setup --apply` updates Lodestar-owned payloads, with backups.
 
 ```bash
 lodestar skills verify --target all
