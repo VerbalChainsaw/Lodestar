@@ -69,3 +69,16 @@ test('decision_conflict actions teach the predecessor rules', async (t) => {
   assert.match(JSON.stringify(conflict.value), /supersedes_event_id/);
   assert.equal((await f.change('set', { key: 'fresh', value: 'v', reason: 'r', status: 'accepted' })).code, 0);
 });
+
+test('decision_conflict actions teach the resolved-heads rule', async (t) => {
+  const f = await setup(t);
+  await f.create('note:head', 'note', { text: 'x' });
+  const body = await f.request({ key: 'fresh-heads', value: 'v', reason: 'r', status: 'accepted',
+    resolved_heads: ['note:head'] },
+  [{ kind: 'record', id: 'project:test' }, { kind: 'record', id: 'note:head' },
+    { kind: 'decision', scope: 'project:test', key: 'fresh-heads' }], 'project:test', actor);
+  const conflict = await f.cli(['decision', 'set', '--cwd', f.root], body);
+  assert.notEqual(conflict.code, 0);
+  assert.match(JSON.stringify(conflict.value), /decision_conflict/);
+  assert.match(JSON.stringify(conflict.value), /heads/);
+});

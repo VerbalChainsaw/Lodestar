@@ -211,7 +211,7 @@
       "source_entrypoint": "skills/lodestar/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "0970d09f76283bca3a8b53d29e2a2b517d68cba51b6d47b50711ef8f800732cb"
+        "value": "dcfd1ac0fb772ef3ff6d65c42e0c6d93f23852b03037bd195596328ad627c310"
       },
       "payload_root": "skills/lodestar",
       "files": [
@@ -257,8 +257,8 @@
         },
         {
           "path": "references/knowledge.md",
-          "bytes": 6787,
-          "sha256": "a39dc69293aa56495b9438e6a82894463f9f6841977bf10b5a3eff81fb6f5b2a"
+          "bytes": 6942,
+          "sha256": "2522c85a776c74f1fd7e12f31ad114d9fa75dc02578008c40a091f3defbd99c3"
         },
         {
           "path": "references/templates.md",

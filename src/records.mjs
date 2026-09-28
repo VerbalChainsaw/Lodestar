@@ -480,11 +480,14 @@ function assertAliasAvailability(db, id, aliases) {
     if (owner && owner.record_id !== id) {
       let action = "Choose a globally unique alias.";
       try {
-        const ownerRecord = normalizeRecord(getRecordById(db, owner.record_id));
-        if (ownerRecord.type === "rejection" && (ownerRecord.semantics?.lifecycle ?? "current") === "current") {
+        const ownerRow = db.prepare(
+          "SELECT type, COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') AS lifecycle "
+            + "FROM records WHERE id=?",
+        ).get(owner.record_id);
+        if (ownerRow && ownerRow.type === "rejection" && ownerRow.lifecycle === "current") {
           action = `Alias belongs to current rejection record ${owner.record_id}; read it before choosing a different alias.`;
         }
-      } catch { /* Keep the standard guidance when the owner cannot be normalized. */ }
+      } catch { /* Keep the standard guidance when the owner row cannot be inspected. */ }
       throw lodestarError(
         "alias_conflict",
         "An alias already belongs to another record.",
@@ -1142,7 +1145,7 @@ export function putRecord(db, value, options = {}) {
     // Non-blocking rediscovery interception for direct put create/update only
     // (rejection register contract: references/knowledge.md "Settled rejections").
     // Computed at acceptance so the stored receipt replays its advisory exactly.
-    const next = data.type === "rejection"
+    const next = (data.kind ?? data.type) === "rejection"
       ? [] : rejectionAdvisories(db, data, value.project_scope ?? null);
     return { data, changed_ids: data.revision === revision ? [id] : [],
       ...(next.length ? { next } : {}) };
@@ -1163,12 +1166,15 @@ function rejectionAdvisories(db, record, projectScope) {
       + "ORDER BY id",
   ).all(record.id, subject, projectScope, projectScope);
   const lines = rows.slice(0, 3).map(({ id, reason }) => {
-    const summary = typeof reason === "string" && reason.length > 140
-      ? `${reason.slice(0, 137)}...` : (reason ?? "");
-    return `Settled rejection covers this subject: ${id} — ${summary} Read it before proceeding.`;
+    const text = typeof reason === "string" ? reason.trim() : "";
+    const summary = text.length > 140 ? `${text.slice(0, 137)}...` : text;
+    return summary.length
+      ? `Settled rejection covers this subject: ${id} — ${summary} Read it before proceeding.`
+      : `Settled rejection covers this subject: ${id}. Read it before proceeding.`;
   });
   if (rows.length > 3) {
-    lines.push(`${rows.length - 3} more current rejections share this subject; run lodestar find "${subject}".`);
+    const extra = rows.length - 3;
+    lines.push(`${extra} more current rejection${extra === 1 ? "" : "s"} share${extra === 1 ? "s" : ""} this subject; run lodestar find "${subject}".`);
   }
   return lines;
 }
