@@ -14,4 +14,4 @@ Start returns the maintained operating guide and a fresh installation check. Use
 
 Send complete contract-5 mutations through a UTF-8 request file or stdin. Keep payloads out of shell command strings. Use --args-file or --args-stdin for a complete JSON command-argument array when command-line size or quoting is a concern.
 
-If a host clips output, repeat a read using --output with a new file path. Verify the returned byte count and SHA-256 and read the complete file. For a lost mutation response, retry the exact same request_id and body; do not repeat the external action.
+If a response is large or a host clips output, repeat a read using `--output` with a new file path. Verify the returned byte count and SHA-256 and read the complete file. For a lost mutation response, retry the exact same request_id and body; do not repeat the external action.

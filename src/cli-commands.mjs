@@ -88,7 +88,7 @@ export const COMMANDS = Object.freeze({
   init: { usage: "lodestar init [--migrate|--promote-recovery --file <request.json>] [--db <path>]",
     summary: "Explicitly create a current store or apply a preserving conversion.",
     values: ["--file"], booleans: ["--migrate", "--promote-recovery"], positionals: 0 },
-  put: { usage: "lodestar put [--file <request.json>]", summary: "Create or update using the shared guarded mutation contract.",
+  put: { usage: "lodestar put [--file <request.json>]", summary: "Create or update using the shared guarded mutation contract; update inputs require both set and remove.",
     values: ["--file"], booleans: [], positionals: 0 },
   get: { usage: "lodestar get <id-or-alias> [--history|--raw]", summary: "Read an exact record, raw evidence, or preserved history and update basis.",
     values: [], booleans: ["--history", "--raw"], positionals: 1 },

@@ -59,3 +59,13 @@ test('decision keys reject malformed spelling instead of silently conflating it'
     await assert.rejects(() => f.change('set', { key, value: 'x', reason: 'x', status: 'accepted' }));
   }
 });
+
+test('decision_conflict actions teach the predecessor rules', async (t) => {
+  const f = await setup(t);
+  const conflict = await f.change('set', { key: 'fresh', value: 'v', reason: 'r', status: 'accepted',
+    supersedes_event_id: null });
+  assert.notEqual(conflict.code, 0);
+  assert.match(JSON.stringify(conflict.value), /decision_conflict/);
+  assert.match(JSON.stringify(conflict.value), /supersedes_event_id/);
+  assert.equal((await f.change('set', { key: 'fresh', value: 'v', reason: 'r', status: 'accepted' })).code, 0);
+});

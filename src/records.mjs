@@ -478,6 +478,13 @@ function assertAliasAvailability(db, id, aliases) {
     }
     const owner = aliasOwner.get(alias);
     if (owner && owner.record_id !== id) {
+      let action = "Choose a globally unique alias.";
+      try {
+        const ownerRecord = normalizeRecord(getRecordById(db, owner.record_id));
+        if (ownerRecord.type === "rejection" && (ownerRecord.semantics?.lifecycle ?? "current") === "current") {
+          action = `Alias belongs to current rejection record ${owner.record_id}; read it before choosing a different alias.`;
+        }
+      } catch { /* Keep the standard guidance when the owner cannot be normalized. */ }
       throw lodestarError(
         "alias_conflict",
         "An alias already belongs to another record.",
@@ -487,7 +494,7 @@ function assertAliasAvailability(db, id, aliases) {
             alias,
             record_id: owner.record_id,
           },
-          action: "Choose a globally unique alias.",
+          action,
         },
       );
     }
@@ -588,10 +595,11 @@ function plain(value) {
     && Object.getPrototypeOf(value) === Object.prototype;
 }
 
-function invalidMutation(message, identifiers = {}) {
+function invalidMutation(message, identifiers = {},
+  action = "Upgrade the caller and submit the complete Lodestar contract-5 mutation.") {
   throw lodestarError("invalid_mutation_contract", message, {
     identifiers,
-    action: "Upgrade the caller and submit the complete Lodestar contract-5 mutation.",
+    action,
   });
 }
 
@@ -909,9 +917,11 @@ export function mutate(db, operation, value, callback, {
       ? callbackResult.data : callbackResult;
     const changedIds = plain(callbackResult) && Array.isArray(callbackResult.changed_ids)
       ? callbackResult.changed_ids : [];
+    const advisoryNext = plain(callbackResult) && Array.isArray(callbackResult.next)
+      ? callbackResult.next.filter((line) => typeof line === "string") : [];
     const beforeImages = changedIds.map((changedId) => captures.get(changedId))
       .filter(Boolean);
-    const accepted = { data };
+    const accepted = { data, ...(advisoryNext.length ? { next: advisoryNext } : {}) };
     canonicalStringify(accepted);
     const receiptData = {
       request_id: request.request_id,
@@ -933,7 +943,7 @@ export function mutate(db, operation, value, callback, {
       aliases: [], links: [], sources: [],
     }, { createdAt: timestamp, updatedAt: timestamp, revision });
     return {
-      data,
+      ...accepted,
       request: { id: request.request_id, replayed: false,
         committed_revision: revision },
       receipt_id: id,
@@ -1043,7 +1053,9 @@ function assertSubjectAvailable(db, record) {
 function updateRecordValue(current, input) {
   exactKeys(input, PUT_UPDATE_FIELDS, "input");
   if (!plain(input.set) || !Array.isArray(input.remove)) {
-    invalidMutation("update requires object set and array remove fields.");
+    invalidMutation("update requires object set and array remove fields.",
+      { mode: "update" },
+      "Include \"remove\": [] when the update removes no keys; see lodestar put --help.");
   }
   exactKeys(input.set, UPDATE_SET_FIELDS, "input.set");
   if (input.remove.some((key) => typeof key !== "string")) {
@@ -1127,8 +1139,38 @@ export function putRecord(db, value, options = {}) {
   const prepared = preparePutEvidence(db, input, value);
   return mutate(db, "put", value, ({ revision, timestamp }) => {
     const data = applyPutInput(db, input, { revision, timestamp, ...prepared });
-    return { data, changed_ids: data.revision === revision ? [id] : [] };
+    // Non-blocking rediscovery interception for direct put create/update only
+    // (rejection register contract: references/knowledge.md "Settled rejections").
+    // Computed at acceptance so the stored receipt replays its advisory exactly.
+    const next = data.type === "rejection"
+      ? [] : rejectionAdvisories(db, data, value.project_scope ?? null);
+    return { data, changed_ids: data.revision === revision ? [id] : [],
+      ...(next.length ? { next } : {}) };
   }, { ...options, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
+}
+
+function rejectionAdvisories(db, record, projectScope) {
+  const subject = record?.data?.subject;
+  if (typeof projectScope !== "string" || typeof subject !== "string"
+    || subject.length === 0) return [];
+  const rows = db.prepare(
+    "SELECT id, json_extract(content_json,'$.value.reason') AS reason "
+      + "FROM records WHERE type='rejection' AND id<>? "
+      + "AND lower(json_extract(content_json,'$.value.subject')) = lower(?) "
+      + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current')='current' "
+      + "AND (scope=? OR (scope='global' "
+      + "AND json_extract(content_json,'$._lodestar.semantics.applicability.project')=?)) "
+      + "ORDER BY id",
+  ).all(record.id, subject, projectScope, projectScope);
+  const lines = rows.slice(0, 3).map(({ id, reason }) => {
+    const summary = typeof reason === "string" && reason.length > 140
+      ? `${reason.slice(0, 137)}...` : (reason ?? "");
+    return `Settled rejection covers this subject: ${id} — ${summary} Read it before proceeding.`;
+  });
+  if (rows.length > 3) {
+    lines.push(`${rows.length - 3} more current rejections share this subject; run lodestar find "${subject}".`);
+  }
+  return lines;
 }
 
 export function applyPutInput(db, input, {
@@ -1216,7 +1258,10 @@ export function applyPutInput(db, input, {
   assertSubjectAvailable(db, record);
   if (mode === "create" && record.type !== "project" && request.project_scope !== null
     && record.scope !== request.project_scope && record.scope !== "global") {
-    throw lodestarError("project_binding_conflict", "New facts must use the resolved canonical project scope.");
+    throw lodestarError("project_binding_conflict", "New facts must use the resolved canonical project scope.", {
+      identifiers: { scope: record.scope, project_scope: request.project_scope },
+      action: "Set the new record's scope to the resolved project scope or run the write from that project's checkout.",
+    });
   }
   if (existing && mode !== "replace") {
     const prior = normalizeRecord(getRecordById(db, id));

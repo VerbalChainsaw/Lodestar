@@ -3,7 +3,9 @@
 Use narrow, stable keys whose punctuation is meaningful. Read all current streams with
 `lodestar decision show` or one stream with `lodestar decision show <key>`. Write with
 `decision set|status|drop|inject --file <request.json>` using the current read basis and
-the exact structured input declared by the installed package.
+the exact structured input declared by the installed package. A fresh key needs no
+`supersedes_event_id`; include it only when revising a stream whose current head you
+have read.
 
 Every accepted change records its reason and semantics. The current answer is derived
 from accepted event revisions, never wall-clock ordering. Reversals preserve prior

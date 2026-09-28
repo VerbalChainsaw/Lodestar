@@ -29,7 +29,9 @@ For contract-5 `put` updates, include both an object `set` and an array `remove`
 when the help schema does not make that obvious. `get` returns the record directly
 under envelope `data`, not `data.record`. Use the process working directory for
 ordinary `get`/`find`; do not copy `start --cwd` onto commands that do not advertise
-that option. Filter large `find` responses before printing them.
+that option. Filter large `find` responses before printing them. On a mature project,
+`start` can return a large orientation; capture it with `--output <new-file>` and read
+only the sections you need.
 
 Use `lodestar <command> --help` in JSON mode, or native `lodestar_describe`, for
 the complete mutation envelope and operation input schema. `decision show` reads
@@ -47,3 +49,96 @@ A current `content_owner` backed by a local file or package manifest is re-read 
 write admission and must match its exact locator, byte count, and SHA-256. A
 `source_root` locator includes `source_id`; retain the returned
 `config:lodestar:sources` precondition so a root change cannot reuse the old basis.
+
+## Settled rejections (never revisit)
+
+Record an element the project has settled against — a rejected model, data set,
+architecture, or approach — as a `kind: "rejection"` record so future sessions are
+intercepted before re-proposing it. One rejection per subject. Convention: the
+record's `data.subject` carries the exact subject terms (the write-time advisory
+matches it case-folded), `data.verdict` is `"never-revisit"`, `data.reason` is one
+line, `priority` is set explicitly so orientation orders it, and `semantics.subject`
+is set so a duplicate rejection conflicts instead of accumulating. Orientation and
+the write-time advisory surface rejections whose scope is the project or `global`
+with `semantics.applicability.project` set to the project; `find` reaches rejections
+in every scope. Treat a rejection search hit or advisory line as a settled verdict:
+stop, read it, and reopen it only through an update that carries actual user
+direction. Retire a rejection through `delete` or by updating `semantics.lifecycle`
+to `historical` or `superseded` with a `retirement_reason`; current orientation then
+omits it while exact history remains.
+
+```json
+{
+  "v": 5,
+  "request_id": "018f-example-rejection-create",
+  "write_basis": {
+    "database_instance_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "database_epoch": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "project_scope": "project:example",
+    "checkout": null,
+    "targets": [
+      { "kind": "record", "id": "project:example", "expected_revision": 4 },
+      { "kind": "record", "id": "rejection:materialized-views", "expected_revision": null }
+    ]
+  },
+  "input": {
+    "mode": "create",
+    "record": {
+      "id": "rejection:materialized-views",
+      "kind": "rejection",
+      "name": "Materialized views — rejected",
+      "scope": "project:example",
+      "availability": "known",
+      "priority": 200,
+      "data": {
+        "subject": "materialized views",
+        "verdict": "never-revisit",
+        "reason": "Rebuild cost and staleness outweighed read speed; revisit only on recorded user direction."
+      },
+      "aliases": ["materialized views", "matview approach"],
+      "links": [],
+      "sources": [],
+      "semantics": {
+        "subject": "materialized-views",
+        "basis": "asserted",
+        "lifecycle": "current",
+        "context_role": "orientation",
+        "applicability": { "project": "project:example", "checkout": null }
+      }
+    }
+  }
+}
+```
+
+Retire or supersede a rejection with an update that keeps both `set` and `remove`:
+
+```json
+{
+  "v": 5,
+  "request_id": "018f-example-rejection-retire",
+  "write_basis": {
+    "database_instance_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "database_epoch": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "project_scope": "project:example",
+    "checkout": null,
+    "targets": [
+      { "kind": "record", "id": "rejection:materialized-views", "expected_revision": 5 }
+    ]
+  },
+  "input": {
+    "mode": "update",
+    "id": "rejection:materialized-views",
+    "set": {
+      "semantics": {
+        "subject": "materialized-views",
+        "basis": "asserted",
+        "lifecycle": "superseded",
+        "context_role": "orientation",
+        "applicability": { "project": "project:example", "checkout": null },
+        "retirement_reason": "Superseded by the 2027 read-path redesign."
+      }
+    },
+    "remove": []
+  }
+}
+```

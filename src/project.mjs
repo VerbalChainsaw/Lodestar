@@ -172,7 +172,8 @@ export function validateProjectBindings(db, id, prepared = null) {
     if (current.revision !== peer.revision || canonicalStringify(currentRoots) !== canonicalStringify(peer.raw_roots)) {
       throw lodestarError("project_binding_conflict", "Project root evidence changed before binding validation.",
         { identifiers: { id, peer: peer.id, expected_revision: peer.revision,
-          current_revision: current.revision } });
+          current_revision: current.revision },
+          action: "Re-read the changed peer project record and refresh the binding basis before retrying." });
     }
     const peerBinding = peer.catalog_binding;
     const sameSource = binding?.catalog_id && binding.catalog_id === peerBinding?.catalog_id
@@ -181,7 +182,8 @@ export function validateProjectBindings(db, id, prepared = null) {
     const sameRoot = peer.roots.some((root) => roots.has(comparable(root)));
     if ((sameSource || sameRoot) && canonicalProject(db, peer.id).record.id !== selected.record.id) {
       throw lodestarError("project_binding_conflict", "Competing projects claim the same source entry or physical root.",
-        { identifiers: { projects: [id, peer.id], same_source: Boolean(sameSource), same_root: sameRoot } });
+        { identifiers: { projects: [id, peer.id], same_source: Boolean(sameSource), same_root: sameRoot },
+          action: "Resolve which project owns this source entry or physical root, then retry with distinct bindings." });
     }
   }
   return selected.bindings.map(({ target }) => target);

@@ -143,7 +143,8 @@ export function applyDecision(db, project, identity, action, input, { revision, 
     }
     if (input.supersedes_event_id !== undefined && input.supersedes_event_id !== head?.event_id) {
       throw lodestarError("decision_conflict", "The supplied predecessor is not the current decision head.",
-        { identifiers: { key, current_event_id: head?.event_id ?? null } });
+        { identifiers: { key, current_event_id: head?.event_id ?? null },
+          action: "Omit supersedes_event_id for a key without a current head; otherwise pass the current head event_id from identifiers.current_event_id." });
     }
     if (action !== "inject") safeText(input.reason, "Decision reason");
     if (action === "set") {
@@ -164,7 +165,8 @@ export function applyDecision(db, project, identity, action, input, { revision, 
           const event = replayDecisions(result.history).heads[key]; return event ? [event.event_id] : []; }));
       if (input.resolved_heads.some((id) => !actual.has(id)) || input.resolved_heads.length !== actual.size) {
         throw lodestarError("decision_conflict", "Resolution must identify every current historical stream head.",
-          { identifiers: { key, heads: [...actual] } });
+          { identifiers: { key, heads: [...actual] },
+            action: "Re-read each historical stream with decision show <key> and resupply resolved_heads with every current head listed in identifiers.heads." });
       }
     }
     const data = action === "inject" ? { event: "injection", key,
