@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.2.0 - 2026-09-28
+
+- Add guided corrective actions to conflict failures. Update-mode `set`/`remove`
+  rules, both decision-conflict sites, the project binding conflicts, and pending
+  promotion bindings now name the exact repair instead of leaving a generic hint.
+- Add the rejection register convention. A `kind: "rejection"` record records a
+  subject the project has settled against; current rejections surface in
+  orientation and search, and a write that carries a matching subject receives a
+  non-blocking advisory persisted in the acceptance receipt so exact retries
+  replay it. Alias reuse that targets a rejection names the owning record.
+- Broaden large-read guidance. Bootstrap instructions, the packaged skill, and
+  the knowledge reference now cover large responses as well as clipped ones,
+  directing callers to `--output` capture before a host truncates.
+- Document the repository verification invariants in the managed-assets build
+  script docblock.
+- Retain the 2.1.4 plugin packaging and invocation corrections. Contract 5 and
+  schema 5 are unchanged; no data migration is required.
+
 ## 2.1.4 - 2026-09-08
 
 - Fix Codex plugin startup after native installation by making the complete npm

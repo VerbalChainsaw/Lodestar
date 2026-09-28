@@ -3,7 +3,7 @@
 For a new installation, use Node.js 24.15.0 or newer:
 
 ```text
-npm install --global lodestar-agent-context@2.1.4
+npm install --global lodestar-agent-context@2.2.0
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -15,7 +15,7 @@ lodestar start --cwd .
 Use `lodestar init` only when creating a new store. An existing store must pass
 the [migration/recovery procedure](../README.md#storage-and-recovery); setup never
 changes a database. You can also install the versioned tarball from the
-[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.1.4).
+[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.2.0).
 
 `setup` without `--apply` is a read-only plan. Choose codex, claude, opencode,
 hermes, or all. Missing skills are installed; unchanged owned copies upgrade
@@ -104,7 +104,7 @@ native skills and launchers; it does not enable a plugin or modify Codex setting
 To add the three structured tools, install the complete package through Codex:
 
 ```text
-codex plugin marketplace add VerbalChainsaw/Lodestar --ref v2.1.4
+codex plugin marketplace add VerbalChainsaw/Lodestar --ref v2.2.0
 codex plugin add lodestar@lodestar
 ```
 
