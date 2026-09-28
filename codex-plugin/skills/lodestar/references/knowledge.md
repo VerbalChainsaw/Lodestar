@@ -58,7 +58,9 @@ intercepted before re-proposing it. One rejection per subject. Convention: the
 record's `data.subject` carries the exact subject terms (the write-time advisory
 matches it case-folded), `data.verdict` is `"never-revisit"`, `data.reason` is one
 line, `priority` is set explicitly so orientation orders it, and `semantics.subject`
-is set so a duplicate rejection conflicts instead of accumulating. Orientation and
+carries the rejection-scoped slug (`rejection:<slug>`) so a duplicate rejection
+conflicts instead of accumulating — subject uniqueness spans all record kinds, so
+never reuse a plain domain slug here. Orientation and
 the write-time advisory surface rejections whose scope is the project or `global`
 with `semantics.applicability.project` set to the project; `find` reaches rejections
 in every scope. Treat a rejection search hit or advisory line as a settled verdict:
@@ -99,7 +101,7 @@ omits it while exact history remains.
       "links": [],
       "sources": [],
       "semantics": {
-        "subject": "materialized-views",
+        "subject": "rejection:materialized-views",
         "basis": "asserted",
         "lifecycle": "current",
         "context_role": "orientation",
@@ -130,7 +132,7 @@ Retire or supersede a rejection with an update that keeps both `set` and `remove
     "id": "rejection:materialized-views",
     "set": {
       "semantics": {
-        "subject": "materialized-views",
+        "subject": "rejection:materialized-views",
         "basis": "asserted",
         "lifecycle": "superseded",
         "context_role": "orientation",
