@@ -1160,16 +1160,24 @@ function rejectionAdvisories(db, record, projectScope, requestCheckout) {
     const fold = (value) => typeof value === "string" ? value.normalize("NFC").toLowerCase() : null;
     const foldPath = (value) => typeof value === "string" ? fold(value.replace(/\\/g, "/")) : null;
     const wanted = fold(subject);
+    const memberScopes = db.prepare(
+      "SELECT DISTINCT scope FROM records WHERE type='project' "
+        + "AND json_extract(content_json,'$.value.canonical_project_id') IN (?, ?) "
+        + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current')='current'",
+    ).all(projectScope, projectScope.replace(/^project:/, ""));
+    const scopes = [...new Set([projectScope,
+      ...memberScopes.map(({ scope }) => scope).filter((scope) => typeof scope === "string")])];
+    const scopeList = scopes.map(() => "?").join(",");
     const rows = db.prepare(
       "SELECT id, json_extract(content_json,'$.value.subject') AS subject, "
         + "json_extract(content_json,'$.value.reason') AS reason, "
         + "json_extract(content_json,'$._lodestar.semantics.applicability.checkout') AS checkout "
         + "FROM records WHERE type='rejection' AND id<>? "
         + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current')='current' "
-        + "AND (scope=? OR (scope='global' "
-        + "AND json_extract(content_json,'$._lodestar.semantics.applicability.project')=?)) "
+        + "AND (scope IN (" + scopeList + ") OR (scope='global' "
+        + "AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN (" + scopeList + "))) "
         + "ORDER BY id",
-    ).all(record.id, projectScope, projectScope);
+    ).all(record.id, ...scopes, ...scopes);
     const matching = rows.filter(({ subject: candidate, checkout }) => fold(candidate) === wanted
       && (typeof checkout !== "string" || (typeof requestCheckout === "string"
         && foldPath(checkout) === foldPath(requestCheckout))));

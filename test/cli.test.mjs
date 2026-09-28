@@ -398,3 +398,22 @@ test('an occupied --output path fails with a typed conflict and preserves the fi
   assert.equal(JSON.parse(result.stderr).error.code, 'output_conflict');
   assert.equal(await readFile(target, 'utf8'), '{"keep":true}');
 });
+
+test('limited reads signal more at the envelope level', async (t) => {
+  const f = await fixture(t);
+  const actor = { id: 'agent:one', agent: 'agent', session: 'one', harness: 'test' };
+  await f.create('project:test', 'project', { roots: [f.root] }, 'project:test');
+  for (const id of ['pending:a', 'pending:b']) {
+    const body = await f.request({ id, text: `candidate ${id}` },
+      [{ kind: 'record', id }, { kind: 'record', id: 'project:test' }], 'project:test', actor);
+    assert.equal((await f.cli(['pending', 'add', '--cwd', f.root], body)).code, 0);
+  }
+  const full = await f.cli(['pending', 'list', '--cwd', f.root]);
+  assert.equal(full.code, 0, JSON.stringify(full.value));
+  assert.equal(full.value.more, false);
+  assert.equal(full.value.data.records.length, 2);
+  const limited = await f.cli(['pending', 'list', '--cwd', f.root, '--limit', '1']);
+  assert.equal(limited.code, 0, JSON.stringify(limited.value));
+  assert.equal(limited.value.more, true);
+  assert.equal(limited.value.data.records.length, 1);
+});

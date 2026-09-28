@@ -193,6 +193,13 @@ export function resolveProject(db, cwdValue = process.cwd()) {
   const cwd = physical(cwdValue);
   const git = spawnSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute",
     "--git-common-dir", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
+  if (git.error || git.status === null) {
+    throw lodestarError("project_discovery_failed", "Git project discovery could not run.", {
+      identifiers: { cwd,
+        cause: typeof git.error?.message === "string" ? git.error.message.slice(0, 200) : null },
+      action: "Install Git so discovery can distinguish checkouts, or work in an explicitly mapped project root.",
+    });
+  }
   const [commonLine, rootLine] = String(git.stdout ?? "").trim().split(/\r?\n/u);
   const common = commonLine ? physical(commonLine) : null;
   const checkout = rootLine ? physical(rootLine) : cwd;

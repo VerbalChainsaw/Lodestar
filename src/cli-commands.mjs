@@ -3,10 +3,18 @@ import { lodestarError } from "./errors.mjs";
 const text = { type: "string", minLength: 1 };
 const list = { type: "array" };
 const object = { type: "object" };
-const optional = { evidence: list, conditions: list, direction: { type: ["object", "null"] },
-  rejected_alternative: {}, supersedes_event_id: { type: ["string", "null"] }, resolved_heads: list };
 const define = (required, properties) => ({ type: "object", required,
   properties, additionalProperties: false });
+const checkpointShape = define(["objective", "current_state", "completed_results", "unresolved_work", "references"], {
+  objective: text, current_state: text, completed_results: list, unresolved_work: list, references: list });
+const directionShape = { ...define(["kind", "attribution", "reference", "instruction"], {
+  kind: { enum: ["user"] }, attribution: { enum: ["asserted", "host_observed"] },
+  reference: text, instruction: text }), type: ["object", "null"] };
+const promotionDestinationShape = define(["operation", "input"], {
+  operation: { enum: ["put", "decision.set"] },
+  input: { type: "object", description: "The destination operation input: a put create/update input, or a decision.set input." } });
+const optional = { evidence: list, conditions: list, direction: directionShape,
+  rejected_alternative: {}, supersedes_event_id: { type: ["string", "null"] }, resolved_heads: list };
 
 // These declarations are consumed by CLI validation and shipped native tools.
 // Callers do not maintain separate domain field lists or defaults.
@@ -29,14 +37,14 @@ export const MUTATION_INPUTS = Object.freeze({
     evidence: list, artifacts: list, decision_ids: list, checkpoint_ids: list,
     unresolved_consequence: { type: ["string", "null"] }, observed_at: text }),
   "work.expire": define(["targets", "reason"], { targets: list, reason: text }),
-  "handoff.arm": define(["id", "checkpoint"], { id: text, checkpoint: object }),
-  "handoff.checkpoint": define(["id", "checkpoint"], { id: text, checkpoint: object,
+  "handoff.arm": define(["id", "checkpoint"], { id: text, checkpoint: checkpointShape }),
+  "handoff.checkpoint": define(["id", "checkpoint"], { id: text, checkpoint: checkpointShape,
     state: { enum: ["open", "closed"] }, reason: text }),
   "handoff.now": define(["id", "reason"], { id: text, reason: text }),
   "handoff.claim": define(["id"], { id: text }),
   "handoff.disarm": define(["id", "reason"], { id: text, reason: text }),
   "pending.add": define(["id", "text"], { id: text, text, source: {} }),
-  "pending.promote": define(["id", "destination"], { id: text, destination: object }),
+  "pending.promote": define(["id", "destination"], { id: text, destination: promotionDestinationShape }),
   "pending.drop": define(["id", "reason"], { id: text, reason: text }),
 });
 
@@ -75,7 +83,8 @@ export const installationOptions = (options) => Object.fromEntries(Object.entrie
   .filter(([flag]) => options[flag] !== undefined).map(([flag, field]) => [field, options[flag]]));
 export const PATH_OPTIONS = Object.freeze(["--cwd", "--file", "--db", "--source", "--wsl-shim", "--posix-shim",
   "--args-file", "--output", ...Object.keys(HOST_OPTIONS).filter((flag) => !["--target", "--codex-root"].includes(flag))]);
-const domain = (usage, summary, positionals) => ({ usage, summary,
+const domain = (usage, summary, positionals) => ({ usage,
+  summary: `${summary} Reads accept --limit and --at-revision; mutations are guarded by the request write basis.`,
   values: [...identity, "--file", "--limit", "--at-revision"], booleans: [], positionals });
 export const COMMANDS = Object.freeze({
   setup: { usage: "lodestar setup [--target <codex|claude|hermes|opencode|all>] [--apply] [--replace-local]",
