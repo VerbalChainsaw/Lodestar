@@ -55,21 +55,33 @@ remain local evidence and are not copied into public documentation.
 
 ## Native child lifecycle release qualification
 
-OMX source `4579ba81dbc3e340e956443f057625d29bee4beb` corrects the native
-child event roster and actual parent-scoped session payload contract. Fresh
-plain Codex and explicit OMX trials independently correlate parent and child
-transcript identities, root hook entry/completion and lifecycle observation
-records. These handlers are observational: they do not allocate worker tracking
-or promote authority. Root registration is activated; separate plugin child
-trust activation remains an explicit host configuration choice.
+OMX source `7c7517d0c973875adeb7a0211986ac069df010ee` is the final qualified harness repair.
+Native child event payloads use the parent session context and child agent ID;
+their transcript metadata uses the child in `id` and may name the parent in
+`session_id`. Both mismatches were caught by actual host trials, preserved in
+the incident history and covered by regression tests. Foreign or missing native
+child identities, mismatched parents and conflicting roles are rejected.
 
-The release suites passed 133/133 on Windows and 132 with zero failures on
-Linux; one Linux case explicitly requires unavailable host-native PowerShell
-and passes on Windows. Build, scoped lint and generated mirror checks passed.
-The initial real-host trial disproved the synthetic payload assumption and
-remains in the incident history alongside its regression repair.
+Fresh plain Codex and explicit OMX sessions verify root and plugin invocation,
+routing and effects separately. Plain Codex plugin hooks correctly no-op. In
+explicit OMX, both observers can record the same unique child lifecycle; no
+second worker tracker or new authority is created. Legacy SessionStart identity
+compatibility remains isolated from the stricter native child event contract.
 
-Center Geo reports retained structural leads, including an added wrapper
-fanout lead independently adjudicated as intentional dispatch. A nonzero
-scanner exit was not relabeled PASS or suppressed. Windows fsync warnings
-remain a limitation on physical durability claims.
+Final Windows release checks passed 139/139. Stable Linux checks passed 138 with
+zero failures and one explicit host-native PowerShell capability skip; its shim
+assertions pass on Windows. Build, scoped lint, syntax, generated mirrors and
+independent review passed. Exact source and built file hashes qualify the Linux
+candidate before and after testing. Runtime package and cache activation retain
+preimages and verify the complete inventory delta. The reviewed plugin trust
+entries were already present at final verification; no trust or permissions
+were changed in that closure.
+
+Publication verification uses each branch's configured remote. A prior empty
+OMX lookup queried upstream origin instead of the user's fork; exact fork
+advertisement resolved the diagnostic without rewriting Git history.
+
+Center Geo parsed six scoped files with zero parse failures and unchanged
+structural severity counts. Existing leads and graph uncertainty remain visible;
+the scanner result is not a claim of zero possible defects. Windows fsync
+warnings remain a limitation on physical durability claims.
