@@ -52,3 +52,24 @@ activation records must separately identify replaced artifacts, their preimages,
 backup integrity, unchanged package files, installed test results and the
 configuration snapshot used for verification. Private host logs/configuration
 remain local evidence and are not copied into public documentation.
+
+## Native child lifecycle release qualification
+
+OMX source `4579ba81dbc3e340e956443f057625d29bee4beb` corrects the native
+child event roster and actual parent-scoped session payload contract. Fresh
+plain Codex and explicit OMX trials independently correlate parent and child
+transcript identities, root hook entry/completion and lifecycle observation
+records. These handlers are observational: they do not allocate worker tracking
+or promote authority. Root registration is activated; separate plugin child
+trust activation remains an explicit host configuration choice.
+
+The release suites passed 133/133 on Windows and 132 with zero failures on
+Linux; one Linux case explicitly requires unavailable host-native PowerShell
+and passes on Windows. Build, scoped lint and generated mirror checks passed.
+The initial real-host trial disproved the synthetic payload assumption and
+remains in the incident history alongside its regression repair.
+
+Center Geo reports retained structural leads, including an added wrapper
+fanout lead independently adjudicated as intentional dispatch. A nonzero
+scanner exit was not relabeled PASS or suppressed. Windows fsync warnings
+remain a limitation on physical durability claims.
