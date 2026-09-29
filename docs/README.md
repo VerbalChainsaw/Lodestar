@@ -22,3 +22,7 @@ saved observations; explicit canonical project mappings preserve usable correcti
 
 Maintainers should use the [publishing guide](https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/publishing.md) for package release,
 landing-page deployment, and verification order.
+
+For an integration example that preserves these ownership boundaries, see the
+[Codex-first harness recipe](recipes/codex-first-harness.md) and its
+[validation and incident history](recipes/codex-harness-validation.md).
