@@ -46,7 +46,7 @@
   "scripts": {
     "assets:build": "node scripts/build-managed-assets.mjs --write",
     "assets:check": "node scripts/build-managed-assets.mjs --check",
-    "test": "npm run assets:check && node --test \"test/*.test.mjs\"",
+    "test": "npm run assets:check && node scripts/run-tests.mjs",
     "pack:check": "npm pack --dry-run --json"
   },
   "engines": {
