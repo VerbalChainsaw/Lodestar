@@ -93,14 +93,12 @@ test('pre-response real commit and later rejected same-ID request remain recover
   assert.equal(replay.value.request.replayed, true); assert.deepEqual(await readFile(path.join(journal.folder, 'request.json')), bytes);
 });
 
-test('typed rejected write keeps its captured request; it cannot authorize successful retirement', async t => {
+test('definite typed rejection retires its owned request after response delivery', async t => {
   const f = await fixture(t); await f.create('note:exists', 'note', {});
   const body = await bodyFor(f, 'note:exists'); const result = await f.cli(['put'], body);
   assert.notEqual(result.code, 0);
-  const names = await readdir(rootFor(f)); assert.equal(names.length, 1);
-  const folder = path.join(rootFor(f), names[0]);
-  assert.equal(JSON.parse(await readFile(path.join(folder, 'context.json'))).request_id, body.request_id);
-  assert.deepEqual(JSON.parse(await readFile(path.join(folder, 'request.json'))), body);
+  assert.equal(result.value.error.code, 'record_exists');
+  assert.deepEqual(await readdir(rootFor(f)), []);
 });
 
 test('response storage refusal after real commit retains sole stdin bytes and reports receipt reconciliation', async t => {

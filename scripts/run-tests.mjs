@@ -5,7 +5,9 @@ import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { pathToFileURL } from "node:url";
 
-export async function runOwnedTests({ files, deadlineMs = 120000 } = {}) {
+// Includes child startup, all cases, and teardown. Healthy Windows CLI journeys
+// take about two minutes per file; this is a finite diagnostic ceiling.
+export async function runOwnedTests({ files, deadlineMs = 300000 } = {}) {
   files ??= globSync("test/*.test.mjs", { exclude: (name) => name === "node_modules" }).sort();
   files = files.map((file) => path.resolve(file));
   if (files.length === 0) throw new Error("No owned test/*.test.mjs files selected.");

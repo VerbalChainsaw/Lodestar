@@ -607,8 +607,13 @@ export async function runCli(
         next: [],
       });
     }
+    let savedRejection = null;
     if (io.recoveryJournal && !io.recoveryJournal.receiptSaved) {
-      try { await storeCliResponse(io.recoveryJournal, JSON.parse(text)); }
+      try {
+        savedRejection = JSON.parse(text);
+        await storeCliResponse(io.recoveryJournal, savedRejection);
+        io.recoveryJournal.receiptSaved = true;
+      }
       catch (journalError) {
         const envelope = JSON.parse(text);
         envelope.error.identifiers.recovery_journal = io.recoveryJournal.folder;
@@ -633,8 +638,21 @@ export async function runCli(
         text = canonicalStringify(envelope);
       }
     }
-    try { await writeChannel(io.stderr, `${text}\n`); }
+    let errorDelivered = false;
+    try { await writeChannel(io.stderr, `${text}\n`); errorDelivered = true; }
     catch { /* An unavailable error channel cannot replace the operation failure. */ }
+    if (errorDelivered && savedRejection && io.recoveryJournal?.receiptSaved) {
+      try { await retireCliJournal(io.recoveryJournal, savedRejection); }
+      catch (cleanupError) {
+        const warning = canonicalStringify({ code: "recovery_journal_cleanup_failed",
+          message: "The rejection was delivered, but its recovery journal could not be retired.",
+          identifiers: { journal: io.recoveryJournal.folder, response_delivered: true, committed: false,
+            cleanup_error_code: cleanupError.code ?? "storage_error" },
+          action: `Preserve '${io.recoveryJournal.folder}' and the recorded response. Correct the reported recovery-storage problem before retrying the exact request; the original rejection remains authoritative.` });
+        try { await writeChannel(io.stderr, `Warning: recovery_journal_cleanup_failed ${warning}\n`); }
+        catch { /* The original rejection remains the sole operation result. */ }
+      }
+    }
     return normalized.exitCode;
   } finally {
     try { await outputHandle?.close(); }

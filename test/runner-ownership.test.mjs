@@ -33,6 +33,28 @@ test("maintained test command executes owned tests without importing archived ba
   assert.match(result.stdout, /\[test-file\].*COMPLETE test[\\/]owned.test.mjs passed=true/u);
 });
 
+test("healthy sequential cases finish beyond the former scaled total window", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lodestar-test-progress-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "test"));
+  await writeFile(path.join(root, "test", "progress.test.mjs"),
+    'import test from "node:test"; for(let i=1;i<=6;i++)test(`HEALTHY_CASE_${i}`,async()=>{await new Promise(resolve=>setTimeout(resolve,600));});\n');
+  const invocation = path.join(root, "invoke.mjs");
+  // Scale the corrected five-minute ceiling to six seconds. The cases alone
+  // take 3.6 seconds, beyond the former two-minute ceiling scaled to 2.4 seconds.
+  await writeFile(invocation, `import { runOwnedTests } from ${JSON.stringify(new URL("../scripts/run-tests.mjs", import.meta.url).href)}; process.exitCode = await runOwnedTests({ deadlineMs: 6000 });\n`);
+  const env = { ...process.env }; delete env.NODE_TEST_CONTEXT;
+  const started = Date.now();
+  const result = spawnSync(process.execPath, [invocation],
+    { cwd: root, env, encoding: "utf8", timeout: 12000, windowsHide: true });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(Date.now() - started >= 3600);
+  for (let i = 1; i <= 6; i++) assert.match(result.stdout, new RegExp(`✔ HEALTHY_CASE_${i}`));
+  assert.match(result.stdout, /COMPLETE test[\\/]progress.test.mjs passed=true/u);
+  assert.doesNotMatch(result.stderr, /DEADLINE/u);
+});
+
 test("parent file deadline interrupts a finite synchronous child and retains failure evidence", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "lodestar-test-deadline-"));
   t.after(() => rm(root, { recursive: true, force: true }));

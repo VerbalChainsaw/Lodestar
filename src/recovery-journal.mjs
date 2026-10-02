@@ -147,6 +147,36 @@ async function admit(selection, folder, proof) {
   const priorUnknown=uncertainty!==null || context.prior_outcome_unknown!==false;
   return {folder,context,request,bytes,operation,args,settled:settles(response,request,operation,priorUnknown),response};
 }
+async function recordedCliRejection(selection,folder){
+  const context=await json(path.join(folder,"context.json"));
+  if(context.recovery_v!==1||context.producer!=="cli"||context.database!==selection.database||
+    context.prior_outcome_unknown!==false||typeof context.node!=="string"||!path.isAbsolute(context.node)||
+    typeof context.cli!=="string"||!path.isAbsolute(context.cli)||!identity(context.runtime_fingerprint))return null;
+  if((await optionalJson(path.join(folder,"response.json")))?.ok!==false)return null;
+  // Old runtimes need not still exist. Validate the saved context against its
+  // own complete binding, then accept only a definite recorded no-commit.
+  // This never admits an unknown dispatch under a different runtime or caller.
+  const saved={...selection,node:context.node,cli:context.cli,runtimeFingerprint:context.runtime_fingerprint};
+  const journal=await admit(saved,folder,null);
+  const response=journal.response;
+  if(!journal.settled||response?.ok!==false||!response.scope||typeof response.scope!=="object"||
+    Array.isArray(response.scope)||["project","cwd","session","actor"].some(key=>!Object.hasOwn(response.scope,key))||
+    !response.error.identifiers||typeof response.error.identifiers!=="object"||Array.isArray(response.error.identifiers))return null;
+  const entries=await readdir(folder,{withFileTypes:true});
+  const names=["request.json","context.json","response.json"];
+  if(entries.length!==names.length||entries.some(entry=>!names.includes(entry.name)||!entry.isFile()||entry.isSymbolicLink()))return null;
+  for(const name of names)if((await lstat(path.join(folder,name))).nlink!==1)return null;
+  return journal;
+}
+function rejectionArguments(args){
+  const semantic=[];
+  for(let i=0;i<args.length;i++){
+    if(["--session","--agent","--harness"].includes(args[i])){i++;continue;}
+    semantic.push(args[i]);
+    if(args[i]==="--file"){semantic.push("<exact-saved-request>");i++;}
+  }
+  return JSON.stringify(semantic);
+}
 export async function listRecovery(selection) {
   const proof=await proofs(selection), journals=[], settled=[], errors=[]; let otherDatabases=0;
   for(const root of rootList(selection)){
@@ -161,7 +191,7 @@ export async function listRecovery(selection) {
         if(!entry.isDirectory()||entry.isSymbolicLink())throw fail("Journal entry is not a direct directory.",folder);
         const context=await json(path.join(folder,"context.json"));
         if(typeof context.database==="string" && context.database!==selection.database){otherDatabases++;continue;}
-        const journal=await admit(selection,folder,proof);
+        const journal=await recordedCliRejection(selection,folder)??await admit(selection,folder,proof);
         if(journal.settled){
           settled.push({folder,request_id:journal.request.request_id,receipt_id:journal.response.receipt_id??null,
             context_sha256:hash(await readTextFileComplete(path.join(folder,"context.json"),{resource:"recovery context"})),
@@ -186,13 +216,16 @@ export async function prepareCliJournal(selection, operation, parsed, arguments_
     action:"Preserve existing journals, the exact request bytes and ID, and the selected database. Correct the reported input, binding or local storage access before retrying this undispatched request. For older uncertain attempts, use the configured Lodestar runtime with the same --db selection: doctor and get --raw -- <id> for the known receipt and current record. Reconcile those attempts before an exact saved-request replay."});}
 }
 async function admitPublishedPeer(selection,folder){
+  return readPublishedPeer(folder,async()=>admit(selection,folder,await proofs(selection)));
+}
+async function readPublishedPeer(folder,read){
   // A peer owns its retirement. Retry only a missing-file race, and accept its
   // disappearance; persistent malformed/inaccessible journals still refuse.
   for(let attempt=0;;attempt++){
-    try{return await admit(selection,folder,await proofs(selection));}
+    try{return await read();}
     catch(error){
-      if(error.code!=="input_unreadable"||error.cause?.code!=="ENOENT")throw error;
-      try{await lstat(folder);}catch(missing){if(missing.code==="ENOENT")return null;throw missing;}
+      if(error.code!=="ENOENT"&&(error.code!=="input_unreadable"||error.cause?.code!=="ENOENT"))throw error;
+      try{await lstat(folder);}catch(missing){if(missing.code==="ENOENT")return undefined;throw missing;}
       if(attempt===50)throw error;
       await new Promise(resolve=>setTimeout(resolve,10));
     }
@@ -205,6 +238,15 @@ async function checkCliPeers(selection,request,bytes,operation,args,binding,ownF
     const folder=path.join(root,entry.name);if(folder===ownFolder)continue;
     await plain(folder);
     if(!entry.isDirectory()||entry.isSymbolicLink())throw fail("Same-ID recovery entry is not a direct directory.",folder);
+    if(!entry.name.endsWith(".preparing")){
+      const rejected=await readPublishedPeer(folder,()=>recordedCliRejection(selection,folder));
+      if(rejected===undefined)continue;
+      if(rejected){
+        if(!rejected.bytes.equals(bytes)||rejected.operation!==operation||rejectionArguments(rejected.args)!==rejectionArguments(args))
+          throw fail("Request ID collides with different saved bytes or semantic dispatch arguments; no new write was dispatched.",folder,"recovery_request_conflict");
+        continue;
+      }
+    }
     if(entry.name===prefix){
       const prior=await admit(selection,folder,await proofs(selection));
       if(!prior.bytes.equals(bytes)||prior.operation!==operation||prior.context.arguments_sha256!==hash(JSON.stringify(args)))
@@ -264,7 +306,8 @@ async function prepareJournal(selection, operation, parsed, arguments_, io) {
   parsed.options["--file"]=path.join(folder,"request.json");
   const journal = {folder,context,request,operation};
   ownedCliJournals.set(journal,{folder,request:structuredClone(request),operation,bytes,
-    contextText:JSON.stringify(context)+"\n",directory:await lstat(folder,{bigint:true}),responseText:null});
+    contextText:JSON.stringify(context)+"\n",priorUnknown:context.prior_outcome_unknown,
+    directory:await lstat(folder,{bigint:true}),responseText:null});
   return journal;
 }
 function frozenArguments(operation, parsed, arguments_, folder) {
@@ -299,10 +342,14 @@ export async function retireCliJournal(journal,envelope){
   const owned=journal&&ownedCliJournals.get(journal);
   if(!owned)return false;
   const {folder,request,operation}=owned;
-  if(journal.folder!==folder || !settles(envelope,request,operation,false) || envelope.ok!==true ||
+  // A later rejection cannot settle an earlier dispatch with an unknown outcome.
+  // Keep both copies until a matching success receipt reconciles the request.
+  if(envelope?.ok===false && !settles(envelope,request,operation,owned.priorUnknown))return false;
+  if(journal.folder!==folder || !settles(envelope,request,operation,owned.priorUnknown) ||
     !envelope.scope || typeof envelope.scope!=="object" || Array.isArray(envelope.scope) ||
-    ["project","cwd","session","actor"].some(key=>!Object.hasOwn(envelope.scope,key)) || !Object.hasOwn(envelope,"data") ||
-    owned.responseText!==JSON.stringify(envelope)+"\n")throw fail("A complete matching success receipt is required for owned journal retirement.",folder);
+    ["project","cwd","session","actor"].some(key=>!Object.hasOwn(envelope.scope,key)) ||
+    (envelope.ok===true&&!Object.hasOwn(envelope,"data")) ||
+    owned.responseText!==JSON.stringify(envelope)+"\n")throw fail("A complete matching settled response is required for owned journal retirement.",folder);
   const names=["request.json","context.json","response.json"];
   async function verifyDirectory(){
     await plain(folder);
@@ -323,7 +370,7 @@ export async function retireCliJournal(journal,envelope){
     if(!actual.equals(expected[i]))throw fail("Owned recovery content changed before retirement.",folder);
   }
   for(let i=0;i<names.length;i++)await verifyFile(i);
-  // Keep the committed response until exact request/context removal finishes.
+  // Keep the settled response until exact request/context removal finishes.
   // No recursive removal: unexpected files or a replaced directory are retained.
   for(let i=0;i<names.length;i++){await verifyDirectory();await verifyFile(i);await unlink(path.join(folder,names[i]));}
   await verifyDirectory();await rmdir(folder);ownedCliJournals.delete(journal);
