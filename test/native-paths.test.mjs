@@ -42,12 +42,26 @@ async function directoryAtLength(root, total) {
   return directory;
 }
 
+function driveRelativeInput(file, checkout = process.cwd()) {
+  const drive = file.slice(0, 2);
+  const driveDirectory = path.win32.resolve(checkout, drive);
+  return drive + path.win32.relative(driveDirectory, file);
+}
+
 test("owned ordinary, relative and alias inputs preserve resolved public locations", async (t) => {
   const { file } = await fixture(t);
   const alias = path.dirname(file) + path.sep + ".." + path.sep
     + path.basename(path.dirname(file)) + path.sep + path.basename(file);
   const inputs = [file, path.relative(process.cwd(), file), alias];
-  if (process.platform === "win32") inputs.push(file.slice(0, 2) + path.relative(process.cwd(), file));
+  if (process.platform === "win32") {
+    const otherDrive = file[0].toUpperCase() === "C" ? "D:" : "C:";
+    for (const checkout of [process.cwd(), `${otherDrive}\\fixture-checkout`]) {
+      const input = driveRelativeInput(file, checkout);
+      assert.equal(path.win32.isAbsolute(input.slice(2)), false);
+      assert.equal(path.win32.resolve(input), path.win32.resolve(file));
+      inputs.push(input);
+    }
+  }
   for (const input of inputs) {
     const raw = new DatabaseSync(input, { readOnly: true });
     const expected = raw.location(); raw.close();

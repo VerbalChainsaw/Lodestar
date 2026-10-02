@@ -54,15 +54,20 @@ for (const [name, select] of [
   assert.deepEqual(await readFile(context.file), config); assert.deepEqual(await readFile(resolved), store);
 }));
 
-test('portable runtime handles a case variant according to physical app identity', () => fixture(async context => {
+for (const suffix of ['', '.lodestar-stage', '.lodestar-previous'])
+  for (const nested of ['', 'nested/child'])
+test(`portable runtime handles a case variant of app${suffix}/${nested} by physical identity`, () => fixture(async context => {
+  const protectedRoot = `${context.app}${suffix}`;
+  await mkdir(protectedRoot, { recursive: true });
   // Change only our basename, never system ancestors such as /tmp or /var.
-  const variant = path.join(context.root, path.basename(context.app).toUpperCase(), 'store.db');
+  const variantRoot = path.join(context.root, path.basename(protectedRoot).toUpperCase());
+  const variant = path.join(variantRoot, nested, 'store.db');
   const { resolved, config, store } = await context.bind(variant);
-  const appIdentity = await stat(context.app);
-  const selectedParentIdentity = await stat(path.dirname(resolved));
-  const aliasesApp = process.platform === 'win32'
-    || (selectedParentIdentity.dev === appIdentity.dev && selectedParentIdentity.ino === appIdentity.ino);
-  if (aliasesApp) {
+  const protectedIdentity = await stat(protectedRoot, { bigint: true });
+  const selectedAncestorIdentity = await stat(variantRoot, { bigint: true });
+  const aliasesProtected = process.platform === 'win32'
+    || (selectedAncestorIdentity.dev === protectedIdentity.dev && selectedAncestorIdentity.ino === protectedIdentity.ino);
+  if (aliasesProtected) {
     await assert.rejects(loadInterfaceConfig(context.file), error => {
       assert.equal(error.code, 'interface_config_invalid');
       assert.equal(error.identifiers.path, context.file);
@@ -79,6 +84,16 @@ test('portable runtime handles a case variant according to physical app identity
   } else {
     assert.equal((await loadInterfaceConfig(context.file)).database, resolved);
   }
+  assert.deepEqual(await readFile(context.file), config);
+  assert.deepEqual(await readFile(resolved), store);
+}));
+
+test('portable admission leaves absent staging and previous roots absent', () => fixture(async context => {
+  const { resolved, config, store } = await context.bind(`${context.app}-external/store.db`);
+  const absent = [`${context.app}.lodestar-stage`, `${context.app}.lodestar-previous`];
+  for (const root of absent) await assert.rejects(stat(root), { code: 'ENOENT' });
+  assert.equal((await loadInterfaceConfig(context.file)).database, resolved);
+  for (const root of absent) await assert.rejects(stat(root), { code: 'ENOENT' });
   assert.deepEqual(await readFile(context.file), config);
   assert.deepEqual(await readFile(resolved), store);
 }));

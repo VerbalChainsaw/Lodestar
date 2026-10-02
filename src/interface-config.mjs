@@ -25,19 +25,36 @@ async function admitPortableDatabase(configPath, root, database) {
     { path: configPath, pointer: "/runtime/database", database, app_root: root }, action);
   const comparable = (file) => process.platform === "win32" ? file.toLowerCase() : file;
   const selected = comparable(database);
-  for (const protectedRoot of [root, `${root}.lodestar-stage`, `${root}.lodestar-previous`]) {
+  const protectedRoots = [root, `${root}.lodestar-stage`, `${root}.lodestar-previous`];
+  for (const protectedRoot of protectedRoots) {
     const boundary = comparable(protectedRoot);
     if (selected === boundary || selected.startsWith(`${boundary}${path.sep}`)) {
       throw reject(`The portable database is inside a protected directory: ${protectedRoot}.`);
     }
   }
   // Reject aliases rather than allowing a lexical external path to resolve into an owned directory.
+  const databaseAncestors = [];
   for (const start of [root, database]) {
     for (let file = start; ; file = path.dirname(file)) {
       let info;
-      try { info = await lstat(file); } catch { throw reject(`Cannot verify the selected path ancestor: ${file}.`); }
+      try { info = await lstat(file, { bigint: true }); } catch { throw reject(`Cannot verify the selected path ancestor: ${file}.`); }
       if (info.isSymbolicLink()) throw reject(`The selected path contains a reparse or symlink ancestor: ${file}.`);
+      if (start === database) databaseAncestors.push({ file, info });
       if (path.dirname(file) === file) break;
+    }
+  }
+  // realpath can preserve case on insensitive volumes; compare actual filesystem identities.
+  for (const protectedRoot of protectedRoots) {
+    let identity;
+    try { identity = await lstat(protectedRoot, { bigint: true }); }
+    catch (error) {
+      if (error.code === "ENOENT" && protectedRoot !== root) continue;
+      throw reject(`Cannot verify the protected directory: ${protectedRoot}.`);
+    }
+    for (const { file, info } of databaseAncestors) {
+      if (info.dev === identity.dev && info.ino === identity.ino) {
+        throw reject(`The selected path aliases a protected directory: ${protectedRoot} through ${file}.`);
+      }
     }
   }
 }
