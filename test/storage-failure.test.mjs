@@ -18,6 +18,83 @@ async function fixture(t) {
   return { root, file: path.join(root, "state.db") };
 }
 
+const writerSource = `
+  import { DatabaseSync } from 'node:sqlite';
+  const started = Date.now();
+  const stage = (name) => process.stderr.write(name + ' ' + (Date.now() - started) + 'ms\\n');
+  stage('startup');
+  const db = new DatabaseSync(process.argv[1]);
+  stage('opened');
+  db.function('lodestar_write_contract', {}, () => 5);
+  db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA cache_size=4; BEGIN IMMEDIATE');
+  stage('transaction');
+  db.prepare('UPDATE records SET name=?').run('u'.repeat(12000));
+  stage('updated');
+  process.stdout.write('READY\\n');
+  setInterval(() => {}, 1000);
+`;
+
+async function interruptWriter(t, file, { source = writerSource, readyTimeoutMs = 10000 } = {}) {
+  const child = spawn(process.execPath, ["--input-type=module", "-e", source, file],
+    { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  const closed = new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
+  let stdout = "", stderr = "", failure, readyTimer;
+  const details = () => ({ executable: process.execPath, file, pid: child.pid,
+    code: child.exitCode, signal: child.signalCode, stdout, stderr });
+  child.stderr.on("data", (data) => { stderr += data; });
+  try {
+    await new Promise((resolve, reject) => {
+      readyTimer = setTimeout(() => reject(new Error(`Owned writer not ready: ${JSON.stringify(details())}`)), readyTimeoutMs);
+      child.stdout.on("data", (data) => {
+        stdout += data;
+        if (stdout.includes("READY")) resolve();
+      });
+      child.once("error", reject);
+      child.once("exit", () => reject(new Error(`Owned writer exited before kill: ${JSON.stringify(details())}`)));
+    });
+    assert.equal(child.kill("SIGKILL"), true, "terminate only the writer created by this fixture");
+  } catch (error) { failure = error; }
+  finally {
+    clearTimeout(readyTimer);
+    // Cleanup belongs to this lexical scope: the filesystem after-hook must
+    // never run while this exact writer still owns the database or its pipes.
+    if (child.pid && child.exitCode === null && child.signalCode === null && !child.killed)
+      assert.equal(child.kill("SIGKILL"), true, `Owned writer cleanup failed: ${JSON.stringify(details())}`);
+    let closeTimer;
+    try {
+      await Promise.race([closed, new Promise((_, reject) => {
+        closeTimer = setTimeout(() => reject(new Error(`Owned writer did not close: ${JSON.stringify(details())}`, { cause: failure })), 5000);
+      })]);
+    } finally { clearTimeout(closeTimer); }
+  }
+  const result = { ...details(), stdout_closed: child.stdout.destroyed, stderr_closed: child.stderr.destroyed };
+  t.diagnostic(JSON.stringify({ owned_writer_closed: result }));
+  if (failure) { failure.cleanup = result; throw failure; }
+  return result;
+}
+
+test("owned writer readiness failure closes its SQLite holder before fixture removal", { timeout: 10000 }, async (t) => {
+  const { root, file } = await fixture(t);
+  await initializeDatabase(file);
+  let failure;
+  try {
+    await interruptWriter(t, file, { readyTimeoutMs: 3000, source: `
+      import { DatabaseSync } from 'node:sqlite';
+      const db = new DatabaseSync(process.argv[1]);
+      db.exec('BEGIN IMMEDIATE');
+      process.stdout.write('HOLDING\\n');
+      setInterval(() => {}, 1000);
+    ` });
+  } catch (error) { failure = error; }
+  assert.match(failure?.message ?? "", /Owned writer not ready/);
+  assert.match(failure.cleanup.stdout, /HOLDING/);
+  assert.equal(failure.cleanup.signal, "SIGKILL");
+  assert.equal(failure.cleanup.stdout_closed, true);
+  assert.equal(failure.cleanup.stderr_closed, true);
+  await rm(root, { recursive: true, force: true });
+  await assert.rejects(readFile(file), { code: "ENOENT" });
+});
+
 test("native SQLITE_FULL names storage and preserves the failed transaction", async (t) => {
   const { root, file } = await fixture(t);
   const db = openConnection(file);
@@ -48,40 +125,18 @@ test("native SQLITE_FULL names storage and preserves the failed transaction", as
 test("interrupted writer leaves a genuine hot journal; ordinary reads preserve it", { timeout: 30000 }, async (t) => {
   const { root, file } = await fixture(t);
   await initializeDatabase(file);
-  // Make enough committed pages to force the owned child's tiny cache to spill.
+  // Twelve large records still exceed the four-page writer cache. The native
+  // journal header and rollback error below independently prove the spill.
+  const fixtureRows = 12;
   const fixtureDb = new DatabaseSync(file);
   fixtureDb.function("lodestar_write_contract", {}, () => 5);
   fixtureDb.exec("BEGIN IMMEDIATE");
   const insert = fixtureDb.prepare("INSERT INTO records VALUES(?,?,?,?,?,?,?)");
-  for (let i = 0; i < 160; i += 1) insert.run(`fact:${i}`, "fact", "c".repeat(12000), "project:test",
+  for (let i = 0; i < fixtureRows; i += 1) insert.run(`fact:${i}`, "fact", "c".repeat(12000), "project:test",
     '{"state":"known","value":{"kept":true}}', "2026-09-30T00:00:00.000Z", "2026-09-30T00:00:00.000Z");
   fixtureDb.exec("COMMIT");
   fixtureDb.close();
-  const child = spawn(process.execPath, ["--input-type=module", "-e", `
-    import { DatabaseSync } from 'node:sqlite';
-    const db = new DatabaseSync(process.argv[1]);
-    db.function('lodestar_write_contract', {}, () => 5);
-    db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA cache_size=4; BEGIN IMMEDIATE');
-    db.prepare('UPDATE records SET name=?').run('u'.repeat(12000));
-    process.stdout.write('READY\\n');
-    setInterval(() => {}, 1000);
-  `, file], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  const exited = new Promise((resolve, reject) => { child.once("exit", resolve); child.once("error", reject); });
-  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
-  let stderr = "";
-  child.stderr.on("data", (data) => { stderr += data; });
-  await new Promise((resolve, reject) => {
-    let output = "";
-    const timeout = setTimeout(() => reject(new Error(`Owned writer not ready: ${stderr}`)), 10000);
-    child.stdout.on("data", (data) => {
-      output += data;
-      if (output.includes("READY")) { clearTimeout(timeout); resolve(); }
-    });
-    child.once("error", (error) => { clearTimeout(timeout); reject(error); });
-    child.once("exit", () => { clearTimeout(timeout); reject(new Error(`Owned writer exited before kill: ${stderr}`)); });
-  });
-  assert.equal(child.kill("SIGKILL"), true, "terminate only the writer created by this fixture");
-  await exited;
+  await interruptWriter(t, file);
   const journalPath = `${file}-journal`;
   const journal = await readFile(journalPath);
   assert.ok(journal.length > 512);
@@ -119,7 +174,7 @@ test("interrupted writer leaves a genuine hot journal; ordinary reads preserve i
   await copyFile(journalPath, `${recovered}-journal`);
   const control = new DatabaseSync(recovered);
   assert.equal(control.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  assert.equal(control.prepare("SELECT COUNT(*) AS count FROM records WHERE name=?").get("c".repeat(12000)).count, 160);
+  assert.equal(control.prepare("SELECT COUNT(*) AS count FROM records WHERE name=?").get("c".repeat(12000)).count, fixtureRows);
   control.close();
   assert.deepEqual(await readFile(file), crashedBytes);
   assert.deepEqual(await readFile(journalPath), journal);
