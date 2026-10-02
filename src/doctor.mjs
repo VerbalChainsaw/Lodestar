@@ -9,6 +9,7 @@ import { diagnoseDecisions } from "./decision.mjs";
 import { diagnoseHandoff } from "./continuity.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
 import { validateTimestamp } from "./validate.mjs";
+import { schemaVersionGuidance } from "./database-schema.mjs";
 export { migrationPreflight } from "./schema-migration.mjs";
 
 function orderedNames(db, type) {
@@ -148,13 +149,12 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     databaseEpoch = metadata.database_epoch ?? null;
     databaseRevision = metadata.database_revision ?? null;
     if (schemaValue !== String(SCHEMA_VERSION)) {
+      const guidance = schemaVersionGuidance(database, schemaValue);
       add(
         "unsupported_schema",
         "The database schema version is not supported.",
-        {
-          expected: SCHEMA_VERSION,
-          actual: schemaValue,
-        },
+        guidance.identifiers,
+        guidance.action,
       );
     }
     try {
@@ -220,7 +220,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   }
 
   for (const issue of storedSemanticIssues(db, validColumns)) {
-    add(issue.code, issue.message, issue.identifiers);
+    add(issue.code, issue.message, issue.identifiers, issue.action);
   }
 
   const decisions = validColumns.records ? diagnoseDecisions(db)

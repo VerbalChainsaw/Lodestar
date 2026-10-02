@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { setup } from '../src/setup.mjs';
+import { temporaryDirectory } from './helpers/contract.mjs';
+test('setup leaves externally owned Center Geometry unchanged and outside its complete plan', async t => {
+  const home = await temporaryDirectory(t, 'lodestar-center-owner-');
+  const external = path.join(home, '.agents', 'skills', 'center-multigeometry');
+  await mkdir(external, {recursive:true});
+  const original = { 'SKILL.md':'independent scanner owner', 'manifest.json':'external manifest', 'custom.txt':'user preserved' };
+  for (const [name, bytes] of Object.entries(original)) await writeFile(path.join(external,name),bytes);
+  const plan = await setup({home,target:'codex'});
+  assert.equal(plan.ready,true);
+  assert.ok(!plan.plans.some(row => path.basename(row.target) === 'center-multigeometry'));
+  const applied = await setup({home,target:'codex',apply:true});
+  assert.equal(applied.verified,true);
+  assert.deepEqual((await readdir(external)).sort(),Object.keys(original).sort());
+  for (const [name, bytes] of Object.entries(original)) assert.equal(await readFile(path.join(external,name),'utf8'),bytes);
+});
+test('packed artifact excludes the externally owned Center Geometry payload', async t => {
+  const cache = await temporaryDirectory(t,'lodestar-center-pack-');
+  const npmCli = process.env.npm_execpath;
+  const command = npmCli ? process.execPath : process.platform==='win32' ? 'npm.cmd':'npm';
+  const args = ['pack','--dry-run','--json','--ignore-scripts','--offline','--cache',cache];
+  const result = spawnSync(command,npmCli ? [npmCli,...args] : args,{cwd:path.resolve(import.meta.dirname,'..'),encoding:'utf8',shell:!npmCli && process.platform==='win32'});
+  assert.equal(result.status,0,result.stderr);
+  const packed = JSON.parse(result.stdout)[0];
+  assert.ok(!packed.files.some(row=>row.path.startsWith('managed-assets/skills/center-multigeometry/')));
+  assert.ok(packed.files.some(row=>row.path==='managed-assets/skills/center-audit/SKILL.md'));
+});

@@ -57,10 +57,14 @@ jobs:
       - name: Exercise the packed executable
         run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
 
+  desktop:
+    uses: ./.github/workflows/desktop.yml
+
   publish:
     needs:
       - codeql
       - verify
+      - desktop
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,6 +91,11 @@ jobs:
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
       - run: npm test
       - run: npm run pack:check
+      - name: Download verified Windows distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: lodestar-windows
+          path: .
       - name: Build release assets
         shell: bash
         run: |
@@ -97,12 +106,18 @@ jobs:
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
           test -f "${package}"
-          sha256sum "${package}" > SHA256SUMS.txt
+          sha256sum "${package}" "Lodestar-${version}-win-x64.zip" > SHA256SUMS.txt
           {
             echo "PACKAGE=${package}"
             echo "PACKAGE_INTEGRITY=${integrity}"
             echo "PACKAGE_SPEC=${name}@${version}"
           } >> "${GITHUB_ENV}"
+      - name: Smoke the exact publication archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund --prefix .release-smoke "./${PACKAGE}"
+          node scripts/smoke-packed-package.mjs .release-smoke/node_modules/lodestar-agent-context/lodestar.mjs
       - name: Publish exact package to npm
         shell: bash
         env:
@@ -152,7 +167,9 @@ jobs:
       - name: Attest release package provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
         with:
-          subject-path: ${{ env.PACKAGE }}
+          subject-path: |
+            ${{ env.PACKAGE }}
+            Lodestar-*-win-x64.zip
       - name: Publish GitHub release
         shell: bash
         env:
@@ -161,6 +178,7 @@ jobs:
           set -euo pipefail
           release_assets=(
             "${PACKAGE}"
+            "Lodestar-${GITHUB_REF_NAME#v}-win-x64.zip"
             SHA256SUMS.txt
           )
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then

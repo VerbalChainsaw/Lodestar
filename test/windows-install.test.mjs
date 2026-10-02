@@ -16,6 +16,36 @@ import {
   renderWindowsPosixShim,
 } from "../src/windows-install.mjs";
 
+const gitRoot = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git");
+const syntaxBash = process.platform === "win32" ? path.join(gitRoot, "bin", "bash.exe") : "bash";
+
+function childDetails(result) {
+  return JSON.stringify({ command: result.command, code: result.error?.code ?? null,
+    signal: result.signal, status: result.status, stderr: result.stderr, stdout: result.stdout });
+}
+
+function runChild(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8", windowsHide: true, timeout: 15000, ...options,
+  });
+  result.command = [command, ...args];
+  if (result.error && result.error.code !== "ENOENT") assert.fail(childDetails(result));
+  assert.equal(result.signal, null, childDetails(result));
+  return result;
+}
+
+test("external fixture deadline rejects a stalled child with its diagnostics", () => {
+  assert.throws(() => runChild(process.execPath, ["-e",
+    'process.stderr.write("owned deadline fixture"); setInterval(() => {}, 1000);'], { timeout: 2000 }),
+  (error) => {
+    assert.match(error.message, /ETIMEDOUT/);
+    assert.match(error.message, /owned deadline fixture/);
+    assert.match(error.message, /"signal":/);
+    assert.match(error.message, /"status":/);
+    return true;
+  });
+});
+
 test("WSL UNC targets preserve the distribution and Linux path", () => {
   assert.deepEqual(
     parseWslUncTarget(String.raw`\\wsl.localhost\Ubuntu\home\phixx\.local\bin\lodestar`),
@@ -63,16 +93,15 @@ test("the WSL shim crosses the Windows-owned one-shot boundary", () => {
 });
 
 // The installed shim is checked by piping its bytes to `bash -n` on stdin. Passing a
-// path instead would require guessing the dialect of whichever bash is on PATH: Git
-// Bash reads C:\x as /c/x, WSL bash as /mnt/c/x, and the wrong guess reports a missing
-// file as a syntax failure. Stdin removes the dialect from the assertion entirely.
+// path instead would depend on the shell's path dialect. On Windows choose the
+// same Git Bash used by the transport test, avoiding the WSL bash stub on PATH.
 function assertBashSyntax(t, source) {
-  const syntax = spawnSync("bash", ["-n"], { input: source, encoding: "utf8" });
+  const syntax = runChild(syntaxBash, ["-n"], { input: source });
   if (syntax.error?.code === "ENOENT") {
     t.skip("bash is not available to check shim syntax");
     return;
   }
-  assert.equal(syntax.status, 0, syntax.stderr);
+  assert.equal(syntax.status, 0, childDetails(syntax));
 }
 
 test("the Windows POSIX shim installer writes an executable atomically", async (t) => {
@@ -97,35 +126,36 @@ test("the WSL shim installer writes an executable atomically", async (t) => {
 
 // Guards the guard: proves `bash -n` on stdin actually rejects a parse error, so a
 // green shim check above means the shim parsed rather than the check being inert.
-test("the shim syntax check rejects a parse error", () => {
-  const syntax = spawnSync("bash", ["-n"], {
+test("the shim syntax check rejects a parse error", (t) => {
+  const syntax = runChild(syntaxBash, ["-n"], {
     input: "if [ -z \"$X\" ; then echo hi\n",
     encoding: "utf8",
   });
-  if (syntax.error?.code === "ENOENT") return;
-  assert.notEqual(syntax.status, 0);
+  if (syntax.error?.code === "ENOENT") return t.skip("bash is not available to check shim syntax");
+  assert.notEqual(syntax.status, 0, childDetails(syntax));
 });
 
 test("the Windows POSIX shim converts declared Git Bash paths and preserves its literal tail", async (t) => {
   if (process.platform !== "win32") return t.skip("Requires Windows Git Bash");
-  const git = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git");
+  const git = gitRoot;
   const bash = path.join(git, "bin", "bash.exe");
   const cygpath = path.join(git, "usr", "bin", "cygpath.exe");
-  const available = spawnSync(bash, ["-lc", "command -v cygpath"], { encoding: "utf8", windowsHide: true });
-  if (available.error?.code === "ENOENT" || available.status !== 0) return t.skip("Git Bash is unavailable");
+  const available = runChild(bash, ["-lc", "command -v cygpath >/dev/null || exit 77"]);
+  if (available.error?.code === "ENOENT" || available.status === 77) return t.skip("Git Bash or cygpath is unavailable");
+  assert.equal(available.status, 0, childDetails(available));
   const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-posix-transport-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const entry = path.join(directory, "capture.mjs");
   await writeFile(entry, "process.stdout.write(JSON.stringify(process.argv.slice(2)));", "utf8");
   const posix = (candidate) => {
-    const converted = spawnSync(cygpath, ["-u", candidate], { encoding: "utf8", windowsHide: true });
-    assert.equal(converted.status, 0, converted.stderr);
+    const converted = runChild(cygpath, ["-u", candidate]);
+    assert.equal(converted.status, 0, childDetails(converted));
     return converted.stdout.trim();
   };
-  const invoke = (args) => spawnSync(bash, ["-s", "--", ...args], {
+  const invoke = (args) => runChild(bash, ["-s", "--", ...args], {
     input: renderWindowsPosixShim({ entry }), encoding: "utf8", windowsHide: true,
   });
-  const parse = (result) => { assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout); };
+  const parse = (result) => { assert.equal(result.status, 0, childDetails(result)); return JSON.parse(result.stdout); };
   const value = (args, name) => args[args.indexOf(name) + 1];
   const cwd = path.join(directory, "project");
   const file = path.join(directory, "request.json");
@@ -146,7 +176,7 @@ test("the Windows POSIX shim converts declared Git Bash paths and preserves its 
   assert.equal(value(put, "--file"), file);
   const custom = path.join(directory, "custom-launcher");
   await writeFile(custom, renderWindowsPosixShim({ entry }));
-  const fromFile = parse(spawnSync(bash, [posix(custom), "start"], { encoding: "utf8", windowsHide: true }));
+  const fromFile = parse(runChild(bash, [posix(custom), "start"]));
   assert.equal(value(fromFile, "--posix-shim"), custom);
 });
 
@@ -193,9 +223,15 @@ test("launcher publication detects changed targets and verifies preserved backup
 
 test("WSL transports actual arguments and working directory across the Windows boundary", async (t) => {
   if (process.platform !== "win32") return t.skip("Requires Windows with WSL interop");
-  const available = spawnSync("wsl.exe", ["--", "bash", "-c", "test -x /init && command -v wslpath"],
-    { encoding: "utf8", windowsHide: true });
-  if (available.status !== 0) return t.skip("WSL interop is unavailable");
+  const available = runChild("wsl.exe", ["--", "bash", "-c",
+    "test -x /init && command -v wslpath >/dev/null || exit 77"]);
+  const capabilityMessage = `${available.stdout ?? ""}\n${available.stderr ?? ""}`.replaceAll("\0", "");
+  if (available.error?.code === "ENOENT" || available.status === 77
+    || /WSL_E_DEFAULT_DISTRO_NOT_FOUND|WSL_E_DISTRO_NOT_FOUND|WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED|Wsl\/Service\/CreateInstance\/E_ACCESSDENIED|no installed distributions|has not been installed/i.test(capabilityMessage))
+    return t.skip(`WSL interop is unavailable: ${JSON.stringify({
+      code: available.error?.code ?? null, status: available.status, diagnostic: capabilityMessage.trim(),
+    })}`);
+  assert.equal(available.status, 0, childDetails(available));
   const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-wsl-transport-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const entry = path.join(directory, "capture.mjs");
@@ -203,18 +239,24 @@ test("WSL transports actual arguments and working directory across the Windows b
   const shim = renderWslShim({ entry });
   const custom = path.join(directory, "custom-launcher");
   await writeFile(custom, shim);
-  const customLinux = spawnSync("wsl.exe", ["--exec", "wslpath", "-u", custom], { encoding: "utf8", windowsHide: true }).stdout.trim();
-  const fileResult = spawnSync("wsl.exe", ["--", "bash", customLinux, "start"], { encoding: "utf8", windowsHide: true });
-  assert.equal(fileResult.status, 0, fileResult.stderr);
+  const converted = runChild("wsl.exe", ["--exec", "wslpath", "-u", custom]);
+  assert.equal(converted.status, 0, childDetails(converted));
+  const customLinux = converted.stdout.trim();
+  const fileResult = runChild("wsl.exe", ["--", "bash", customLinux, "start"]);
+  assert.equal(fileResult.status, 0, childDetails(fileResult));
   const fileArgs = JSON.parse(fileResult.stdout).argv;
   assert.equal(fileArgs[fileArgs.indexOf("--wsl-shim") + 1], custom);
-  const invoke = (cwd, args, prefix = "") => spawnSync("wsl.exe",
+  const invoke = (cwd, args, prefix = "") => runChild("wsl.exe",
     ["--cd", cwd, "--", "bash", "-s", "--", ...args],
     { input: `${prefix}${shim}`, encoding: "utf8", windowsHide: true });
-  const parse = (result) => { assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout).argv; };
+  const parse = (result) => { assert.equal(result.status, 0, childDetails(result)); return JSON.parse(result.stdout).argv; };
   const value = (args, name) => args[args.indexOf(name) + 1];
-  const home = spawnSync("wsl.exe", ["--", "bash", "-c", "printf %s \"$HOME\""], { encoding: "utf8" }).stdout;
-  const homeWin = spawnSync("wsl.exe", ["--", "wslpath", "-w", home], { encoding: "utf8" }).stdout.trim();
+  const homeResult = runChild("wsl.exe", ["--", "bash", "-c", "printf %s \"$HOME\""]);
+  assert.equal(homeResult.status, 0, childDetails(homeResult));
+  const home = homeResult.stdout;
+  const homeWinResult = runChild("wsl.exe", ["--", "wslpath", "-w", home]);
+  assert.equal(homeWinResult.status, 0, childDetails(homeWinResult));
+  const homeWin = homeWinResult.stdout.trim();
   const normal = parse(invoke("/", ["start", "--cwd", home]));
   const elsewhere = parse(invoke("/mnt/c", ["--human", "start", "--cwd", home]));
   assert.equal(value(normal, "--cwd"), homeWin);
@@ -257,7 +299,7 @@ test("WSL transports actual arguments and working directory across the Windows b
   assert.equal(value(paths, "--db"), "C:\\state\\not-created.db");
   assert.equal(value(paths, "--file"), "C:\\request file.json");
   const fromEnvironment = invoke("/mnt/c", ["doctor"], "export LODESTAR_DB=/mnt/c/state/environment.db\n");
-  assert.equal(fromEnvironment.status, 0, fromEnvironment.stderr);
+  assert.equal(fromEnvironment.status, 0, childDetails(fromEnvironment));
   assert.equal(JSON.parse(fromEnvironment.stdout).db, "C:\\state\\environment.db");
   const override = parse(invoke("/mnt/c", ["doctor", "--db", "/mnt/c/state/explicit.db"],
     "export LODESTAR_DB=\"$HOME/not-the-selected-database.db\"\n"));
@@ -265,6 +307,6 @@ test("WSL transports actual arguments and working directory across the Windows b
   const ended = parse(invoke(home, ["start", "--", "--file", "literal"]));
   assert.deepEqual(ended.slice(ended.indexOf("--")), ["--", "--file", "literal"]);
   const rejected = invoke(home, ["init", "--db", `${home}/forbidden.db`]);
-  assert.notEqual(rejected.status, 0);
+  assert.notEqual(rejected.status, 0, childDetails(rejected));
   assert.match(rejected.stderr, /SQLite must remain on a Windows filesystem/u);
 });

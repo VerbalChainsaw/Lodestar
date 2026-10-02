@@ -161,7 +161,10 @@ test("a cached plugin launched by native WSL Node keeps the Windows one-shot bou
   ], `${nativeHome}/inherited-forbidden.db`));
   assert.equal(third[0].result.structuredContent.data.data.text, text,
     "an explicit Windows-mounted database must override an inherited Linux database");
-  assert.match(third[1].error.message, /SQLite must remain on a Windows filesystem/u);
+  assert.equal(third[1].result.isError, true);
+  assert.match(third[1].result.structuredContent.error.message, /SQLite must remain on a Windows filesystem/u);
+  assert.match(third[1].result.structuredContent.error.message, /No write was dispatched/u);
+  assert.ok(third[1].result.structuredContent.error.action);
 
   const cli = run(NODE, [entry, "--args-stdin"], {
     input: JSON.stringify(["get", id, "--db", database]),

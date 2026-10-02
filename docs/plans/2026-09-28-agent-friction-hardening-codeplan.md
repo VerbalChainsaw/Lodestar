@@ -517,7 +517,7 @@ Independent fresh context over the same falsification mandate (read-only; static
 
 Implemented as planned, with these dispositions:
 
-- T0–T2, T4, T6–T11: executed as specified. Full suite **199/199 green** (190 baseline + 9 new), `assets:check` green, assets regenerated with `--source-root "C:/Users/zerop/Development/Golden Rules"` and **zero golden-skill churn**.
+- T0–T2, T4, T6–T11: executed as specified. Full suite **199/199 green** (190 baseline + 9 new), `assets:check` green, assets regenerated with `--source-root "<Golden-Rules-root>"` and **zero golden-skill churn**.
 - T3: all four action-less conflict sites fixed (`project.mjs` ×2, `records.mjs`, `pending.mjs`); repo-wide grep confirms no further action-less `project_binding_conflict` / `decision_conflict` throws.
 - T5: the build-script docblock shipped. The **AGENTS.md section was blocked** by the protected-agent-instruction approval prompt (timed out — not consented; no retry made). The guidance already lives in the script docblock and README; recommend a separate approved write for the AGENTS.md section.
 - T11: changelog intentionally untouched (no Unreleased section exists; release framing is the Director's).

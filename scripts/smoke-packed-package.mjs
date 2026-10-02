@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { smokePluginPackage } from "./smoke-plugin-package.mjs";
 
 const entry = path.resolve(process.argv[2] ?? ".package-smoke/node_modules/lodestar-agent-context/lodestar.mjs");
-const temporaryRoot = path.resolve(os.tmpdir());
+const temporaryRoot = await realpath(os.tmpdir());
 const directory = await mkdtemp(path.join(temporaryRoot, "lodestar-packed-smoke-"));
 const database = path.join(directory, "registry.db");
 let checks = 0;

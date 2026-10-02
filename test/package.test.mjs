@@ -65,7 +65,7 @@ test("the package publishes one executable and the canonical managed assets", as
   ]) assert.ok(files.has(required), `missing packaged canonical file: ${required}`);
   const manifest = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "manifest.json"), "utf8"));
   assert.equal(manifest.contract, 5);
-  assert.equal(manifest.skills.length, 7);
+  assert.equal(manifest.skills.length, 6);
   for (const skill of manifest.skills) {
     assert.ok(files.has(`managed-assets/${skill.source_entrypoint}`), `missing maintained skill: ${skill.name}`);
     for (const payload of skill.files) {
@@ -191,7 +191,7 @@ test("the contract-5 manifest verifies raw bytes and complete skill membership",
   const manifest = JSON.parse(await readFile(path.join(ROOT, "managed-assets", "manifest.json"), "utf8"));
   assert.equal(manifest.contract, 5);
   assert.deepEqual(manifest.skills.map(({ name }) => name).sort(), [
-    "adderall", "center-audit", "center-multigeometry", "codeplan",
+    "adderall", "center-audit", "codeplan",
     "director-protocol", "ladder-audit", "lodestar",
   ]);
   for (const skill of manifest.skills) {

@@ -2,7 +2,18 @@ import { Buffer } from "node:buffer";
 import { open } from "node:fs/promises";
 import { TextDecoder } from "node:util";
 
-import { lodestarError, wrapError } from "./errors.mjs";
+import { decorateError, lodestarError, wrapError } from "./errors.mjs";
+
+export const JSON_INPUT_MAXIMUM_BYTES = 16 * 1024 * 1024;
+export const JSON_MAXIMUM_DEPTH = 1024;
+
+function assertJsonDepth(depth, maximum = JSON_MAXIMUM_DEPTH) {
+  if (depth > maximum) throw lodestarError("resource_limit",
+    "JSON nesting exceeds the supported depth.", {
+      identifiers: { resource: "json_depth", depth, maximum },
+      action: "Flatten the JSON nesting or split the data into linked records, then retry; no data was truncated.",
+    });
+}
 
 const ARRAY_BUFFER_IS_VIEW = ArrayBuffer.isView;
 const UINT8_ARRAY = Uint8Array;
@@ -91,10 +102,10 @@ function validStringChunk(value, pendingHigh, resource) {
   };
 }
 
-function normalizedJson(value) {
+function normalizedJson(value, maximumDepth) {
   const holder = Object.create(null);
   const ancestors = new Set();
-  const tasks = [{ kind: "value", value, target: holder, key: "value", pointer: "" }];
+  const tasks = [{ kind: "value", value, target: holder, key: "value", pointer: "", depth: 0 }];
   while (tasks.length > 0) {
     const task = tasks.pop();
     if (task.kind === "leave") {
@@ -113,7 +124,7 @@ function normalizedJson(value) {
       tasks.push({ ...task, index: task.index + 1 });
       tasks.push({ kind: "value", value: task.source[task.index],
         target: task.target, key: task.index,
-        pointer: `${task.pointer}/${task.index}` });
+        pointer: `${task.pointer}/${task.index}`, depth: task.depth });
       continue;
     }
     if (task.kind === "object") {
@@ -128,7 +139,7 @@ function normalizedJson(value) {
       }
       tasks.push({ ...task, index: task.index + 1 });
       tasks.push({ kind: "value", value: entry, target: task.target, key,
-        pointer: `${task.pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}` });
+        pointer: `${task.pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`, depth: task.depth });
       continue;
     }
     const current = task.value;
@@ -159,6 +170,7 @@ function normalizedJson(value) {
         "The value contains a type JSON cannot represent.",
       );
     }
+    assertJsonDepth(task.depth + 1, maximumDepth);
     if (ancestors.has(current)) {
       throw lodestarError("invalid_json", "The value contains a circular reference.");
     }
@@ -175,15 +187,18 @@ function normalizedJson(value) {
     tasks.push({ kind: "leave", value: current });
     tasks.push(isArray
       ? { kind: "array", source: current, target: result, index: 0,
-        pointer: task.pointer }
+        pointer: task.pointer, depth: task.depth + 1 }
       : { kind: "object", source: current, target: result,
-        keys: Object.keys(current).sort(), index: 0, pointer: task.pointer });
+        keys: Object.keys(current).sort(), index: 0, pointer: task.pointer, depth: task.depth + 1 });
   }
   return holder.value;
 }
 
-export function canonicalStringify(value) {
-  return JSON.stringify(normalizedJson(value));
+export function canonicalStringify(value, { maximumDepth = JSON_MAXIMUM_DEPTH } = {}) {
+  if (!Number.isSafeInteger(maximumDepth) || maximumDepth < 1 || maximumDepth > JSON_MAXIMUM_DEPTH) {
+    throw new TypeError(`Canonical JSON depth must be a positive integer no larger than ${JSON_MAXIMUM_DEPTH}.`);
+  }
+  return JSON.stringify(normalizedJson(value, maximumDepth));
 }
 
 export function decodeUtf8(
@@ -210,6 +225,11 @@ export function assertTextBytes(
   identifiers = {},
 ) {
   const bytes = Buffer.byteLength(text, "utf8");
+  assertInputBytes(bytes, maximum, resource, identifiers);
+  return bytes;
+}
+
+function assertInputBytes(bytes, maximum, resource, identifiers = {}) {
   if (bytes > maximum) {
     throw lodestarError(
       "resource_limit",
@@ -225,7 +245,6 @@ export function assertTextBytes(
       },
     );
   }
-  return bytes;
 }
 
 export function parseJsonText(
@@ -234,6 +253,7 @@ export function parseJsonText(
     maximum,
     resource = "json_input",
     identifiers = {},
+    validateNumbers = true,
   } = {},
 ) {
   // A transport BOM is not JSON data. Preserve raw source decoding elsewhere;
@@ -244,7 +264,9 @@ export function parseJsonText(
   }
   try {
     const value = JSON.parse(text);
-    assertJsonNumericDomain(text);
+    const validateNumberAt = typeof validateNumbers === "function"
+      ? (pointer) => validateNumbers(pointer, value) : validateNumbers;
+    assertJsonNumericDomain(text, { validateNumbers: validateNumberAt });
     return value;
   } catch (error) {
     throw wrapError(
@@ -256,7 +278,7 @@ export function parseJsonText(
   }
 }
 
-export function assertJsonNumericDomain(text) {
+export function assertJsonNumericDomain(text, { validateNumbers = true } = {}) {
   let offset = 0;
   const decimalMeaning = (token) => {
     const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/u.exec(token);
@@ -288,8 +310,9 @@ export function assertJsonNumericDomain(text) {
     }
     return "";
   };
-  const inspectValue = (pointer) => {
+  const inspectValue = (pointer, depth = 0) => {
     whitespace();
+    if (text[offset] === "{" || text[offset] === "[") assertJsonDepth(depth + 1);
     if (text[offset] === '"') {
       stringToken();
       return;
@@ -313,7 +336,7 @@ export function assertJsonNumericDomain(text) {
         keys.add(key);
         whitespace();
         offset += 1;
-        inspectValue(keyPointer);
+        inspectValue(keyPointer, depth + 1);
         whitespace();
         if (text[offset++] === "}") return;
       }
@@ -325,7 +348,7 @@ export function assertJsonNumericDomain(text) {
       if (text[offset] === "]") { offset += 1; return; }
       let index = 0;
       while (offset < text.length) {
-        inspectValue(`${pointer}/${index++}`);
+        inspectValue(`${pointer}/${index++}`, depth + 1);
         whitespace();
         if (text[offset++] === "]") return;
       }
@@ -336,6 +359,9 @@ export function assertJsonNumericDomain(text) {
     const match = token.exec(text);
     if (match) {
       offset = token.lastIndex;
+      // Binding owners may admit ignored metadata numbers by pointer. Every
+      // consumer still scans the complete document for duplicate names.
+      if (!(typeof validateNumbers === "function" ? validateNumbers(pointer) : validateNumbers)) return;
       const numeric = Number(match[0]);
       if (!Number.isFinite(numeric)
         || (Number.isInteger(numeric) && !Number.isSafeInteger(numeric))
@@ -359,9 +385,10 @@ export function assertJsonNumericDomain(text) {
 
 export async function readTextFileComplete(
   file,
-  { resource = "file_input" } = {},
+  { resource = "file_input", maximum = JSON_INPUT_MAXIMUM_BYTES } = {},
 ) {
   let handle;
+  let primaryError;
   try {
     handle = await open(file, "r");
     const info = await handle.stat();
@@ -369,26 +396,56 @@ export async function readTextFileComplete(
       throw lodestarError("invalid_path", "The input path is not a regular file.",
         { identifiers: { path: file } });
     }
-    return decodeUtf8(await handle.readFile(), { resource, identifiers: { path: file } });
+    assertInputBytes(info.size, maximum, resource, { path: file });
+    // The stat is an early rejection, not a snapshot: bound the actual read too
+    // so a file growing after stat cannot bypass admission.
+    return await readStreamComplete(handle.createReadStream({
+      highWaterMark: 64 * 1024, autoClose: false,
+    }), { resource, maximum, identifiers: { path: file } });
   } catch (error) {
-    throw wrapError(error, "input_unreadable", "Lodestar could not read the input file.", {
+    primaryError = wrapError(error, "input_unreadable", "Lodestar could not read the input file.", {
       identifiers: { path: file },
       action: "Check that the path names a readable regular file.",
     });
+    throw primaryError;
   } finally {
-    await handle?.close().catch(() => {});
+    if (handle) {
+      try {
+        await handle.close();
+      } catch (error) {
+        const cleanup = {
+          code: "input_close_failed",
+          action: "No database mutation was dispatched. Preserve the input file, inspect file handles and storage access, and restart Lodestar before retrying.",
+        };
+        if (primaryError) throw decorateError(primaryError, { cleanup, committed: false });
+        throw lodestarError("input_unreadable", "Lodestar could not close the input file. No database mutation was dispatched.", {
+          identifiers: { path: file, resource, cleanup, committed: false },
+          action: cleanup.action,
+          cause: error,
+        });
+      }
+    }
   }
 }
 
 export async function readStreamComplete(
   stream,
-  { resource = "stdin_input" } = {},
+  { resource = "stdin_input", maximum = JSON_INPUT_MAXIMUM_BYTES, identifiers = {} } = {},
 ) {
   const chunks = [];
+  let bytes = 0;
   let pendingHigh = "";
   for await (const chunk of stream) {
     let buffer;
     if (typeof chunk === "string") {
+      // Count before making a normalized string or Buffer. A held high
+      // surrogate plus a leading low surrogate encodes as four bytes, while
+      // Buffer.byteLength counts the low surrogate alone as three.
+      const leading = chunk.charCodeAt(0);
+      const pendingBytes = pendingHigh
+        ? (leading >= 0xDC00 && leading <= 0xDFFF ? 1 : 3) : 0;
+      assertInputBytes(bytes + Buffer.byteLength(chunk, "utf8") + pendingBytes,
+        maximum, resource, identifiers);
       const validated = validStringChunk(chunk, pendingHigh, resource);
       pendingHigh = validated.pendingHigh;
       buffer = Buffer.from(validated.text);
@@ -396,6 +453,7 @@ export async function readStreamComplete(
       const view = byteView(chunk);
       if (view !== null) {
         if (pendingHigh) throw invalidUtf8(resource);
+        assertInputBytes(bytes + view.byteLength, maximum, resource, identifiers);
         buffer = copyByteView(view);
       }
       if (buffer === null || buffer === undefined) {
@@ -406,8 +464,9 @@ export async function readStreamComplete(
           });
       }
     }
+    bytes += buffer.length;
     if (buffer.length) chunks.push(buffer);
   }
   if (pendingHigh) throw invalidUtf8(resource);
-  return decodeUtf8(Buffer.concat(chunks), { resource });
+  return decodeUtf8(Buffer.concat(chunks, bytes), { resource, identifiers });
 }

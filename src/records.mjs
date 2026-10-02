@@ -15,6 +15,7 @@ import { assertJsonNumericDomain, canonicalStringify } from "./json.mjs";
 import { prepareProjectRoots, resolveProjectScope, sameMachinePath, validateProjectBindings } from "./project.mjs";
 import { allocateRevision, currentRevision } from "./revisions.mjs";
 import { CONTRACT_VERSION } from "./schema.mjs";
+import { requireStoredRecordSemantics, storedSourceCorrection, validateStoredReceipt } from "./stored-semantics.mjs";
 import {
   CONTEXT_ROLES,
   FRESHNESS_STATES,
@@ -217,16 +218,10 @@ function storedJson(text, validate, identifiers) {
     return value;
   } catch (error) {
     if (error?.code === "unsupported_numeric_value") {
-      throw lodestarError(
-        "record_requires_source_correction",
+      throw storedSourceCorrection(
         "The stored record contains a number outside the current numeric domain.",
-        {
-          identifiers: { ...identifiers, ...error.identifiers },
-          action: identifiers.id
-            ? `Use get ${identifiers.id} --raw, then submit a guarded replacement from the source owner.`
-            : "Inspect the raw stored JSON and correct its source representation.",
-          cause: error,
-        },
+        { ...identifiers, ...error.identifiers },
+        error,
       );
     }
     throw lodestarError(
@@ -256,10 +251,7 @@ export function parseStoredMetadata(text, identifiers = {}) {
 function parsedRecord(row) {
   const stored = parseStoredContent(row.content_json, { id: row.id });
   const metadata = stored._lodestar ?? {};
-  if (!metadata.semantics) throw lodestarError("record_requires_source_correction", "The record is missing current-contract semantic metadata.", {
-    identifiers: { id: row.id, pointer: "/_lodestar/semantics" },
-    action: `Inspect get ${row.id} --raw and use an explicit checked source correction.`,
-  });
+  requireStoredRecordSemantics(stored, { id: row.id });
   const { _lodestar: _ignored, ...content } = stored;
   return {
     id: row.id,
@@ -734,7 +726,7 @@ function beforeImage(db, id) {
   return row ? { raw_record: row, raw_associations: rawAssociations(db, id) } : null;
 }
 
-function targetRevision(db, target) {
+function targetRevision(db, target, decisionHeads) {
   if (target.kind === "record") {
     const row = db.prepare("SELECT id, json_extract(content_json, '$._lodestar.revision') "
       + "AS revision FROM records WHERE id=?").get(target.id);
@@ -749,20 +741,22 @@ function targetRevision(db, target) {
     }
     return revision;
   }
-  const rows = db.prepare("SELECT content_json FROM records WHERE type='decision-event' "
-    + "AND scope=? ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
-    .all(target.scope);
-  let revision = null;
-  for (const row of rows) {
-    const content = parseStoredContent(row.content_json);
-    if (contentData(content)?.key === target.key) {
+  if (!decisionHeads.has(target.scope)) {
+    const rows = db.prepare("SELECT content_json FROM records WHERE type='decision-event' "
+      + "AND scope=? ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
+      .all(target.scope);
+    const heads = new Map();
+    for (const row of rows) {
+      const content = parseStoredContent(row.content_json);
+      const key = contentData(content)?.key;
       const candidate = Number(content._lodestar?.revision ?? 0);
-      if (Number.isSafeInteger(candidate) && candidate > (revision ?? 0)) {
-        revision = candidate;
+      if (Number.isSafeInteger(candidate) && candidate > (heads.get(key) ?? 0)) {
+        heads.set(key, candidate);
       }
     }
+    decisionHeads.set(target.scope, heads);
   }
-  return revision;
+  return decisionHeads.get(target.scope).get(target.key) ?? null;
 }
 
 export function writeBasis(db, {
@@ -776,6 +770,7 @@ export function writeBasis(db, {
     const normalized = normalizedTarget(target, `targets[${index}]`);
     return [targetKey(normalized), normalized];
   })).values()];
+  const decisionHeads = new Map();
   return {
     database_instance_id: metadata.database_instance_id,
     database_epoch: metadata.database_epoch,
@@ -783,7 +778,7 @@ export function writeBasis(db, {
     checkout,
     targets: distinct.map((target) => ({
       ...target,
-      expected_revision: targetRevision(db, target),
+      expected_revision: targetRevision(db, target, decisionHeads),
     })),
   };
 }
@@ -797,7 +792,7 @@ function receiptId(request) {
     ])).digest("hex")}`;
 }
 
-function storedReceipt(db, id) {
+function storedReceipt(db, id, expected = null) {
   const row = rawRecordById(db, id);
   if (!row) return null;
   const record = parseStoredContent(row.content_json, { id });
@@ -806,7 +801,8 @@ function storedReceipt(db, id) {
       identifiers: { id, type: row.type },
     });
   }
-  return contentData(record);
+  return validateStoredReceipt(record, { id,
+    databaseInstanceId: readMetadata(db).database_instance_id, expected });
 }
 
 export function mutate(db, operation, value, callback, {
@@ -843,7 +839,8 @@ export function mutate(db, operation, value, callback, {
         action: "Refresh the record after recovery and submit a new logical request.",
       });
     }
-    const receipt = storedReceipt(db, id);
+    const receipt = storedReceipt(db, id, { request_id: request.request_id,
+      database_epoch: request.database_epoch, operation, payload_sha256: payloadHash });
     if (receipt) {
       if (receipt.payload_sha256 !== payloadHash) {
         throw lodestarError("request_conflict", "The request ID was already accepted with different input.", {
@@ -884,8 +881,9 @@ export function mutate(db, operation, value, callback, {
         action: "Refresh the named targets and retry with a new logical request.",
       });
     }
+    const decisionHeads = new Map();
     for (const entry of request.preconditions) {
-      const actual = targetRevision(db, entry.target);
+      const actual = targetRevision(db, entry.target, decisionHeads);
       if (actual !== entry.expected_revision) {
         throw lodestarError("revision_conflict", "A mutation target changed after it was read.", {
           identifiers: { request_id: request.request_id, target: entry.target,
@@ -1101,16 +1099,18 @@ export function preparePutEvidence(db, input, value) {
     project.root = data.roots?.[0] ?? data.root;
   }
   let sourceRoots = {};
+  let sourceConfiguration;
   for (const source of record.sources ?? []) {
     const metadata = source.metadata;
     if (metadata.relation !== "content_owner" || !["local_file", "package_manifest"].includes(metadata.kind)) continue;
     validateSourceMetadata(metadata);
-    if (metadata.locator.base === "source_root") {
+    if (metadata.locator.base === "source_root" && sourceConfiguration === undefined) {
       const configRow = rawRecordById(db, "config:lodestar:sources");
-      const config = configRow ? normalizeRecord(getRecordById(db, configRow.id)).data : {};
+      sourceConfiguration = configRow ? normalizeRecord(getRecordById(db, configRow.id)) : null;
       sourceBindings.push({ target: { kind: "record", id: "config:lodestar:sources" },
-        expected_revision: configRow ? normalizeRecord(getRecordById(db, configRow.id)).revision : null });
-      sourceRoots = Object.fromEntries((config.skill_source_roots ?? []).map((source) => [source.id, source.locator]));
+        expected_revision: sourceConfiguration?.revision ?? null });
+      sourceRoots = Object.fromEntries((sourceConfiguration?.data.skill_source_roots ?? [])
+        .map((source) => [source.id, source.locator]));
     }
     const located = resolveSourceLocator(metadata.locator, { project, sourceRoots });
     const actual = inspectLocalSourceSync(located.path);
@@ -1202,6 +1202,37 @@ function rejectionAdvisories(db, record, projectScope, requestCheckout) {
 }
 
 
+function assertRecordApplicability(db, record, request) {
+  const applicability = (record.kind ?? record.type) === "project"
+    ? { project: resolveProjectScope(db, record.id)?.scope, checkout: null }
+    : record.semantics?.applicability ?? { project: record.scope, checkout: null };
+  const scope = applicability.project === "global" ? null : applicability.project ?? null;
+  const requestScope = request.project_scope === "global" ? null : request.project_scope;
+  const binding = scope !== requestScope ? resolveProjectScope(db, scope, request.checkout) : null;
+  if (scope !== requestScope && binding?.scope !== requestScope) {
+    throw lodestarError("invalid_input", "Record applicability does not match the mutation project scope.", {
+      identifiers: { id: record.id, expected: request.project_scope, actual: scope },
+      action: "Read the target record again and retain its complete write_basis before preparing a new logical request.",
+    });
+  }
+  if (binding) {
+    const supplied = new Set(request.preconditions.map(({ target }) => targetKey(target)));
+    const missing = binding.binding_preconditions.map(({ target }) => target)
+      .filter((target) => !supplied.has(targetKey(target)));
+    if (missing.length) throw lodestarError("missing_precondition", "The record's project mapping needs its observed revision.", {
+      identifiers: { required_basis: writeBasis(db, { projectScope: scope, checkout: request.checkout, targets: missing }) },
+      action: "Read the record again and retain its complete mapping basis.",
+    });
+  }
+  if (applicability.checkout != null && (request.checkout === null ||
+    !sameMachinePath(applicability.checkout, request.checkout))) {
+    throw lodestarError("invalid_input", "Record applicability does not match the observed checkout basis.", {
+      identifiers: { id: record.id, expected: request.checkout, actual: applicability.checkout },
+      action: "Read the target record and its checkout context, then prepare the correction from that complete basis.",
+    });
+  }
+}
+
 export function applyPutInput(db, input, {
   revision,
   timestamp,
@@ -1220,6 +1251,7 @@ export function applyPutInput(db, input, {
   }
   if (mode === "create" && existing) throw lodestarError("record_exists", "Create requires an absent record ID.", { identifiers: { id } });
   if (mode === "replace" && !existing) throw lodestarError("record_not_found", "Replace requires an existing record ID.", { identifiers: { id } });
+  if (existing) assertOrdinaryType(existing.type);
   let record;
   if (mode === "update") {
     record = updateRecordValue(normalizeRecord(getRecordById(db, id)), input);
@@ -1257,33 +1289,19 @@ export function applyPutInput(db, input, {
       });
     }
   }
-  const applicability = record.semantics?.applicability;
-  const applicabilityBinding = request.project_scope !== null && applicability?.project !== request.project_scope
-    ? resolveProjectScope(db, applicability?.project, request.checkout) : null;
-  if (request.project_scope !== null
-    && applicability?.project !== request.project_scope && applicabilityBinding?.scope !== request.project_scope) {
-    throw lodestarError("invalid_input",
-      "Record applicability does not match the mutation project scope.", {
-        identifiers: { id, expected: request.project_scope,
-          actual: applicability?.project ?? null },
-      });
+  if (existing && existing.type !== "project") {
+    let prior;
+    try { prior = normalizeRecord(getRecordById(db, id)); }
+    catch (error) {
+      if (mode !== "replace" || error.code !== "record_requires_source_correction") throw error;
+      // An explicit source correction still requires the stored origin scope.
+      prior = { id, kind: existing.type, scope: existing.scope };
+    }
+    assertRecordApplicability(db, prior, request);
   }
-  if (applicabilityBinding) {
-    const supplied = new Set(request.preconditions.map(({ target }) => targetKey(target)));
-    const missing = applicabilityBinding.binding_preconditions.map(({ target }) => target)
-      .filter((target) => !supplied.has(targetKey(target)));
-    if (missing.length) throw lodestarError("missing_precondition", "The record's project mapping needs its observed revision.", {
-      identifiers: { required_basis: writeBasis(db, { projectScope: applicability.project, checkout: request.checkout, targets: missing }) },
-      action: "Read the record again and retain its complete mapping basis." });
-  }
-  if (applicability?.checkout !== null && applicability?.checkout !== undefined
-    && (request.checkout === null || !sameMachinePath(applicability.checkout, request.checkout))) {
-    throw lodestarError("invalid_input",
-      "Record applicability does not match the observed checkout basis.", {
-        identifiers: { id, expected: request.checkout,
-          actual: applicability?.checkout ?? null },
-      });
-  }
+  // Registration establishes a project's identity; ordinary facts already have
+  // an applicability. Project roots and canonical links are validated below.
+  if (record.type !== "project") assertRecordApplicability(db, record, request);
   assertSubjectAvailable(db, record);
   if (mode === "create" && record.type !== "project" && request.project_scope !== null
     && record.scope !== request.project_scope && record.scope !== "global") {
@@ -1327,6 +1345,7 @@ export function deleteRecord(db, value, options = {}) {
   return mutate(db, "delete", value, ({ revision, timestamp }) => {
     const current = normalizeRecord(getRecordById(db, input.id));
     assertOrdinaryType(current.kind);
+    assertRecordApplicability(db, current, activeMutations.get(db));
     const semantics = {
       ...(current.semantics ?? {}),
       lifecycle: "historical",
@@ -1358,28 +1377,54 @@ export function normalizeRecord(record) {
     semantics: record.semantics };
 }
 
+function rawReadWriteBasis(db, row) {
+  // Inspection stays available for malformed rows, but an unsafe basis must not be issued.
+  let projectScope, checkout;
+  if (row.type === "project") {
+    // Project descriptors use observed targets and validated bindings. Raw
+    // inspection must stay available before an ambiguous mapping is repaired.
+    projectScope = null;
+    checkout = null;
+  } else try {
+    const applicability = JSON.parse(row.content_json)?._lodestar?.semantics?.applicability;
+    if (!applicability || typeof applicability !== "object" || Array.isArray(applicability) ||
+      !Object.hasOwn(applicability, "project")) return null;
+    projectScope = applicability.project;
+    checkout = applicability.checkout ?? null;
+    if ((projectScope !== null && (typeof projectScope !== "string" || !projectScope)) ||
+      (checkout !== null && (typeof checkout !== "string" || !checkout))) return null;
+  } catch { return null; }
+  const sourceRootUsed = rawAssociations(db, row.id).sources.some(({ metadata_json }) => {
+    try { return JSON.parse(metadata_json)?.locator?.base === "source_root"; }
+    catch { return false; }
+  });
+  return writeBasis(db, { projectScope, checkout,
+    targets: [{ kind: "record", id: row.id },
+      ...(sourceRootUsed ? [{ kind: "record", id: "config:lodestar:sources" }] : [])] });
+}
+
 export function getRawRecord(db, identifier) {
   const id = resolveRecordId(db, identifier);
   const rawRecord = rawRecordById(db, id);
   return {
     raw_record: rawRecord,
     raw_associations: rawAssociations(db, id),
-    write_basis: writeBasis(db, {
-      projectScope: rawRecord.scope,
-      targets: [{ kind: "record", id }],
-    }),
+    write_basis: rawReadWriteBasis(db, rawRecord),
   };
 }
 
 export function getRecordHistory(db, identifier) {
   const id = resolveRecordId(db, identifier);
   const versions = [];
-  const receipts = db.prepare("SELECT id,content_json FROM records "
+  const receipts = db.prepare("SELECT id,type,content_json FROM records "
     + "WHERE type IN ('mutation-receipt','migration-source') "
     + "ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
     .all();
+  const databaseInstanceId = readMetadata(db).database_instance_id;
   for (const receipt of receipts) {
-    const data = contentData(parseStoredContent(receipt.content_json, { id: receipt.id }));
+    const content = parseStoredContent(receipt.content_json, { id: receipt.id });
+    const data = receipt.type === "mutation-receipt"
+      ? validateStoredReceipt(content, { id: receipt.id, databaseInstanceId }) : contentData(content);
     for (let sequence = 0; sequence < (data.before_images ?? []).length; sequence += 1) {
       const image = data.before_images[sequence];
       if (image.raw_record?.id === id) versions.push({
@@ -1394,10 +1439,7 @@ export function getRecordHistory(db, identifier) {
     id,
     versions,
     current: beforeImage(db, id),
-    write_basis: writeBasis(db, {
-      projectScope: rawRecordById(db, id)?.scope ?? null,
-      targets: [{ kind: "record", id }],
-    }),
+    write_basis: rawReadWriteBasis(db, rawRecordById(db, id)),
   };
 }
 

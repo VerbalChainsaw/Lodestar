@@ -1,5 +1,62 @@
 # Changelog
 
+## 3.0.0 - 2026-10-02
+
+- Add shared read-only `work prepare-capture` and `work attention` contracts.
+  Loader and Manager review creation before separately linking the confirmed
+  record to mission/requirements; failed or canceled association retains its ID.
+  Recorded observations do not infer passed acceptance. Attention reports each
+  section's coverage, with local recovery observed separately.
+- Admit active context/dependencies before orientation and use one deterministic
+  record/decision order under existing limits. Native integration keeps exact
+  required reads or an explicitly counted current-work read catalog.
+- Add nested-menu project jump with retained original-scope drafts in Manager.
+  Show observed source/build identities and contract/schema support separately
+  from release labels and package verification.
+
+- Add optional continuation context associations outside the approved intent hash
+  and one bounded read-only continuity projection through `work check`.
+  Preserve applicable rejection reasons, dependency gaps, current decision replay,
+  exact public reads and separate coverage/acceptance status. Native integration
+  checkpoints and their existing preview carry the same projection; old pending
+  request bytes resolve before an upgrade.
+
+- Prevent ordinary replacement from overwriting an existing reserved receipt,
+  work, decision, pending or alteration record. Preserve exact replay and history.
+- Make doctor and normalized reads agree when current semantic metadata is
+  missing. Supply literal raw-read arguments without rewriting damaged data.
+- Reject invalid UTF-8, duplicate decoded JSON members, lossy consumed control
+  numbers and ambiguous multiline CLI output across operator and host readers.
+  Preserve uncertain writes and exact recovery files with corrective guidance.
+- Reuse one package-use check for Loader and Manager during update, recovery and
+  retirement. Explain an unavailable process snapshot before any file move.
+- Reuse dependency loads and a locked recovery inventory digest within an
+  operation. Index captured migration associations and before-images while
+  retaining full reconstruction and integrity checks.
+
+- Preserve project context and dirty drafts across delayed reads and capability
+  refreshes; clear an absent selected record after a complete library refresh.
+- Keep literal IDs, queries and decision keys exact across both interfaces.
+  Reject self-overwriting candidate promotion and superseded acceptance evidence.
+- Reject ambiguous or invalid binding bytes with public corrective diagnostics,
+  while preserving compatible ignored metadata and strict meaningful fields.
+
+- Add explicit first-project and reviewed operator actions to both interfaces,
+  cross-project search in Loader, and read-only plan/actual/difference projections
+  with stale-evidence checks through `work check`.
+- Keep incomplete recovery journals visible, refresh Manager details after Save,
+  reject unsupported decision/handoff list limits, and isolate Setup's Node child
+  environment from inherited preload and host identity variables.
+- Add the separate Windows Loader console and compatible menu Manager for
+  inspecting and correcting the same Lodestar store through the one-shot CLI.
+- Add typed discovery, dense project and record navigation, readable health and
+  provenance, reviewed saves with recovery, diagnostics, and bounded library
+  continuation.
+- Provide a portable Windows distribution with first-use configuration, launchers,
+  and staged updates with interrupted-update recovery. See the [3.0.0 release notes](docs/releases/v3.0.0.md)
+  for prerequisites and upgrade steps.
+- Keep contract 5 and schema 5. Existing schema-5 stores require no 3.0 migration.
+
 ## 2.2.1 - 2026-09-28
 
 - Cover historical member scopes in the rejection advisory so a rebinding

@@ -1,9 +1,29 @@
 # Installation and startup
 
-For a new installation, use Node.js 24.15.0 or newer:
+Lodestar 3.0.0 provides the CLI package `lodestar-agent-context@3.0.0` and the
+Windows archive `Lodestar-3.0.0-win-x64.zip`. Use the
+[3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
+for versioned archives and the SHA-256 checksum inventory. Verify downloaded
+archives against that inventory before installing.
+
+For **Loader or Manager on Windows**, install Node.js 24.15.0 or newer, the .NET 10
+Desktop Runtime (x64), and PowerShell 7. Verify and extract the whole Windows ZIP,
+run `Install.cmd`, then open Loader or Manager from the Start Menu. See
+[per-user installation](#windows-loader-and-manager-per-user-installation) for
+planning, selected paths, upgrades and recovery. `Setup.cmd` supports portable use.
+
+For the **CLI and native agent skills**, use Node.js 24.15.0 or newer and the
+package procedure below. Application installation, skill installation and host
+activation are distinct steps. Automatic continuity through a separately prepared
+host hook requires that host's explicit activation and a natural runtime event;
+the CLI, native skill and MCP plugin do not install or activate that hook.
+
+## CLI and native skills
+
+For a new installation:
 
 ```text
-npm install --global lodestar-agent-context@2.2.1
+npm install --global lodestar-agent-context@3.0.0
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -12,10 +32,24 @@ lodestar doctor
 lodestar start --cwd .
 ```
 
-Use `lodestar init` only when creating a new store. An existing store must pass
-the [migration/recovery procedure](../README.md#storage-and-recovery); setup never
+Use `lodestar init` only when creating a new store. An existing schema-5 store
+needs no 3.0 migration. An older schema-4 store requires the explicit
+[migration/recovery procedure](../README.md#storage-and-recovery); setup never
 changes a database. You can also install the versioned tarball from the
-[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v2.2.1).
+[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0).
+
+To use an isolated CLI package, verify `lodestar-agent-context-3.0.0.tgz`
+against the release's SHA-256 inventory, then install it in a new directory.
+Replace the placeholders with your selected paths and invoke that exact package:
+
+```text
+npm install --prefix "<local-package-directory>" --ignore-scripts "<verified-release-tarball>"
+node "<local-package-directory>/node_modules/lodestar-agent-context/lodestar.mjs" --db "<existing-database>" start --cwd "<project-root>"
+```
+
+This read uses an existing schema-5 store. New-store creation remains an explicit
+`init` operation, and native skill installation remains an explicit `setup`
+operation. Local package installation alone does not activate a native host.
 
 `setup` without `--apply` is a read-only plan. Choose codex, claude, opencode,
 hermes, or all. Missing skills are installed; unchanged owned copies upgrade
@@ -54,6 +88,112 @@ power-loss recovery is not certified: directory metadata and rename durability
 depend on the filesystem, including Windows-to-WSL transport. The installer locks
 serialize cooperating setup processes; content checks are not an OS-level
 compare-and-swap against arbitrary external writers.
+
+## Windows Loader and Manager: per-user installation
+
+Download `Lodestar-3.0.0-win-x64.zip` from the
+[3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
+and verify its SHA-256 checksum against the release inventory. Extract the whole
+archive to a separate directory. This is a framework-dependent Windows package. Install
+the **.NET 10 Desktop Runtime (x64)**, **PowerShell 7**, and **Node.js 24.15.0 or newer**
+separately before first use. The package does not install these prerequisites.
+It bundles no code-signing identity or automatic updater. Verify the archive and
+scripts before trusting or explicitly unblocking a Windows download.
+
+Run `Install.cmd` for an ordinary per-user installation. It checks the selected
+runtime and database, installs to `%LOCALAPPDATA%\Programs\Lodestar`, and creates
+Start Menu entries for Loader and Manager plus one owned HKCU uninstall entry.
+`-DesktopShortcut` adds a Loader desktop shortcut. It requires no administrator
+access and creates no service, autostart entry, PATH edit or background updater.
+Existing `interfaces.json` is preserved byte-for-byte. The database stays outside
+the app; the default is `%LOCALAPPDATA%\Lodestar\lodestar.db`. This explicit Install
+operation creates that store if absent. Neither app creates a store merely on launch.
+
+Inspect the resolved plan or select different paths:
+
+```powershell
+pwsh -NoProfile -File .\Install.ps1 -Mode Plan
+pwsh -NoProfile -File .\Install.ps1 -Destination "C:\Apps\Lodestar" -DatabasePath "C:\Data\lodestar.db" -NodePath "C:\Tools\node.exe"
+```
+
+Plan reads and validates without initializing or migrating data. The database must
+be external to the app, payload and update folders. Reparse-point paths, conflicting
+ownership and changed payload bytes are refused with the failed stage and next action.
+
+### Upgrade, recover and uninstall
+
+Close Loader, Manager and all database writers. Extract the next release separately
+and run its `Install.cmd` with the same destination. To adopt one old verified portable
+bundle, explicitly pass `-PreviousInstallation "C:\Apps\OldLodestar"`; its original
+directory remains and its configuration/store selection are preserved. Unknown or
+ambiguous state is retained for review. This does not replace global npm packages or
+install/activate agent skills or native hooks.
+
+An existing schema-5 store needs no conversion. The supported schema-4 conversion
+requires `-MigrateDatabase`, an independently verified backup and a retained exact
+request before mutation. Unsupported, corrupt and future databases are refused.
+Application rollback never reverses a database conversion. Close writers first and
+retain the independent backup; file inventories alone do not prove a usable backup.
+
+```powershell
+pwsh -NoProfile -File .\Install.ps1 -MigrateDatabase
+pwsh -NoProfile -File .\Install.ps1 -Mode Recover -Destination "C:\Apps\Lodestar"
+```
+
+Recover reconciles the recorded selection, application transaction and exact saved
+migration request. Keep the receipt, stage, previous bundle, backup and request until
+reconciliation succeeds. Controlled recovery artifacts sit beside the selected app
+and database; diagnostics identify their paths. Preserve changed or unknown files.
+No blind new logical request is issued to settle an uncertain earlier mutation.
+
+Uninstall through Windows Installed Apps or the installed `Install.ps1 -Mode Uninstall`.
+It removes unchanged owned application files and registration. The database, retained
+configuration and recovery evidence survive. Changed inventory, foreign files or
+changed registration produce a conflict and corrective action. A later reinstall
+uses the retained selection unless you explicitly choose a new one.
+
+`Install.cmd` pauses after failure only when called without arguments. Other launchers
+and calls with arguments return their exit code immediately. To keep output visible,
+invoke them in an existing terminal. No launcher modifies PowerShell execution policy
+or unblocks downloads. Inspect and trust the verified scripts before explicit unblocking;
+the distribution `README.txt` explains checksums and Windows download marks.
+
+### Portable use
+
+1. Run `Setup.cmd` in the extracted directory. It checks the prerequisites and
+   uses the standard existing Lodestar database when present; otherwise it asks
+   for an absolute database path. Node is found from your installed runtime or
+   selected with `-NodePath`. To create a new
+   store, pass `-DatabasePath "C:\Data\lodestar.db" -InitializeDatabase` explicitly;
+   choose an absent database outside the app folder with an existing parent directory.
+   Neither app creates a store when it opens, and Setup refuses to overwrite an
+   existing `interfaces.json`.
+2. Run `Loader.cmd` for the Windows console or `Manager.cmd` for the terminal
+   menu. Both read the configured `interfaces.json` and use the same database.
+   Keep that configuration with the portable directory.
+3. For a later portable release, close Loader and Manager, extract the new ZIP
+   into a separate directory, then run
+   `Update.cmd "C:\path\to\existing app"` from the new release
+   directory. The updater stages and validates the
+   replacement, preserves the configured store and local configuration, and
+   retains the prior validated bundle. If an update is interrupted, run
+   `pwsh -NoProfile -File .\Update.ps1 -Mode Recover -Destination "C:\path\to\existing app"`
+   from the new release folder. Recovery follows the saved transaction journal;
+   it does not downgrade a successfully completed update. Keep the transaction
+   folders until recovery reports its outcome. Each launcher supports `--help`.
+
+`Lodestar.cmd` invokes the configured core/store with literal arguments. The CLI
+launcher rejects attempts to override its binding; invoke the selected core explicitly
+when deliberately choosing another database. Owned installations use `Install` for
+updates and recovery; portable `Update` refuses those targets so their ownership receipt
+and Windows registration remain coherent. Downgrades and unsupported store schemas
+are refused before staging. Each launcher supports `--help`.
+
+The apps invoke the packaged CLI as one-shot operations. The database
+remains a separate Windows-owned file; do not copy only its main SQLite file as a
+backup while a WAL file may be present. An older schema-4 store still needs the
+[explicit migration/recovery procedure](../README.md#storage-and-recovery).
+The [3.0.0 release notes](releases/v3.0.0.md) describe the interface changes.
 
 ## Homes and discovery
 
@@ -101,10 +241,10 @@ automatic selection.
 
 The skill and CLI work without the optional MCP plugin. `lodestar setup` installs
 native skills and launchers; it does not enable a plugin or modify Codex settings.
-To add the three structured tools, install the complete package through Codex:
+Add the three structured tools by installing the complete package through Codex:
 
 ```text
-codex plugin marketplace add VerbalChainsaw/Lodestar --ref v2.2.1
+codex plugin marketplace add VerbalChainsaw/Lodestar --ref v3.0.0
 codex plugin add lodestar@lodestar
 ```
 
@@ -221,8 +361,10 @@ lodestar start --cwd . --output complete-context.json
 The destination must not already exist. It is reserved before dispatch and receives
 the full UTF-8 success envelope. Stdout returns a compact descriptor with its path,
 byte length, and SHA-256. Read the file completely and verify the descriptor; do not
-infer missing context from a clipped display. A failed operation can leave an empty
-or partial output file; without the success descriptor it is not verified output.
+infer missing context from a clipped display. A failed operation writes its complete
+error envelope to the same file and returns the same descriptor inside the error
+envelope on stderr, so verify the descriptor before using the file rather than
+discarding it. Only an interrupted process can leave an empty or partial file.
 If a mutation's response is lost after commit, retry the exact saved request to
 recover its receipt without duplicating the effect.
 

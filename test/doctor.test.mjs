@@ -10,6 +10,7 @@ import {
   openDiagnosticDatabase,
 } from "../src/database.mjs";
 import { diagnoseDatabase } from "../src/doctor.mjs";
+import { fixture as contractFixture } from "./helpers/contract.mjs";
 
 // This test-only connection deliberately injects corruption for diagnostic probes.
 class DatabaseSync extends SQLiteDatabase {
@@ -54,7 +55,10 @@ test("doctor reports complete required records without startup-budget policy",
       "rule",
       "Large required record",
       "global",
-      JSON.stringify({ state: "known", value: { required: true, text: "x".repeat(5000) } }),
+      JSON.stringify({ state: "known", value: { required: true, text: "x".repeat(5000) },
+        _lodestar: { revision: 1, priority: 0, semantics: { lifecycle: "current",
+          context_role: "orientation", basis: "asserted",
+          applicability: { project: null, checkout: null } } } }),
       "2026-07-30T10:00:00.000Z",
       "2026-07-30T10:00:00.000Z",
     );
@@ -65,6 +69,34 @@ test("doctor reports complete required records without startup-budget policy",
     db.close();
     assert.equal(report.healthy, true);
   });
+
+for (const mode of ["missing-semantics", "legacy-without-core-metadata"]) {
+  test(`doctor discloses ${mode} while preserving exact raw evidence`, async (t) => {
+    const f = await contractFixture(t);
+    const id = `fact:doctor:${mode}`;
+    await f.create(id, "fact", { example: true });
+    const raw = new DatabaseSync(f.database);
+    const content = JSON.parse(raw.prepare("SELECT content_json FROM records WHERE id=?").get(id).content_json);
+    if (mode === "missing-semantics") delete content._lodestar.semantics;
+    else delete content._lodestar;
+    const bytes = JSON.stringify(content);
+    raw.prepare("UPDATE records SET content_json=? WHERE id=?").run(bytes, id);
+    raw.close();
+    const ordinary = await f.cli(["get", id]);
+    assert.equal(ordinary.value.error.code, mode === "missing-semantics"
+      ? "record_requires_source_correction" : "database_integrity");
+    const diagnostic = await f.cli(["doctor"]);
+    assert.equal(diagnostic.value.data.healthy, false);
+    const issue = diagnostic.value.data.issues.find((item) => item.code === "record_requires_source_correction"
+      && item.identifiers.id === id);
+    assert.ok(issue);
+    assert.equal(issue.identifiers.pointer, "/_lodestar/semantics");
+    assert.match(issue.action, /raw|source/u);
+    const inspected = await f.cli(["get", id, "--raw"]);
+    assert.equal(inspected.code, 0);
+    assert.equal(inspected.value.data.raw_record.content_json, bytes);
+  });
+}
 
 test("doctor validates the stable database instance identity", async (t) => {
   const file = await fixture(t);

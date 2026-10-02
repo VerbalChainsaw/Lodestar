@@ -44,6 +44,13 @@ identity, or infer a decision from arbitrary prose.
   contract-5 mutation boundary.
 - `lodestar work status|history|start|report|done|expire` records advisory work
   and actual task outcomes.
+- `lodestar work check <intent-record-id> --cwd <project-root>` compares a
+  recorded plan and supplied evidence, returning plan, actual and difference
+  views plus bounded relevant continuity. Optional `continuation.context` links
+  supporting records outside the approved intent hash; inspect current typed help
+  before editing because older cores refuse the field. Readiness is a mapping
+  check, not proof that tests ran. JSON help describes the intent, hierarchy,
+  continuation and context fields. Read named gaps before dependent action.
 - `lodestar handoff status|history|arm|checkpoint|now|claim|disarm` preserves
   explicit continuity without creating or rotating sessions.
 - `lodestar decision show|status|set|drop|inject` maintains checked decision streams.
@@ -59,7 +66,10 @@ identity, or infer a decision from arbitrary prose.
   proves that a separate recovered image contains the exact accepted logical state.
 
 Use `lodestar <command> --help` in JSON mode, or native `lodestar_describe`, for
-the complete mutation envelope and operation input schema. `decision show` reads
+the same versioned operation descriptors. `cli_inputs` describes all parsed command
+flags, global transport, and command constraints; `parameters` describes only the
+safe generic read form and may be narrower. Mutation descriptors carry the
+`mutation_request` envelope and operation-specific `input_schema`. `decision show` reads
 the stream; `decision status` changes its status. Do not guess write fields.
 
 JSON is the default output. Add `--human` only for human-formatted output. Read
@@ -86,6 +96,12 @@ verify the returned byte count and SHA-256 before reading the complete UTF-8
 envelope. Output files are created without overwriting existing files. A lost
 mutation response requires the exact same request body and ID; never repeat an
 external action merely because its ledger response was lost.
+
+For a new accepted task following completed work, update the host-bound current
+intent and continuation before implementation; an unrelated task note does not
+change that binding. Preserve prior outcomes/history, mark new results unverified,
+and confirm the current `work check` reflects the accepted work. See
+[continuity.md](references/continuity.md) for capture and automatic resume.
 
 ## Normal correction path
 

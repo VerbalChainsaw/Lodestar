@@ -4,28 +4,50 @@
 
 ![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Release notes](docs/releases/v2.2.1.md) · [FAQ](https://github.com/VerbalChainsaw/Lodestar/blob/main/Q%26A.md)
+[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Operator recipes](docs/operator-recipes.md) · [Release notes](docs/releases/v3.0.0.md) · [FAQ](Q&A.md)
 
-Lodestar keeps useful project context, decisions, and unfinished work in one local
-registry. Your coding agent can get its bearings, check what changed, and leave a
-clear continuation for the next session.
+Lodestar keeps project context, decisions, evidence, and unfinished work in one
+local registry. Open **Loader** to see what needs attention, capture a useful
+finding, review a correction, or recover an interrupted save. **Manager** brings
+the same operations to a terminal menu. Your coding agent uses the same records
+through the one-shot CLI or native integration.
 
 Use it when new sessions keep rediscovering project facts, revisiting settled
 decisions, or losing the thread of unfinished work. It provides a current starting
 point and a checked correction path. You and your native project instructions
 keep authority over the work.
 
-## What is better in 2.1
+## New in 3.0
 
-The 2.x releases replace the older 1.6 workflow with one contract for CLI
-and native tools, explicit installation ownership, and read-only startup.
+Lodestar 3.0 adds two ways to work with the same local records. **Loader** is a
+separate graphite Windows console for finding projects and records, inspecting
+source and history, reviewing corrections, and saving deliberately. Its Health
+view shows observed state and offers an explicit doctor check. **Manager** is a
+compatible menu interface for the same core operations. Typed discovery, readable
+record details, diagnostics, and bounded library continuation help with larger
+stores and interrupted work. The Windows package supplies per-user installation,
+portable configuration, launchers, and staged updates with recovery.
 
-**Version 2.2.0 adds the rejection register.** Record an approach the project
-has settled against — a model, a data set, an architecture — and future sessions
-meet it during orientation, during search, and at the moment of a write, with a
-non-blocking advisory that replays exactly on retry. Conflict failures now name
-their exact repair, and large reads point to `--output` capture. Contract 5 and
-schema 5 are unchanged. See the [2.2.0 release notes](docs/releases/v2.2.0.md).
+**Attention** brings unfinished work, pending items, acceptance gaps and missing
+context into one project view. **Capture / link** saves knowledge, research or a
+result, then reviews its association with the mission or a stable requirement.
+The confirmed record stays available if linking is canceled or rejected.
+Bounded relevant context brings useful evidence and active dependencies into a
+continuation while naming omitted content and the full reads still needed.
+See [operator recipes](docs/operator-recipes.md) for these journeys and
+[intent and evidence](docs/intent-evidence.md) for interpreting recorded outcomes.
+
+The core remains a one-shot CLI with contract 5 and schema 5. Existing schema-5
+stores need no conversion; schema 4 requires an explicit verified upgrade. Product
+version alone does not establish a store's schema. See the
+[3.0 release notes](docs/releases/v3.0.0.md) and
+[Windows setup instructions](docs/installation.md#windows-loader-and-manager-per-user-installation).
+
+## One local authority
+
+Loader, Manager, CLI and native tools share the same guarded record operations
+and Windows-owned SQLite database. Reads inspect saved context and current source
+evidence; writes require the observed basis, preserve history and issue receipts.
 
 | Everyday problem | What Lodestar does |
 | --- | --- |
@@ -37,17 +59,9 @@ schema 5 are unchanged. See the [2.2.0 release notes](docs/releases/v2.2.0.md).
 | Project identity changes. | Keeps explicitly mapped member records usable while retaining their origin and history. |
 | An agent re-proposes something already settled. | The rejection register surfaces settled subjects in orientation and search, with an advisory at write time — never a refusal. |
 
-The 2.1.1 repairs also close a native read/write routing error, incomplete dependency
-reporting, clipped recovery bases, and JSON data-key handling defects. Version 2.1.2
-brings those changes into a public release with current documentation, artwork, and
-shared package-smoke checks in CI and release workflows. It also preserves typed
-busy recovery when contention occurs before a write transaction starts.
-
-**Version 2.1.4 fixes cached Codex plugin startup.** The plugin now installs the
-complete package, including the single shared runtime. Release checks run the
-declared plugin from an isolated cache and verify persisted mutations and rejected
-writes. The automatic-selection policy corrected in 2.1.3 remains enabled. See the
-[release notes](docs/releases/v2.1.4.md) for upgrade details.
+The [2.2.1 release notes](docs/releases/v2.2.1.md) describe the retained rejection
+advisories and bounded reads. The [2.1.4 release notes](docs/releases/v2.1.4.md)
+cover upgrading a separately cached Codex plugin to the complete package layout.
 
 There is no daemon, telemetry, background indexer, or startup write. Missing optional
 context does not stop work whose required inputs are otherwise available. A source
@@ -55,10 +69,19 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 
 ## Install
 
-Requires **Node.js 24.15.0 or newer**. For a new installation:
+The Windows package requires **Node.js 24.15.0 or newer**, **.NET 10
+Desktop Runtime (x64)** and **PowerShell 7**. Download `Lodestar-3.0.0-win-x64.zip`
+from the [3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0),
+verify its SHA-256 checksum, and extract the complete archive. Run `Install.cmd`,
+then open Loader or Manager from the Start Menu.
+`Install.ps1 -Mode Plan` shows the selection before installation.
+`Setup.cmd` configures portable use. See [installation](docs/installation.md) for
+runtime selection, upgrades and recovery.
+
+The CLI alone requires **Node.js 24.15.0 or newer**. For a new installation:
 
 ```text
-npm install --global lodestar-agent-context@2.2.1
+npm install --global lodestar-agent-context@3.0.0
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -89,55 +112,36 @@ lodestar find "release process" --scope project:example
 lodestar links project:example:commands
 ```
 
-Reads return the database instance, recovery epoch, accepted revision, and target
-revisions needed for a safe update. A short mutation request has one shape:
+For project triage, read Attention; for recorded requirements and evidence, check
+the selected intent. Replace the example ID with one from the project:
 
-```json
-{
-  "v": 5,
-  "request_id": "018f-example-unique-request",
-  "write_basis": {
-    "database_instance_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    "database_epoch": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-    "project_scope": "project:example",
-    "checkout": null,
-    "targets": [
-      { "kind": "record", "id": "project:example", "expected_revision": 4 },
-      { "kind": "record", "id": "project:example:commands", "expected_revision": null }
-    ]
-  },
-  "input": {
-    "mode": "create",
-    "record": {
-      "id": "project:example:commands",
-      "kind": "command",
-      "name": "Example commands",
-      "scope": "project:example",
-      "availability": "known",
-      "data": { "test": "npm test" },
-      "aliases": [],
-      "links": [],
-      "sources": [],
-      "semantics": {
-        "basis": "asserted",
-        "lifecycle": "current",
-        "context_role": "orientation",
-        "applicability": { "project": "project:example", "checkout": null }
-      }
-    }
-  }
-}
+```text
+lodestar work attention --cwd .
+lodestar work check --cwd . -- knowledge:example-intent
+lodestar work prepare-capture --help
+lodestar put --help
 ```
+
+Loader's Commands search and Manager's action finder use the same typed reference.
+Native agents can call `lodestar_describe` for the installed operation declarations.
+Follow the literal full-read arguments when a projection reports missing context.
+
+Before a write, read the target and inspect its current basis. Use the installed
+help for the operation's complete request and input schema, then preserve the
+reviewed request in a UTF-8 file:
 
 ```text
 lodestar put --file request.json
 ```
 
-Repeating the exact request replays its receipt without another effect. Reusing a
-request ID with changed input fails. A stale target, project binding, database
-instance, or recovery epoch changes nothing and returns a usable refreshed basis.
-`delete` retires a record from current orientation while preserving its content,
-associations, and history.
+Reads supply the database instance, recovery epoch and target revisions for a
+checked save. Repeating the exact request replays its receipt without another
+database effect. Reusing a request ID with changed input fails; a stale basis
+requires a fresh read and deliberate review.
+Loader and Manager preserve uncertain saves for recovery. A confirmed record
+stays available if its separate capture/link association fails. See
+[operator recipes](docs/operator-recipes.md) for guided capture and uncertain-save
+recovery. `delete` retires a record while preserving content and history.
 
 ## Commands
 
@@ -154,6 +158,8 @@ associations, and history.
 | `skills`, `agents` | Verify skill copies or inspect/print agent templates read-only. |
 | `init` | Explicitly create, migrate, or promote a recovered store. |
 | `setup` | Plan or explicitly install native skills, preserving replaced content and recovering interrupted installs. |
+| `recovery` | Inspect retained save journals or replay an exact guarded request deliberately. |
+| `manager` | Open the terminal menu against the selected project and store. |
 
 Ordinary `get`, `find`, and linked-peer reads compare local source evidence without
 rewriting the saved observation. Inspect claims marked `needs_reinspection` before
@@ -188,12 +194,15 @@ never open SQLite from WSL.
 
 ## Skills and package integrity
 
-The package retains seven complete skills: `director-protocol`, `codeplan`,
-`center-multigeometry`, `center-audit`, `ladder-audit`, `lodestar`, and `adderall`.
+The package retains six complete skills: `director-protocol`, `codeplan`,
+`center-audit`, `ladder-audit`, `lodestar`, and `adderall`.
 [`managed-assets/manifest.json`](managed-assets/manifest.json) names each maintained
 source, entrypoint, distribution owner, source identity, and every payload file's raw
 byte length and SHA-256. It is tied directly to contract 5; there is no second
 manifest protocol. Private Golden Rules content is not bundled.
+
+`center-multigeometry` is distributed independently by the canonical `center-geo`
+skill bundle. Lodestar does not install, verify, or receipt that external skill.
 
 `lodestar skills verify` is read-only. `lodestar setup` plans native installation;
 `--apply` performs it. Both share the package manifest and host discovery resolver.
@@ -217,10 +226,13 @@ For an existing schema-4 store, pause every writer and use a distinct backup pat
 $db = "$env:LOCALAPPDATA\Lodestar\lodestar.db"
 $backup = ".\lodestar-schema4.backup.db"
 lodestar doctor --migration-preflight --db $db | Set-Content .\preflight.json -Encoding utf8NoBOM
-node -e "const {DatabaseSync,backup}=require('node:sqlite');const source=new DatabaseSync(process.argv[1],{readOnly:true});backup(source,process.argv[2]).finally(()=>source.close())" $db $backup
-if ($LASTEXITCODE -ne 0) { throw "SQLite backup failed; do not migrate." }
+if ($LASTEXITCODE -ne 0) { throw "Source preflight failed; do not migrate." }
+lodestar migration-backup --db $db $backup
+if ($LASTEXITCODE -ne 0) { throw "Restore-tested backup failed; preserve any reported destination and do not migrate." }
 lodestar doctor --migration-preflight --db $backup | Set-Content .\backup-preflight.json -Encoding utf8NoBOM
-node -e "const f=require('fs'),c=require('crypto'),p=JSON.parse(f.readFileSync('preflight.json')).data,b=JSON.parse(f.readFileSync('backup-preflight.json')).data;f.writeFileSync('migration-request.json',JSON.stringify({v:5,request_id:c.randomUUID(),preflight:p,backup:{path:b.source.path,logical_digest:b.logical_digest,schema_fingerprint:b.schema_fingerprint}},null,2))"
+if ($LASTEXITCODE -ne 0) { throw "Backup preflight failed; do not migrate." }
+node -e "const f=require('fs'),c=require('crypto'),p=JSON.parse(f.readFileSync('preflight.json')).data,b=JSON.parse(f.readFileSync('backup-preflight.json')).data;if(p.logical_digest!==b.logical_digest||p.schema_fingerprint!==b.schema_fingerprint)throw Error('Backup does not match source preflight');f.writeFileSync('migration-request.json',JSON.stringify({v:5,request_id:c.randomUUID(),preflight:p,backup:{path:b.source.path,logical_digest:b.logical_digest,schema_fingerprint:b.schema_fingerprint}},null,2),{flag:'wx',flush:true})"
+if ($LASTEXITCODE -ne 0) { throw "Matching migration request was not created; do not migrate." }
 lodestar init --migrate --db $db --file .\migration-request.json
 lodestar doctor --db $db
 ```
@@ -229,6 +241,42 @@ The SQLite backup API includes committed WAL state; copying only the main databa
 file is insufficient while a WAL file exists. Migration rechecks the locked source against `preflight` and requires the
 restore-inspected backup digest to match. Keep the backup and request until the
 converted database and required reads have been verified.
+
+Request creation reserves `migration-request.json` exclusively and flushes its
+bytes before dispatch. If it already exists, preserve it and reconcile that exact
+request and receipt; do not overwrite it by rerunning the creation step. An
+interrupted write may leave an unaccepted partial file, which must be inspected
+before selecting a fresh request path.
+
+The helper and recipe stage a completed SQLite backup beside the destination, then
+reserve a fresh destination exclusively and copy through its open file handle using
+a 64 KiB buffer. Existing destinations, source aliases and competing creators cause
+refusal. Copy completion requires successful flushing and restore inspection; the
+helper compares the destination's schema and logical digest to its staged snapshot.
+The recipe then runs migration preflight on the completed backup. Hard links are
+not required. Failure or interruption can leave an incomplete, unaccepted new
+destination and a `.lodestar-backup-*` staging directory. Preserve those files for
+inspection, select a fresh path for another attempt, and use a backup only after
+successful completion and matching migration evidence. Cleanup never deletes the
+requested destination.
+
+Storage errors name the database and its storage directory. `database_storage_full`
+can mean insufficient free space or SQLite's page limit. Preserve the database,
+journals and exact request, resolve capacity, then reconcile the original request
+before retrying. `database_recovery_required` means SQLite needs recovery writes
+before ordinary read-only inspection can continue. Pause writers and preserve the
+database and adjacent journals together; arrange explicit SQLite recovery on
+writable local storage. Keep unknown writes unknown until their original request
+has been reconciled. Do not delete journals or reset the database to enable a read.
+
+Writers use DELETE journals and synchronous FULL. For Node 24.15.0's Windows SQLite
+VFS, the journal-delete method ignores the directory-sync flag that EXTRA adds;
+changing FULL to EXTRA supplies no additional directory flush through that VFS.
+The configuration remains DELETE/FULL. Recovery of an interrupted process is
+verified on disposable stores; retention of the final acknowledged commit after
+power loss depends on the filesystem, device and flush behavior and is not proved
+by that test. See the [SQLite synchronous contract](https://sqlite.org/pragma.html#pragma_synchronous)
+and [Node 24.15.0's SQLite Windows VFS](https://github.com/nodejs/node/blob/v24.15.0/deps/sqlite/sqlite3.c#L53633).
 
 A `content_owner` source using `local_file` or `package_manifest` must still match
 its exact locator, byte count, and SHA-256 immediately before write admission. If it
@@ -250,7 +298,7 @@ npm run pack:check
 npm run assets:build -- --source-root <Golden-Rules-root>
 ```
 
-`assets:build` requires the explicit Golden source root before it updates the five
+`assets:build` requires the explicit Golden source root before it updates the four
 Golden-owned generated package copies. `assets:check` verifies the packaged raw-byte
 manifest without needing a machine-specific source path; add the same `--source-root`
 argument when source-to-package verification is required.

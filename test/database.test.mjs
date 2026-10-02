@@ -276,7 +276,7 @@ test("definite init commit failure preserves a resumable reservation", async (t)
     await assert.rejects(
       initializeDatabase(file),
       ({ code, identifiers }) =>
-        code === "database_error"
+        code === "database_io_failed"
         && identifiers.database === file,
     );
   } finally {

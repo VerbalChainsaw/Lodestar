@@ -45,6 +45,34 @@ Source freshness is evidence, not age-based authority. Inspect and hash the same
 bytes, preserve prior observations, and mark an unstable or changed source for
 reinspection rather than claiming current verification.
 
+## Capture against the current intent
+
+`work prepare-capture --cwd <project-root> --file <draft.json>` is a read-only
+preparation operation. Its JSON help publishes `draft_schema` version1 separately
+from the mutation schema. A create draft names the intent, author and one knowledge,
+research or result record; a result records an observation and limits without
+inferring acceptance. Review the returned `data.input` and `data.write_basis`, then
+save through the existing contract-5 `put` request/journal. Allocate the record ID
+once and preserve it through recovery.
+
+After confirmed creation, freshly prepare an associate draft naming that record,
+the mission or stable requirement IDs, and any deliberate acceptance assessment.
+Acceptance defaults to unverified in Loader/Manager. Prepared associations preserve
+approved intent and unrelated results, and pin the current evidence version/hash.
+An unchanged association reports `review.noop:true` and needs no mutation.
+Cancel or failure after creation keeps the record: link its existing ID later.
+Unknown outcomes require exact-request reconciliation before another step;
+conflicts require fresh preparation and review. Preparation never returns a receipt.
+
+`work attention [<intent-id>] --cwd <project-root>` reads work, pending items,
+acceptance and context gaps coherently. Select an intent explicitly when several
+exist. Each section reports coverage and literal full reads. Local request recovery
+is a separate observation. These reads create no records or progress claims.
+Selectable intents use the existing intent validator and current/historical project
+scopes. Invalid records remain named issues with exact reads. When a full inventory
+supplies several argument arrays, execute each separately with the configured CLI
+and database before relying on the omitted intents.
+
 A current `content_owner` backed by a local file or package manifest is re-read before
 write admission and must match its exact locator, byte count, and SHA-256. A
 `source_root` locator includes `source_id`; retain the returned

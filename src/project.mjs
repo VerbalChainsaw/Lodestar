@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 
-import { lodestarError } from "./errors.mjs";
+import { errorResult, lodestarError } from "./errors.mjs";
 import { translateWindowsDialectPath } from "./paths.mjs";
 import { inspectLocalSource } from "./bootstrap.mjs";
 import { canonicalStringify, parseJsonText } from "./json.mjs";
@@ -24,8 +24,8 @@ export const hash = (value, length = 20) => createHash("sha256")
 
 const slash = (value) => String(value).replaceAll("\\", "/").replace(/\/+$/u, "");
 
-// Every dialect an agent can arrive in — Windows, MSYS, Cygwin, WSL, UNC — collapses to
-// one canonical drive form here so a project resolves to the same identity from any shell.
+// Drive mounts translate to a canonical drive form. Ordinary UNC paths retain
+// their server/share identity; filesystem resolution handles existing aliases.
 export function normalizeMachinePath(value) {
   let result = slash(translateWindowsDialectPath(String(value).trim(), {
     includeMsys: process.platform === "win32",
@@ -73,10 +73,27 @@ export function prepareProjectRoots(db, input) {
     }) };
 }
 
-// Windows paths compare case-insensitively; POSIX paths do not.
-const comparable = (value) => (/^[A-Z]:\//u.test(normalizeMachinePath(value))
-  ? normalizeMachinePath(value).toLowerCase()
-  : normalizeMachinePath(value));
+function comparable(value) {
+  const normalized = normalizeMachinePath(value);
+  if (/^[A-Z]:\//u.test(normalized) || (process.platform === "win32" && normalized.startsWith("//"))) {
+    try {
+      const resolved = normalizeMachinePath(realpathSync.native(path.resolve(normalized)));
+      const folded = resolved.toLowerCase();
+      // Preserve established case-folded identities only when the filesystem
+      // proves that Unicode folding still names this same physical path.
+      try {
+        if (normalizeMachinePath(realpathSync.native(path.resolve(folded))) === resolved) return folded;
+      } catch { /* An unavailable folded alias is not identity evidence. */ }
+      return resolved.replace(/[A-Z]/gu, (letter) => letter.toLowerCase());
+    }
+    catch {
+      // Do not invent Unicode equivalence for an unavailable path. Existing
+      // aliases use the filesystem's spelling; retain ASCII Windows comparison.
+      return normalized.replace(/[A-Z]/gu, (letter) => letter.toLowerCase());
+    }
+  }
+  return normalized;
+}
 export const sameMachinePath = (left, right) => comparable(left) === comparable(right);
 
 function projectRecords(db) {
@@ -108,6 +125,22 @@ function canonicalProject(db, id) {
   }
 }
 
+const canonicalScope = (id) => id.startsWith("project:") ? id : `project:${id}`;
+
+function assertCanonicalScopeUnique(db, id) {
+  const scope = canonicalScope(id);
+  for (const candidate of new Set([scope, scope.slice(8)])) {
+    if (candidate === id || !db.prepare("SELECT id FROM records WHERE id=? AND type='project'").get(candidate)) continue;
+    const peer = canonicalProject(db, candidate).record.id;
+    if (peer !== id && canonicalScope(peer) === scope) {
+      throw lodestarError("project_binding_conflict", "Distinct canonical projects resolve to the same scope.", {
+        identifiers: { projects: [id, peer], scope },
+        action: "Run lodestar get --raw -- <project-id> for both literal IDs. Preserve their bytes; explicitly bind an intended alias using canonical_project_id and the matching canonical-project link, with both observed target revisions. If they are separate projects, choose a distinct project ID and deliberately reconcile its references; do not rewrite history.",
+      });
+    }
+  }
+}
+
 export function resolveProjectScope(db, projectScope, checkout = null) {
   if (!projectScope || projectScope === "global") return null;
   const candidates = [projectScope, projectScope.startsWith("project:") ? projectScope.slice(8) : projectScope];
@@ -115,9 +148,24 @@ export function resolveProjectScope(db, projectScope, checkout = null) {
   if (!id) return { scope: projectScope, checkout_root: checkout,
     binding_preconditions: [{ target: { kind: "record", id: projectScope }, expected_revision: null }] };
   const resolved = canonicalProject(db, id);
+  assertCanonicalScopeUnique(db, resolved.record.id);
   return { id: resolved.record.id,
-    scope: resolved.record.id.startsWith("project:") ? resolved.record.id : `project:${resolved.record.id}`,
+    scope: canonicalScope(resolved.record.id),
     checkout_root: checkout, binding_preconditions: resolved.bindings };
+}
+
+function legacyIdentityErrors(db, physicalRoot, scope, kind) {
+  const previous = /^[A-Z]:\//u.test(physicalRoot) ? physicalRoot.toLowerCase() : physicalRoot;
+  const legacyScope = `project:${kind}:${hash(previous)}`;
+  if (legacyScope === scope || !db.prepare(
+    "SELECT id FROM records WHERE scope=? OR (scope='global' AND "
+      + "CASE WHEN json_valid(content_json) THEN json_extract(content_json,'$._lodestar.semantics.applicability.project') END=?) LIMIT 1",
+  ).get(legacyScope, legacyScope)) return [];
+  const readArgs = ["find", "--all", "--scope", legacyScope];
+  return [{ code: "project_identity_reinspection_required",
+    message: "Stored records use an earlier Unicode-folded checkout identity that differs from the filesystem-proven identity.",
+    identifiers: { current_scope: scope, legacy_scope: legacyScope, read_args: readArgs },
+    action: `Use the configured CLI with ${JSON.stringify(readArgs)}. Preserve those records; inspect their project applicability and deliberately reconcile the canonical project binding. Older scopes were not silently attached to a different directory.` }];
 }
 
 function storedProjectRoots(db) {
@@ -138,6 +186,7 @@ function storedProjectRoots(db) {
 
 export function validateProjectBindings(db, id, prepared = null) {
   const selected = canonicalProject(db, id);
+  assertCanonicalScopeUnique(db, selected.record.id);
   const projects = prepared ?? (() => {
     const current = projectRecords(db);
     return { record_errors: current.record_errors, peers: current.records.filter((peer) => peer.id !== id)
@@ -194,10 +243,27 @@ export function resolveProject(db, cwdValue = process.cwd()) {
   const git = spawnSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute",
     "--git-common-dir", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
   if (git.error || git.status === null) {
-    throw lodestarError("project_discovery_failed", "Git project discovery could not run.", {
-      identifiers: { cwd,
-        cause: typeof git.error?.message === "string" ? git.error.message.slice(0, 200) : null },
-      action: "Install Git so discovery can distinguish checkouts, or work in an explicitly mapped project root.",
+    // A failed spawn cannot establish checkout identity, even under a stored root.
+    // Expose bounded process identifiers without copying raw output or error text.
+    const causeCode = typeof git.error?.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(git.error.code)
+      ? git.error.code : null;
+    const signal = typeof git.signal === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(git.signal)
+      ? git.signal : null;
+    let message = "Git project discovery could not run.";
+    let action = "Inspect the process error code and Git execution environment, then retry this command.";
+    if (causeCode === "ENOENT") {
+      message = "Git is unavailable for project discovery.";
+      action = "Install Git or restore its executable on PATH, then retry this command.";
+    } else if (causeCode === "EPERM" || causeCode === "EACCES") {
+      message = "Git execution was blocked or denied during project discovery.";
+      action = "Retry from a host that permits Git process execution, or ask the host administrator to restore Git execution access.";
+    } else if (!git.error) {
+      message = signal ? "Git project discovery was interrupted." : "Git project discovery returned no completion status.";
+      action = "Retry this command. If discovery fails again, inspect the host's Git execution environment.";
+    }
+    throw lodestarError("project_discovery_failed", message, {
+      identifiers: { cwd, cause_code: causeCode, signal },
+      action: `${action} Direct record reads remain available with lodestar get <id>.`,
     });
   }
   const [commonLine, rootLine] = String(git.stdout ?? "").trim().split(/\r?\n/u);
@@ -206,7 +272,7 @@ export function resolveProject(db, cwdValue = process.cwd()) {
   const stored = storedProjectRoots(db);
   const projects = stored.roots
     .filter(({ match }) => comparable(cwd) === match
-      || comparable(cwd).startsWith(`${match}/`)
+      || comparable(cwd).startsWith(match.endsWith("/") ? match : `${match}/`)
       || (common && comparable(path.dirname(common)) === match))
     .sort((a, b) => b.match.length - a.match.length);
   if (projects.length) {
@@ -220,11 +286,19 @@ export function resolveProject(db, cwdValue = process.cwd()) {
         action: "Inspect the project mappings and correct the affected binding before writing.",
       });
     const best = candidates[0], canonical = best.canonical.record;
+    assertCanonicalScopeUnique(db, canonical.id);
+    const bindingErrors = [];
     const members = stored.records.filter((record) => {
       if (record.id === canonical.id) return true;
       if (!record.data.canonical_project_id) return false;
       try { return canonicalProject(db, record.id).record.id === canonical.id; }
-      catch { return false; } // Unrelated broken bindings are diagnosed on their own use.
+      catch (error) {
+        const issue = errorResult(error).envelope.error;
+        bindingErrors.push({ ...issue, identifiers: { ...issue.identifiers, id: record.id,
+          canonical_project_id: record.data.canonical_project_id, cause_id: issue.identifiers?.id ?? null },
+        action: `Read this project using the configured CLI argument array ${JSON.stringify(["get", "--raw", "--", record.id])}. Inspect canonical_project_id and canonical-project links; preserve the stored row and correct the mapping with observed target revisions.` });
+        return false;
+      }
     });
     const bindings = new Map(candidates.flatMap(({ canonical: resolved }) => resolved.bindings)
       .map((entry) => [entry.target.id, entry]));
@@ -233,13 +307,13 @@ export function resolveProject(db, cwdValue = process.cwd()) {
     }
     return {
       id: canonical.id, name: canonical.name, root: best.root,
-      scope: canonical.id.startsWith("project:") ? canonical.id : `project:${canonical.id}`,
+      scope: canonicalScope(canonical.id),
       cwd, checkout_root: rootLine ? checkout : best.root,
-      historical_scopes: members.map(({ id }) => id.startsWith("project:") ? id : `project:${id}`),
+      historical_scopes: members.map(({ id }) => canonicalScope(id)),
       binding_preconditions: [...bindings.values()],
       git_common_directory: common,
       identity_source: "stored_project_root",
-      record_errors: stored.record_errors,
+      record_errors: [...stored.record_errors, ...bindingErrors],
     };
   }
   // One spawn, not two: `start` runs every session and a second git costs ~45ms. A bare
@@ -259,7 +333,7 @@ export function resolveProject(db, cwdValue = process.cwd()) {
       binding_preconditions: [],
       identity_source: "git_common_directory",
       git_common_directory: common,
-      record_errors: stored.record_errors,
+      record_errors: [...stored.record_errors, ...legacyIdentityErrors(db, common, `project:git:${key}`, "git")],
     };
   }
   const key = hash(comparable(cwd));
@@ -273,7 +347,7 @@ export function resolveProject(db, cwdValue = process.cwd()) {
     historical_scopes: [`project:cwd:${key}`],
     binding_preconditions: [],
     identity_source: "canonical_cwd",
-    record_errors: stored.record_errors,
+    record_errors: [...stored.record_errors, ...legacyIdentityErrors(db, cwd, `project:cwd:${key}`, "cwd")],
   };
 }
 
@@ -348,6 +422,8 @@ export function catalogProjection(db, project, configuration) {
   const projects = projectRecords(db), records = projects.records;
   const id = records.find((record) => record.id === project.id || record.id === project.scope)?.id ?? project.scope;
   return { project, id, records, record_errors: projects.record_errors,
+    alias_owners: db.prepare("SELECT alias,record_id FROM aliases").all(),
+    record_ids: db.prepare("SELECT id FROM records").all().map(({ id }) => id),
     complete: projects.record_errors.length === 0,
     write_basis: writeBasis(db, { projectScope: project.scope,
     checkout: project.checkout_root, targets: [{ kind: "record", id },
@@ -373,7 +449,8 @@ export async function catalogReconciliation(snapshot, descriptors, { cache = new
       const document = parseJsonText(source.text, { resource: "project_catalog" });
       entries = Array.isArray(document) ? document : document.projects;
       if (!Array.isArray(entries) || entries.some((entry) => !entry || typeof entry.name !== "string"
-        || typeof entry.path !== "string" || (entry.aliases !== undefined && !Array.isArray(entry.aliases)))) {
+        || typeof entry.path !== "string" || (entry.aliases !== undefined && (!Array.isArray(entry.aliases)
+          || entry.aliases.some((alias) => typeof alias !== "string" || !alias.trim()))))) {
         throw new Error("Catalog projects require name, path, and optional aliases.");
       }
     } catch (error) {
@@ -388,7 +465,9 @@ export async function catalogReconciliation(snapshot, descriptors, { cache = new
     const sameCatalog = binding?.catalog_id === descriptor.id;
     const knownNames = new Set([prior?.name, ...(prior?.aliases ?? []), ...(binding?.previous_names ?? []),
       binding?.observed_entry?.name].filter(Boolean));
-    const pathMatches = entries.filter((entry) => comparable(physical(entry.path)) === comparable(snapshot.project.root));
+    const priorRoots = prior?.data.roots ?? (prior?.data.root ? [prior.data.root] : []);
+    const knownRoots = new Set([snapshot.project.root, ...priorRoots].map((value) => comparable(physical(value))));
+    const pathMatches = entries.filter((entry) => knownRoots.has(comparable(physical(entry.path))));
     let candidates = sameCatalog && binding.source_entry_id != null
       ? entries.filter((entry) => String(entry.id) === String(binding.source_entry_id)) : pathMatches;
     if (!candidates.length && sameCatalog) candidates = entries.filter((entry) =>
@@ -408,15 +487,47 @@ export async function catalogReconciliation(snapshot, descriptors, { cache = new
     }
     const owned = Object.fromEntries(descriptor.source_owned_fields.filter((field) => Object.hasOwn(entry, field))
       .map((field) => [field, entry[field]]));
-    if (sameCatalog && canonicalStringify(binding.observed_entry) === canonicalStringify(entry)
-      && canonicalStringify(prior.data.catalog_fields ?? {}) === canonicalStringify(owned)) {
-      results.push({ source: descriptor.id, status: "unchanged", project_id: snapshot.id, sha256: source.sha256 }); continue;
-    }
     const owns = (field) => descriptor.source_owned_fields.includes(field);
+    const aliasKey = (value) => value.trim().toLowerCase();
+    const aliasOwners = new Map((snapshot.alias_owners ?? snapshot.records.flatMap((record) =>
+      record.aliases.map((alias) => ({ alias, record_id: record.id })))).map(({ alias, record_id }) => [alias, record_id]));
+    const recordIds = new Set(snapshot.record_ids ?? snapshot.records.map(({ id }) => id));
+    const priorAliasKeys = new Set(prior?.aliases ?? []);
+    const formerCatalogAliases = new Set(sameCatalog ? binding.observed_entry?.aliases ?? [] : []);
+    const ambiguousAliases = [];
+    const catalogAliases = (entry.aliases ?? []).filter((alias) => {
+      const key = aliasKey(alias);
+      const shared = entries.filter((candidate) => (candidate.aliases ?? []).some((value) => aliasKey(value) === key));
+      if (shared.length < 2) return true;
+      ambiguousAliases.push({ alias, projects: shared.map(({ name }) => name), owner: aliasOwners.get(alias) ?? null });
+      // A shared catalog mention must not choose a new native owner by update order.
+      return priorAliasKeys.has(alias) && aliasOwners.get(alias) === snapshot.id;
+    });
+    const aliases = owns("aliases") ? [...new Set([...(prior?.aliases ?? []).filter((alias) =>
+      !formerCatalogAliases.has(alias)), ...catalogAliases])]
+      : prior?.aliases ?? [];
+    const aliasConflicts = aliases.flatMap((alias) => {
+      const owner = aliasOwners.get(alias);
+      return (owner && owner !== snapshot.id) || recordIds.has(alias)
+        ? [{ alias, owner: recordIds.has(alias) ? alias : owner }] : [];
+    });
+    if (aliasConflicts.length) {
+      results.push({ source: descriptor.id, status: "project_conflict", reason: "alias_ownership", conflicts: aliasConflicts }); continue;
+    }
+    const aliasEvidence = ambiguousAliases.length ? { ambiguous_aliases: ambiguousAliases } : {};
+    if (sameCatalog && canonicalStringify(binding.observed_entry) === canonicalStringify(entry)
+      && canonicalStringify(prior.data.catalog_fields ?? {}) === canonicalStringify(owned)
+      && binding.fingerprint === source.sha256) {
+      results.push({ source: descriptor.id, status: "unchanged", project_id: snapshot.id, sha256: source.sha256, ...aliasEvidence }); continue;
+    }
     const catalogFields = { ...(prior?.data.catalog_fields ?? {}) };
     for (const field of descriptor.source_owned_fields) delete catalogFields[field];
     Object.assign(catalogFields, owned);
-    const data = { ...(prior?.data ?? {}), ...(owns("path") ? { roots: [root] } : {}), catalog_fields: catalogFields,
+    // Only the former primary is catalog-owned; other roots are explicit local bindings.
+    const formerPrimary = sameCatalog && binding.observed_entry?.path ? comparable(physical(binding.observed_entry.path)) : null;
+    const roots = [...new Map([root, ...priorRoots.filter((value) => comparable(physical(value)) !== formerPrimary)]
+      .map((value) => [comparable(physical(value)), physical(value)])).values()];
+    const data = { ...(prior?.data ?? {}), ...(owns("path") ? { roots } : {}), catalog_fields: catalogFields,
       catalog_binding: { catalog_id: descriptor.id, source_entry_id: entry.id ?? null,
         binding_id: sameCatalog ? binding.binding_id : `binding:${hash(`${descriptor.id}:${snapshot.id}`, 64)}`,
         observed_entry: entry, fingerprint: source.sha256,
@@ -430,13 +541,12 @@ export async function catalogReconciliation(snapshot, descriptors, { cache = new
     const sources = [...(prior?.sources ?? []).filter(({ origin }) => origin !== observation.origin), observation];
     const semantics = { ...(prior?.semantics ?? { lifecycle: "current", basis: "asserted" }),
       context_role: "orientation", applicability: { project: snapshot.project.scope, checkout: null } };
-    const aliases = owns("aliases") ? [...new Set([...(prior?.aliases ?? []).filter((alias) =>
-      !(binding?.observed_entry?.aliases ?? []).includes(alias)), ...(entry.aliases ?? [])])] : prior?.aliases ?? [];
     const name = owns("name") ? entry.name : prior?.name ?? snapshot.project.name;
     const input = prior ? { mode: "update", id: prior.id, set: { name, aliases, data, sources, semantics }, remove: [] }
       : { mode: "create", record: { id: snapshot.id, kind: "project", name,
         scope: snapshot.project.scope, data, availability: "known", aliases, links: [], sources, semantics } };
     results.push({ source: descriptor.id, status: "reconciliation_available", project_id: snapshot.id,
+      ...aliasEvidence,
       observed_source: { path: source.path, sha256: source.sha256, observed_at: source.observed_at },
       write_basis: snapshot.write_basis, input,
       next: "Recheck the observed source before submitting this put input with a retained request ID." });
