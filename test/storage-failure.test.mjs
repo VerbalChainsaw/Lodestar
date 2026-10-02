@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -13,7 +13,7 @@ import { sqliteError } from "../src/database-schema.mjs";
 import { lodestarError } from "../src/errors.mjs";
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "lodestar-storage-failure-"));
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "lodestar-storage-failure-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, file: path.join(root, "state.db") };
 }

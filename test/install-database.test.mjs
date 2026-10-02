@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, open, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,7 +10,7 @@ import { migrationPreflight } from "../src/schema-migration.mjs";
 import { prepareInstallDatabase } from "../src/install-database.mjs";
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "lodestar-install-db-"));
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "lodestar-install-db-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, database: path.join(root, "café & selected store.db"),
     backupPath: path.join(root, "accepted backup.db"), migrationRequestPath: path.join(root, "migration.json") };

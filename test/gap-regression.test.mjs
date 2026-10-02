@@ -19,7 +19,7 @@
 //     with history. The only residue is that these two families declare no `--limit` while
 //     `work`/`pending` do. That is a feature asymmetry, not a correctness defect.
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -27,7 +27,7 @@ import test from "node:test";
 import { runCli } from "../src/cli.mjs";
 
 async function scratch(t, prefix) {
-  const root = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), prefix));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -77,12 +77,14 @@ test("an unreservable --output reports a typed input error, not an unknown write
   const root = await scratch(t, "lodestar-output-reserve-");
   const database = path.join(root, "lodestar.db");
   assert.equal((await cli(database, ["init"])).code, 0);
+  const before = await readFile(database);
 
   const unreservable = [
     path.join(root, "missing-parent", "out.json"),   // ENOENT
-    path.join(root, "bad<name>.json"),               // EINVAL
     path.join(root, `${"x".repeat(300)}.json`),      // ENAMETOOLONG
   ];
+  // Angle brackets are legal POSIX filename characters.
+  if (process.platform === "win32") unreservable.push(path.join(root, "bad<name>.json"));
 
   for (const target of unreservable) {
     const r = await cli(database, ["version", "--output", target]);
@@ -94,5 +96,15 @@ test("an unreservable --output reports a typed input error, not an unknown write
       "a pre-dispatch failure must not claim the write outcome is unknown");
     assert.match(String(r.value.error?.message ?? ""), /no write was dispatched/i,
       "the message must state that nothing was dispatched");
+    assert.deepEqual(await readFile(database), before);
+  }
+  if (process.platform !== "win32") {
+    const target = path.join(root, "bad<name>.json");
+    const result = await cli(database, ["version", "--output", target]);
+    assert.equal(result.code, 0);
+    assert.equal(result.value.ok, true);
+    assert.equal(result.value.data.output_file.path, target);
+    assert.equal(JSON.parse(await readFile(target, "utf8")).ok, true);
+    assert.deepEqual(await readFile(database), before);
   }
 });

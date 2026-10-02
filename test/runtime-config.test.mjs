@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -9,7 +9,7 @@ import { runCli } from '../src/cli.mjs';
 import { errorPayload } from '../src/errors.mjs';
 
 async function fixture(run) {
-  const parent = await mkdtemp(path.join(tmpdir(), 'runtime-config-'));
+  const parent = await mkdtemp(path.join(await realpath(tmpdir()), 'runtime-config-'));
   const root = path.join(parent, 'app');
   try {
     await mkdir(path.join(root, 'core'), { recursive: true });

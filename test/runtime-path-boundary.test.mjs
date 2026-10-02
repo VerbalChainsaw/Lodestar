@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, writeFile, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -8,7 +8,7 @@ import { loadInterfaceConfig, directInterfaceSelection } from '../src/interface-
 import { runCli } from '../src/cli.mjs';
 
 async function fixture(run) {
-  const root = await mkdtemp(path.join(tmpdir(), 'portable-db-boundary-'));
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), 'portable-db-boundary-'));
   const app = path.join(root, 'app');
   try {
     await mkdir(path.join(app, 'core'), { recursive: true });
@@ -35,7 +35,6 @@ async function fixture(run) {
 for (const [name, select] of [
   ['inside app', ({ app }) => path.join(app, 'store.db')],
   ['normalized relative inside app', () => 'core/../store.db'],
-  ['case variant inside app', ({ app }) => path.join(app.toUpperCase(), 'store.db')],
   ['owned staging directory', ({ app }) => `${app}.lodestar-stage/store.db`],
   ['owned previous generation', ({ app }) => `${app}.lodestar-previous/store.db`],
 ]) test(`portable runtime rejects database ${name} before public dispatch`, () => fixture(async context => {
@@ -53,6 +52,35 @@ for (const [name, select] of [
   const presented = JSON.parse(stderr).error;
   assert.equal(presented.code, 'interface_config_invalid'); assert.equal(presented.identifiers.pointer, '/runtime/database');
   assert.deepEqual(await readFile(context.file), config); assert.deepEqual(await readFile(resolved), store);
+}));
+
+test('portable runtime handles a case variant according to physical app identity', () => fixture(async context => {
+  // Change only our basename, never system ancestors such as /tmp or /var.
+  const variant = path.join(context.root, path.basename(context.app).toUpperCase(), 'store.db');
+  const { resolved, config, store } = await context.bind(variant);
+  const appIdentity = await stat(context.app);
+  const selectedParentIdentity = await stat(path.dirname(resolved));
+  const aliasesApp = process.platform === 'win32'
+    || (selectedParentIdentity.dev === appIdentity.dev && selectedParentIdentity.ino === appIdentity.ino);
+  if (aliasesApp) {
+    await assert.rejects(loadInterfaceConfig(context.file), error => {
+      assert.equal(error.code, 'interface_config_invalid');
+      assert.equal(error.identifiers.path, context.file);
+      assert.equal(error.identifiers.pointer, '/runtime/database');
+      assert.match(error.action, /outside.*app.*staging.*previous/i); return true;
+    });
+    let stdout = '', stderr = '';
+    const code = await runCli(['manager', '--interface-config', context.file], { stdin: { isTTY: true },
+      stdout: { isTTY: true, write(chunk) { stdout += chunk; } }, stderr: { write(chunk) { stderr += chunk; } } });
+    assert.notEqual(code, 0); assert.equal(stdout, '');
+    const presented = JSON.parse(stderr).error;
+    assert.equal(presented.code, 'interface_config_invalid');
+    assert.equal(presented.identifiers.pointer, '/runtime/database');
+  } else {
+    assert.equal((await loadInterfaceConfig(context.file)).database, resolved);
+  }
+  assert.deepEqual(await readFile(context.file), config);
+  assert.deepEqual(await readFile(resolved), store);
 }));
 
 for (const suffix of ['-external', '.lodestar-stage-external', '.lodestar-previous-external'])
