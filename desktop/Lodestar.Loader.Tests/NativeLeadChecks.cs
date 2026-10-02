@@ -4,8 +4,29 @@ using Lodestar.Loader;
 
 public static class NativeLeadChecks
 {
+    private static void VerifyDescendantAcknowledgement(int acknowledgedPid, string? acknowledgedNonce,
+        int expectedPid, string nonce, bool candidateExited)
+    {
+        if (candidateExited || acknowledgedPid != expectedPid || acknowledgedNonce != nonce)
+            throw new Exception("Fixture descendant did not acknowledge the fresh challenge through its live observed handle.");
+    }
+
+    private static void DescendantOwnershipControls()
+    {
+        VerifyDescendantAcknowledgement(42, "fresh", 42, "fresh", false);
+        foreach (var (pid, nonce, exited) in new[] { (43, "fresh", false), (42, "stale", false), (42, "fresh", true) })
+        {
+            var rejected = false;
+            try { VerifyDescendantAcknowledgement(pid, nonce, 42, "fresh", exited); }
+            catch (Exception) { rejected = true; }
+            if (!rejected) throw new Exception("Fixture ownership accepted a wrong PID, stale challenge, or exited handle.");
+        }
+        Console.WriteLine("Fixture ownership controls: fresh live acknowledgement accepted; wrong PID, stale nonce and exited candidate rejected.");
+    }
+
     public static async Task PipeDeadlineAsync()
     {
+        DescendantOwnershipControls();
         foreach (var mutation in new[] { false, true })
         foreach (var outcome in new[] { "complete", "timeout", "cancelled", "output_overflow", "closing" })
         {
@@ -16,21 +37,28 @@ public static class NativeLeadChecks
             var marker = Path.Combine(root, "owned-pids.json");
             var spawnError = Path.Combine(root, "spawn-error.json");
             var ready = Path.Combine(root, "ready");
+            var challenge = Path.Combine(root, "ownership-challenge.json");
+            var acknowledgement = Path.Combine(root, "ownership-acknowledgement.json");
             var cli = Path.Combine(root, "finite-cli.mjs");
             var database = Path.Combine(root, "unused.db");
             File.WriteAllText(database, "Synthetic transport file; no database is opened.");
             var operation = mutation ? "put" : "get";
             var stdio = inheritedPipes ? "['ignore','inherit','inherit']" : "'ignore'";
-            var childSource = "process.stdout.on('error',()=>{});process.stderr.on('error',()=>{});process.stderr.write(Buffer.from([0xc3]));require(\"node:fs\").writeFileSync(process.argv[1],\"ready\");" +
+            var childSource = "const fs=require('node:fs');process.stdout.on('error',()=>{});process.stderr.on('error',()=>{});process.stderr.write(Buffer.from([0xc3]));fs.writeFileSync(process.argv[1],\"ready\");" +
                 (outcome == "output_overflow" ? "setTimeout(()=>process.stdout.write('x'.repeat(17*1024*1024)),250);" : "") +
-                "setTimeout(()=>{},5000);";
+                "const ownership=setInterval(()=>{if(!fs.existsSync(" + JsonSerializer.Serialize(challenge) + "))return;" +
+                "const request=JSON.parse(fs.readFileSync(" + JsonSerializer.Serialize(challenge) + ",'utf8'));" +
+                "fs.writeFileSync(" + JsonSerializer.Serialize(acknowledgement + ".tmp") +
+                ",JSON.stringify({pid:process.pid,nonce:request.nonce}));fs.renameSync(" +
+                JsonSerializer.Serialize(acknowledgement + ".tmp") + "," + JsonSerializer.Serialize(acknowledgement) +
+                ");clearInterval(ownership);},5);setTimeout(()=>clearInterval(ownership),5000);";
             var source = "import {spawn} from 'node:child_process';import {existsSync,writeFileSync,renameSync} from 'node:fs';" +
                 "const child=spawn(process.execPath,['-e'," + JsonSerializer.Serialize(childSource) + "," +
                 JsonSerializer.Serialize(ready) + "],{detached:true,windowsHide:true,stdio:" + stdio + "});" +
                 "child.on('error',error=>{writeFileSync(" + JsonSerializer.Serialize(spawnError) +
                 ",JSON.stringify({code:error.code,name:error.name,message:error.message}));process.exit(1);});" +
                 "writeFileSync(" + JsonSerializer.Serialize(marker + ".tmp") +
-                ",JSON.stringify({parent:process.pid,descendant:child.pid??null,spawnedAt:Date.now()}));renameSync(" +
+                ",JSON.stringify({parent:process.pid,descendant:child.pid??null}));renameSync(" +
                 JsonSerializer.Serialize(marker + ".tmp") + "," + JsonSerializer.Serialize(marker) + ");" +
                 "const wait=setInterval(()=>{if(!existsSync(" + JsonSerializer.Serialize(ready) + "))return;clearInterval(wait);" +
                 "console.log(JSON.stringify({v:5,ok:true,operation:'" + operation + "',revision:null,database_instance_id:null,database_epoch:null,more:false,next:[],data:{fixture:true}}));process.exit(0);},5);";
@@ -54,7 +82,7 @@ public static class NativeLeadChecks
                 TimeSpan.FromMilliseconds(outcome == "timeout" ? 800 : 5000), mutation), cancellation.Token);
             Task? disposing = null;
             Exception? primaryFailure = null;
-            void ReadOwners()
+            async Task ReadOwnersAsync()
             {
                 if (!File.Exists(marker)) return;
                 using var pids = JsonDocument.Parse(File.ReadAllText(marker));
@@ -72,10 +100,23 @@ public static class NativeLeadChecks
                 try
                 {
                     _ = candidate.SafeHandle;
-                    var started = candidate.StartTime.ToUniversalTime();
-                    var published = DateTimeOffset.FromUnixTimeMilliseconds(identity.GetProperty("spawnedAt").GetInt64()).UtcDateTime;
-                    if (started < parentHandle.StartTime.ToUniversalTime() || started > published.AddMilliseconds(1))
-                        throw new Exception("Fixture descendant PID was reused outside its recorded spawn interval.");
+                    if (candidate.HasExited) return;
+                    // Publish a fresh challenge only after opening the candidate's OS
+                    // handle. A stale marker for a reused PID cannot acknowledge it.
+                    var nonce = Guid.NewGuid().ToString("N");
+                    File.WriteAllText(challenge + ".tmp", JsonSerializer.Serialize(new { nonce }));
+                    File.Move(challenge + ".tmp", challenge, true);
+                    var witnessWait = Stopwatch.StartNew();
+                    while (!File.Exists(acknowledgement))
+                    {
+                        if (candidate.HasExited) return;
+                        if (witnessWait.Elapsed > TimeSpan.FromSeconds(1))
+                            throw new Exception("Fixture descendant did not publish its ownership acknowledgement within one second.");
+                        await Task.Delay(5);
+                    }
+                    using var proof = JsonDocument.Parse(File.ReadAllText(acknowledgement));
+                    VerifyDescendantAcknowledgement(proof.RootElement.GetProperty("pid").GetInt32(),
+                        proof.RootElement.GetProperty("nonce").GetString(), descendant, nonce, candidate.HasExited);
                     descendantHandle = candidate;
                 }
                 finally { if (descendantHandle != candidate) candidate.Dispose(); }
@@ -86,7 +127,7 @@ public static class NativeLeadChecks
                 // The actual operation deadline still includes process startup.
                 while (!File.Exists(ready))
                 {
-                    ReadOwners();
+                    await ReadOwnersAsync();
                     if (pending.IsCompleted && !File.Exists(ready))
                     {
                         var incomplete = await pending;
@@ -95,7 +136,7 @@ public static class NativeLeadChecks
                     }
                     await Task.WhenAny(pending, Task.Delay(10));
                 }
-                ReadOwners();
+                await ReadOwnersAsync();
                 if (descendantHandle is null) throw new Exception("Ready fixture has no observed owned descendant handle.");
                 if (outcome is "cancelled" or "closing")
                 {
@@ -140,7 +181,7 @@ public static class NativeLeadChecks
                     cancellation.Cancel();
                     await transport.DisposeAsync();
                     var settled = await pending;
-                    ReadOwners();
+                    await ReadOwnersAsync();
                     if (parentHandle?.HasExited == false)
                         throw new Exception("Owned fixture parent survived transport disposal.");
                     if (descendantHandle is { HasExited: false })
