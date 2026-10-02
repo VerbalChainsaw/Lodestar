@@ -36,9 +36,11 @@ export async function fixture(t) {
     finally { db.close(); }
   }
   async function create(id, kind, data, scope = "global", semantics = undefined) {
+    const applicableScope = semantics?.applicability && Object.hasOwn(semantics.applicability, "project")
+      ? semantics.applicability.project : scope;
     const body = await request({ mode: "create", record: { id, kind, name: id, scope,
       availability: "known", data, aliases: [], links: [], sources: [],
-      ...(semantics ? { semantics: { basis: "asserted", applicability: { project: scope, checkout: null }, ...semantics } } : {}) } }, [{ kind: "record", id }], scope === "global" ? null : scope);
+      ...(semantics ? { semantics: { basis: "asserted", applicability: { project: scope, checkout: null }, ...semantics } } : {}) } }, [{ kind: "record", id }], applicableScope === "global" ? null : applicableScope);
     const result = await cli(["put"], body);
     assert.equal(result.code, 0, JSON.stringify(result.value));
     return result;

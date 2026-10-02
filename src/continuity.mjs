@@ -19,14 +19,18 @@ export function validateHandoff(checkpoint) {
   }
   return { valid: true, checkpoint };
 }
-export function handoffStatus(db, project, identity = {}, { history = false } = {}) {
+export function handoffStatus(db, project, identity = {}, { history = false, limit = null, offset = 0 } = {}) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
-  const result = normalizedRowsResult(db, "SELECT id FROM records WHERE scope IN ("
+  const where = "scope IN ("
     + scopes.map(() => "?").join(",") + ") AND "
-    + (history ? "(type='handoff' OR type LIKE 'handoff-%') " : "type='handoff' AND json_extract(content_json,'$.value.state') IN ('open','claimed') ")
-    + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
+    + (history ? "(type='handoff' OR type LIKE 'handoff-%') " : "type='handoff' AND json_extract(content_json,'$.value.state') IN ('open','claimed') ");
+  const total = limit === null ? null : db.prepare("SELECT COUNT(*) AS total FROM records WHERE " + where).get(...scopes).total;
+  const result = normalizedRowsResult(db, "SELECT id FROM records WHERE " + where
+    + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id"
+    + (limit === null ? "" : " LIMIT ? OFFSET ?"), ...scopes, ...(limit === null ? [] : [limit, offset]));
+  const more = total !== null && total - offset > limit;
   return { advisory: true, records: result.records, record_errors: result.record_errors,
-    complete: result.record_errors.length === 0,
+    complete: result.record_errors.length === 0 && !more, more,
     notice: "Reading does not claim a transfer. Use an explicit claim with its observed revision.",
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
       targets: [...result.records.filter(({ kind }) => kind === "handoff").map(({ id }) => target(id)),

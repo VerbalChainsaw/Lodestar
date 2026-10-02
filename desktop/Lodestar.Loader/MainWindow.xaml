@@ -1,0 +1,277 @@
+<Window x:Class="Lodestar.Loader.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Lodestar Loader" Icon="Assets/Lodestar.ico"
+        Width="1440" Height="900" MinWidth="900" MinHeight="600" WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI" FontSize="12" Background="{DynamicResource Warm}" Foreground="{DynamicResource Ink}"
+        Loaded="OnLoaded" Closing="OnClosing" PreviewKeyDown="OnPreviewKeyDown" SizeChanged="OnSizeChanged">
+  <Window.Resources>
+    <HierarchicalDataTemplate x:Key="ReadoutNodeTemplate" ItemsSource="{Binding Children}">
+      <Grid ToolTip="{Binding Path}" Margin="0,3,4,5">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+        <TextBlock Grid.Column="1" Text="{Binding Type}" Foreground="{DynamicResource Teal}" Margin="8,0,0,0" FontSize="10"/>
+        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Value}" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"/>
+      </Grid>
+    </HierarchicalDataTemplate>
+  </Window.Resources>
+  <Grid x:Name="ClientRoot" Background="{DynamicResource Warm}">
+    <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/><RowDefinition Height="24"/></Grid.RowDefinitions>
+    <Border Grid.Row="0" Background="{DynamicResource InkSoft}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+      <Grid Margin="10,4"><Grid.ColumnDefinitions><ColumnDefinition Width="185"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="LODESTAR" Foreground="{DynamicResource Teal}" FontWeight="Bold" Margin="0,0,8,0"/>
+          <TextBlock Text="Loader" FontWeight="SemiBold"/></StackPanel>
+        <TextBlock Grid.Column="1" Text="Recorded knowledge / local operator console" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="OpenInspectorButton" Content="Inspector" Click="OpenInspectorClicked" Visibility="Collapsed" AutomationProperties.AutomationId="OpenInspector"/>
+          <Button x:Name="RefreshCapabilitiesTopButton" Content="Read capabilities" Click="RefreshCapabilitiesClicked" Visibility="Collapsed" AutomationProperties.AutomationId="RefreshCapabilitiesTop"/>
+          <Button x:Name="SelectRuntimeTopButton" Content="Select runtime" Click="SelectRuntimeClicked" Visibility="Collapsed" AutomationProperties.AutomationId="SelectRuntimeTop"/>
+          <Button x:Name="ContinueButton" Content="Continue loading" Click="ContinueClicked" Visibility="Collapsed" AutomationProperties.AutomationId="ContinueLibrary" AutomationProperties.Name="Continue loading library records"/>
+          <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshClicked" AutomationProperties.AutomationId="RefreshLibrary"/>
+          <Button x:Name="ManagerButton" Content="Open Manager" Click="ManagerClicked" AutomationProperties.AutomationId="OpenManager"/>
+          <Button x:Name="ConnectionButton" Content="Connection" Click="ConnectionClicked" AutomationProperties.AutomationId="Connection"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition x:Name="NavColumn" Width="190" MinWidth="160" MaxWidth="280"/>
+        <ColumnDefinition Width="5"/>
+        <ColumnDefinition x:Name="MainColumn" Width="*"/>
+        <ColumnDefinition x:Name="DetailSplitterColumn" Width="0"/>
+        <ColumnDefinition x:Name="DetailColumn" Width="0" MinWidth="0" MaxWidth="600"/>
+      </Grid.ColumnDefinitions>
+      <Border Grid.Column="0" Background="{DynamicResource InkSoft}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
+        <Grid Margin="8,9"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <StackPanel>
+            <Button x:Name="HealthButton" Content="Health" Style="{StaticResource NavigationButton}" Click="HealthClicked" AutomationProperties.AutomationId="HealthNavigation"/>
+            <Button x:Name="ProjectsButton" Content="Projects" Style="{StaticResource NavigationButton}" Click="ProjectsClicked" AutomationProperties.AutomationId="ProjectsNavigation"/>
+            <Button x:Name="RecordsButton" Content="Project records" Style="{StaticResource NavigationButton}" Click="RecordsClicked" AutomationProperties.AutomationId="RecordsNavigation" ToolTip="Select a project to browse and edit its records"/>
+            <Button x:Name="SearchAllButton" Content="Search all records" Style="{StaticResource NavigationButton}" Click="SearchAllClicked" AutomationProperties.AutomationId="SearchAllNavigation"/>
+            <Button x:Name="GlobalButton" Content="Global knowledge" Style="{StaticResource NavigationButton}" Click="GlobalClicked" AutomationProperties.AutomationId="GlobalNavigation"/>
+            <Button x:Name="CommandsButton" Content="Commands / questions" Style="{StaticResource NavigationButton}" Click="CommandsClicked" AutomationProperties.AutomationId="CommandsNavigation"/>
+            <Button x:Name="RecoveryButton" Content="Pending saves" Style="{StaticResource NavigationButton}" Click="RecoveryClicked" AutomationProperties.AutomationId="RecoveryNavigation"/>
+          </StackPanel>
+          <TextBlock Grid.Row="1" x:Name="LibraryCaption" Text="PROJECTS" Foreground="{DynamicResource Muted}" FontWeight="SemiBold" Margin="5,12,0,4" TextTrimming="CharacterEllipsis"/>
+          <Grid Grid.Row="2"><TextBox x:Name="SearchBox" TextChanged="SearchChanged" AutomationProperties.AutomationId="LibrarySearch"
+                   AutomationProperties.Name="Find loaded projects and records" ToolTip="Filter loaded projects and records. Ctrl+F focuses this field."/>
+            <TextBlock x:Name="SearchPlaceholder" Text="Find project / record" Foreground="{DynamicResource Muted}" IsHitTestVisible="False" VerticalAlignment="Center" Margin="8,0,0,0"/>
+          </Grid>
+          <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,6,0,5">
+            <CheckBox x:Name="HistoryToggle" Content="Historical" VerticalAlignment="Center" Checked="HistoryToggled" Unchecked="HistoryToggled" AutomationProperties.AutomationId="HistoricalProjects" AutomationProperties.Name="Include historical projects"/>
+            <ComboBox x:Name="ProjectSort" Width="76" Margin="8,0,0,0" SelectionChanged="SortChanged" AutomationProperties.AutomationId="ProjectSort" AutomationProperties.Name="Project sort"><ComboBoxItem Content="Name"/><ComboBoxItem Content="Newest"/><ComboBoxItem Content="Status"/><ComboBoxItem Content="Count"/></ComboBox>
+          </StackPanel>
+          <ListBox x:Name="ProjectList" Grid.Row="4" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarListItem}"
+                   SelectionChanged="ProjectSelected" MouseDoubleClick="ProjectDoubleClicked"
+                   AutomationProperties.AutomationId="ProjectList" AutomationProperties.Name="Loaded project finder">
+            <ListBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding Secondary}" Foreground="{DynamicResource Muted}" FontSize="10" TextTrimming="CharacterEllipsis"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Grid.Row="5" x:Name="LibraryFoot" Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="4,6"/>
+        </Grid>
+      </Border>
+      <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="{DynamicResource Line}" ResizeBehavior="PreviousAndNext"
+                    ResizeDirection="Columns" AutomationProperties.AutomationId="NavigationSplitter" AutomationProperties.Name="Resize project navigation"/>
+      <Grid Grid.Column="2" x:Name="MainPane" Margin="11,10">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <StackPanel>
+          <TextBlock x:Name="Eyebrow" Text="LODESTAR" Foreground="{DynamicResource Muted}" FontSize="10" FontWeight="SemiBold" Visibility="Collapsed"/>
+          <DockPanel>
+            <Button x:Name="NewActionButton" DockPanel.Dock="Right" Content="Actions…" Click="NewActionClicked" AutomationProperties.AutomationId="NewAction" ToolTip="Create a project or record, record a decision, or retire a pending item"/>
+            <Button x:Name="FirstProjectButton" DockPanel.Dock="Right" Content="Create first project" Click="FirstProjectClicked" Visibility="Collapsed" AutomationProperties.AutomationId="CreateFirstProject"/>
+            <Button x:Name="AllProjectsButton" DockPanel.Dock="Right" Content="All projects" Click="ProjectsClicked" Visibility="Collapsed" AutomationProperties.AutomationId="AllProjects" ToolTip="Return to the project library"/>
+            <TextBlock x:Name="PageTitle" Text="Health" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+          </DockPanel>
+          <TextBlock x:Name="PageSubtitle" Text="Observed Lodestar state." Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+          <TextBlock x:Name="CoverageText" Foreground="{DynamicResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+        <WrapPanel Grid.Row="1" Margin="0,7,0,8">
+          <TextBlock x:Name="MetricOne" Margin="0,0,14,0" VerticalAlignment="Center"/>
+          <TextBlock x:Name="MetricTwo" Margin="0,0,14,0" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+          <TextBlock x:Name="MetricThree" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+        </WrapPanel>
+        <Grid Grid.Row="2">
+          <Grid x:Name="HealthPanel">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition x:Name="HealthIssuesRow" Height="36"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <DockPanel Margin="0,0,0,7"><Button x:Name="DoctorButton" DockPanel.Dock="Right" Content="Run health check" Click="DoctorClicked" AutomationProperties.AutomationId="RunHealthCheck" AutomationProperties.Name="Run Lodestar doctor health check"/>
+              <StackPanel VerticalAlignment="Center"><TextBlock x:Name="HealthHeadline" Text="Lodestar not checked" FontWeight="SemiBold"/>
+                <TextBlock x:Name="HealthSourceText" Foreground="{DynamicResource Muted}" FontSize="10" TextTrimming="CharacterEllipsis"/></StackPanel></DockPanel>
+            <DataGrid x:Name="HealthObservations" Grid.Row="1" AutoGenerateColumns="False" AutomationProperties.AutomationId="HealthObservations" AutomationProperties.Name="Observed Lodestar checks">
+              <DataGrid.Columns><DataGridTextColumn Header="CHECK" Binding="{Binding Label}" Width="180"/>
+                <DataGridTextColumn Header="OBSERVATION" Binding="{Binding Value}" Width="2*"/>
+                <DataGridTextColumn Header="STATE" Binding="{Binding State}" Width="105"/>
+                <DataGridTextColumn Header="SOURCE / TIME" Binding="{Binding Detail}" Width="2*"/></DataGrid.Columns>
+            </DataGrid>
+            <TextBlock Grid.Row="2" Text="Issues and actions" FontWeight="SemiBold" Margin="0,9,0,4"/>
+            <Grid Grid.Row="3"><ListBox x:Name="HealthIssues" AutomationProperties.AutomationId="HealthIssues" AutomationProperties.Name="Lodestar issues and fixed actions">
+                <ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding Message}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                  <Button Grid.Column="1" Content="{Binding ActionLabel}" Tag="{Binding ActionKey}" Click="HealthIssueClicked" AutomationProperties.Name="{Binding ActionLabel}" AutomationProperties.AutomationId="{Binding ActionId}"/>
+                </Grid></DataTemplate></ListBox.ItemTemplate>
+              </ListBox>
+              <TextBlock x:Name="HealthIssuesEmpty" Text="No issues in observed results. Run health check to include store integrity."
+                         Foreground="{DynamicResource Muted}" Margin="9" IsHitTestVisible="False" Visibility="Collapsed"/>
+            </Grid>
+            <TextBlock Grid.Row="4" Text="Recent recorded activity" FontWeight="SemiBold" Margin="0,9,0,4"/>
+            <DataGrid x:Name="HealthActivity" Grid.Row="5" AutoGenerateColumns="False" SelectionChanged="RecordSelected"
+                      AutomationProperties.AutomationId="HealthActivity" AutomationProperties.Name="Recently updated loaded records">
+              <DataGrid.Columns><DataGridTextColumn Header="RECORD" Binding="{Binding Name}" Width="2*"/>
+                <DataGridTextColumn Header="KIND" Binding="{Binding Kind}" Width="110"/>
+                <DataGridTextColumn Header="SAVED UPDATE" Binding="{Binding Update}" SortMemberPath="UpdatedAt" Width="140"/>
+                <DataGridTextColumn Header="SCOPE" Binding="{Binding Scope}" Width="2*"/></DataGrid.Columns>
+            </DataGrid>
+          </Grid>
+          <TabControl x:Name="MainTabs" Visibility="Collapsed" SelectionChanged="TabChanged" AutomationProperties.AutomationId="MainTabs">
+            <TabItem Header="Overview"><Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <TextBlock x:Name="OverviewText" TextWrapping="Wrap" Margin="3,3,3,8"/>
+              <DataGrid x:Name="OverviewList" Grid.Row="1" AutoGenerateColumns="False" SelectionChanged="RecordSelected" MouseDoubleClick="RecordDoubleClicked" AutomationProperties.AutomationId="OverviewRecords">
+                <DataGrid.Columns><DataGridTextColumn Header="RECORD" Binding="{Binding Name}" Width="2*"/><DataGridTextColumn Header="KIND" Binding="{Binding Kind}" Width="110"/>
+                  <DataGridTextColumn Header="STATE" Binding="{Binding State}" Width="130"/><DataGridTextColumn Header="SAVED UPDATE" Binding="{Binding Update}" SortMemberPath="UpdatedAt" Width="145"/></DataGrid.Columns>
+              </DataGrid>
+              <Grid x:Name="DashboardPanel" Grid.Row="1"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="Group" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                  <ComboBox x:Name="ProjectGroup" Width="115" SelectionChanged="ProjectGroupChanged" AutomationProperties.AutomationId="ProjectGroup" AutomationProperties.Name="Group projects">
+                    <ComboBoxItem Content="None"/><ComboBoxItem Content="Status"/><ComboBoxItem Content="Lifecycle"/></ComboBox>
+                  <Button Content="Reset" Click="ResetProjectViewClicked" AutomationProperties.AutomationId="ResetProjectView"/></StackPanel>
+                <DataGrid x:Name="DashboardList" Grid.Row="1" AutoGenerateColumns="False" SelectionChanged="DashboardSelected" Sorting="ProjectGridSorting"
+                          AutomationProperties.AutomationId="ProjectDashboard" AutomationProperties.Name="Loaded projects by recorded status update and count">
+                  <DataGrid.Columns><DataGridTextColumn Header="PROJECT" Binding="{Binding Name}" SortMemberPath="Name" Width="2*"/>
+                    <DataGridTextColumn Header="RECORDED STATUS" Binding="{Binding Status}" SortMemberPath="Status" Width="140"/>
+                    <DataGridTextColumn Header="SAVED UPDATE" Binding="{Binding Update}" SortMemberPath="UpdatedAt" Width="150"/>
+                    <DataGridTextColumn Header="RECORDS" Binding="{Binding Count}" SortMemberPath="CountValue" Width="85"/></DataGrid.Columns>
+                </DataGrid>
+              </Grid></Grid></TabItem>
+            <TabItem Header="Records"><Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <WrapPanel Margin="0,0,0,6">
+                <TextBox x:Name="AllRecordSearch" Width="200" Visibility="Collapsed" TextChanged="AllRecordSearchChanged" Margin="0,0,8,4" AutomationProperties.AutomationId="AllRecordSearch" AutomationProperties.Name="Search across loaded records" ToolTip="Search names, IDs and stored content across every loaded project and global record"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4"><TextBlock Text="Kind" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="KindFilter" Width="112" SelectionChanged="KindChanged" AutomationProperties.AutomationId="KindFilter" AutomationProperties.Name="Record kind filter"/></StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="9,0,0,4"><TextBlock Text="Availability" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="AvailabilityFilter" Width="112" SelectionChanged="KindChanged" AutomationProperties.AutomationId="AvailabilityFilter" AutomationProperties.Name="Availability filter"/></StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="9,0,0,4"><TextBlock Text="Lifecycle" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="LifecycleFilter" Width="106" SelectionChanged="KindChanged" AutomationProperties.AutomationId="LifecycleFilter" AutomationProperties.Name="Lifecycle filter"/></StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="9,0,0,4"><TextBlock Text="Sort" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="RecordSort" Width="90" SelectionChanged="RecordViewChanged" AutomationProperties.AutomationId="RecordSort" AutomationProperties.Name="Record sort">
+                    <ComboBoxItem Content="Newest"/><ComboBoxItem Content="Name"/><ComboBoxItem Content="Kind"/></ComboBox></StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="9,0,0,4"><TextBlock Text="Group" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                  <ComboBox x:Name="RecordGroup" Width="100" SelectionChanged="RecordViewChanged" AutomationProperties.AutomationId="RecordGroup" AutomationProperties.Name="Record group">
+                    <ComboBoxItem Content="None"/><ComboBoxItem Content="State"/><ComboBoxItem Content="Kind"/><ComboBoxItem Content="Lifecycle"/><ComboBoxItem Content="Availability"/><ComboBoxItem Content="Scope"/></ComboBox></StackPanel>
+                <Button Content="Reset" Click="ResetRecordViewClicked" AutomationProperties.AutomationId="ResetRecordView"/>
+                <TextBlock x:Name="RecordResultCount" Text="0 rows" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="8,0,0,0"/></WrapPanel>
+              <DataGrid x:Name="RecordList" Grid.Row="1" AutoGenerateColumns="False" SelectionChanged="RecordSelected" MouseDoubleClick="RecordDoubleClicked" Sorting="RecordGridSorting" AutomationProperties.AutomationId="RecordList">
+                <DataGrid.Columns><DataGridTextColumn Header="RECORD" Binding="{Binding Name}" SortMemberPath="Name" Width="2*"/>
+                  <DataGridTextColumn Header="KIND" Binding="{Binding Kind}" SortMemberPath="Kind" Width="105"/>
+                  <DataGridTextColumn Header="STATE" Binding="{Binding State}" SortMemberPath="State" Width="125"/>
+                  <DataGridTextColumn Header="SAVED UPDATE" Binding="{Binding Update}" SortMemberPath="UpdatedAt" Width="145"/>
+                  <DataGridTextColumn Header="SCOPE" Binding="{Binding Scope}" SortMemberPath="Scope" Width="*"/></DataGrid.Columns>
+              </DataGrid></Grid></TabItem>
+            <TabItem Header="Activity"><Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <Button x:Name="HistoricalScopeButton" Content="Load mapped historical records" Click="HistoricalScopeClicked" HorizontalAlignment="Left" AutomationProperties.AutomationId="LoadHistoricalScope"/>
+              <ListBox x:Name="ActivityList" Grid.Row="1" SelectionChanged="RecordSelected" AutomationProperties.AutomationId="ActivityList"/></Grid></TabItem>
+            <TabItem Header="Work &amp; handoff"><Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <WrapPanel><Button x:Name="WorkStatusButton" Content="Work status" Tag="work.status" Click="DomainReadClicked" AutomationProperties.AutomationId="WorkStatusRead"/>
+                <Button x:Name="WorkHistoryButton" Content="Work history" Tag="work.history" Click="DomainReadClicked" AutomationProperties.AutomationId="WorkHistoryRead"/>
+                <Button x:Name="HandoffStatusButton" Content="Handoff status" Tag="handoff.status" Click="DomainReadClicked" AutomationProperties.AutomationId="HandoffStatusRead"/>
+                <Button x:Name="HandoffHistoryButton" Content="Handoff history" Tag="handoff.history" Click="DomainReadClicked" AutomationProperties.AutomationId="HandoffHistoryRead"/></WrapPanel>
+              <ListBox x:Name="WorkList" Grid.Row="1" SelectionChanged="RecordSelected" AutomationProperties.AutomationId="WorkList"/></Grid></TabItem>
+            <TabItem Header="Decisions &amp; pending"><Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <WrapPanel><Button x:Name="DecisionStreamButton" Content="Decision stream" Tag="decision.show" Click="DomainReadClicked" AutomationProperties.AutomationId="DecisionStreamRead"/>
+                <Button x:Name="PendingItemsButton" Content="Pending items" Tag="pending.list" Click="DomainReadClicked" AutomationProperties.AutomationId="PendingItemsRead"/></WrapPanel>
+              <ListBox x:Name="DecisionList" Grid.Row="1" SelectionChanged="RecordSelected" AutomationProperties.AutomationId="DecisionList"/></Grid></TabItem>
+            <TabItem Header="Rejections"><ListBox x:Name="RejectionList" Margin="6" SelectionChanged="RecordSelected" AutomationProperties.AutomationId="RejectionList"/></TabItem>
+            <TabItem Header="Attention"><Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="120"/></Grid.RowDefinitions>
+              <WrapPanel><ComboBox x:Name="AttentionIntentChoices" Width="210" Margin="0,0,6,4" AutomationProperties.Name="Attention intent"/><Button x:Name="RefreshAttentionButton" Content="Refresh attention" Click="RefreshAttentionClicked" AutomationProperties.AutomationId="RefreshAttention"/><Button Content="Capture / link" Click="CaptureClicked"/><Button Content="Pending" Tag="pending.list" Click="DomainReadClicked"/></WrapPanel>
+              <TextBox x:Name="AttentionText" Grid.Row="1" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="Project attention has not been read. Select Refresh attention."/>
+              <WrapPanel Grid.Row="2"><ComboBox x:Name="AttentionReadChoices" Width="250" AutomationProperties.Name="Attention follow-up read"/><Button Content="Read selected" Click="AttentionReadClicked"/><Button Content="Recovery" Click="RecoveryClicked"/></WrapPanel>
+              <TextBox x:Name="AttentionRecoveryText" Grid.Row="3" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="Recovery observation is separate from database attention."/>
+            </Grid></TabItem>
+          </TabControl>
+          <Grid x:Name="SpecialPanel" Visibility="Collapsed">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <WrapPanel Grid.Row="0" Margin="0,0,0,6"><Button x:Name="RunCommandButton" Content="Run read" Click="RunCommandClicked" Visibility="Collapsed" AutomationProperties.AutomationId="RunCommand"/>
+              <Button x:Name="ReplayButton" Content="Replay exact request" Click="ReplayClicked" Visibility="Collapsed" AutomationProperties.AutomationId="ReplayPending"/>
+              <Button x:Name="RefreshCapabilitiesButton" Content="Refresh capabilities" Click="RefreshCapabilitiesClicked" Visibility="Collapsed" AutomationProperties.AutomationId="RefreshCapabilities"/>
+              <Button x:Name="SelectRuntimeButton" Content="Select interfaces.json" Click="SelectRuntimeClicked" Visibility="Collapsed" AutomationProperties.AutomationId="SelectRuntime"/></WrapPanel>
+            <ListBox x:Name="SpecialList" Grid.Row="1" SelectionChanged="SpecialSelected" AutomationProperties.AutomationId="SpecialList"/>
+          </Grid>
+        </Grid>
+      </Grid>
+      <GridSplitter x:Name="DetailSplitter" Grid.Column="3" Width="5" HorizontalAlignment="Stretch" Background="{DynamicResource Line}"
+                    ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" Visibility="Collapsed"
+                    AutomationProperties.AutomationId="InspectorSplitter" AutomationProperties.Name="Resize record inspector"/>
+      <Border Grid.Column="4" x:Name="DetailBorder" Visibility="Collapsed" Background="{DynamicResource Pane}" BorderBrush="{DynamicResource Line}" BorderThickness="1,0,0,0">
+        <Grid Margin="10,8"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <StackPanel><DockPanel><Button x:Name="BackButton" DockPanel.Dock="Left" Content="Back" Click="BackClicked" Visibility="Collapsed" AutomationProperties.AutomationId="InspectorBack"/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CollapseInspectorButton" Content="Collapse" Click="CollapseInspectorClicked" AutomationProperties.AutomationId="CollapseInspector" ToolTip="Ctrl+Alt+Left"/>
+                <Button x:Name="ResetInspectorButton" Content="Reset width" Click="ResetInspectorClicked" AutomationProperties.AutomationId="ResetInspector" ToolTip="Ctrl+Alt+0"/>
+              </StackPanel></DockPanel>
+            <TextBlock x:Name="DetailTitle" Text="Selected item" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,5,0,3"/>
+            <TextBlock x:Name="DetailMeta" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"/>
+          </StackPanel>
+          <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,6">
+            <Button x:Name="DetailTabButton" Content="Readable" Click="DetailTabClicked" AutomationProperties.AutomationId="ReadableRecord"/>
+            <Button x:Name="CheckIntentButton" Content="Plan / evidence / context" Click="CheckIntentClicked" Visibility="Collapsed" AutomationProperties.AutomationId="CheckIntent"/>
+            <Button Content="Capture / link" Click="CaptureClicked" AutomationProperties.AutomationId="CaptureRequirement"/>
+            <Button x:Name="HistoryButton" Content="History" Click="HistoryClicked" AutomationProperties.AutomationId="RecordHistory"/>
+            <Button x:Name="LinksButton" Content="Links" Click="LinksClicked" AutomationProperties.AutomationId="RecordLinks"/>
+            <Button x:Name="RawButton" Content="Raw" Click="RawClicked" AutomationProperties.AutomationId="RecordRaw"/>
+            <Button x:Name="EditButton" Content="Edit" Click="EditClicked" AutomationProperties.AutomationId="EditRecord"/>
+            <Button x:Name="ReviewSourceButton" Content="Review source" Click="ReviewSourceClicked" Visibility="Collapsed" AutomationProperties.AutomationId="ReviewSource"/>
+            <Button x:Name="CopySupportButton" Content="Copy support summary" Click="CopySupportClicked" Visibility="Collapsed" AutomationProperties.AutomationId="CopySupportSummary"/>
+            <StackPanel x:Name="ContinuityReadActions" Orientation="Horizontal" Visibility="Collapsed">
+              <ComboBox x:Name="ContinuityReadChoices" Width="220" Margin="2" AutomationProperties.AutomationId="ContinuityReadChoices" AutomationProperties.Name="Selected context or required read" ToolTip="Select a literal public read from the current intent projection"/>
+              <Button x:Name="ContinuityReadButton" Content="Read context" Click="ReadContinuityClicked" AutomationProperties.AutomationId="ReadContinuity"/>
+            </StackPanel>
+          </WrapPanel>
+          <Grid Grid.Row="2">
+            <ScrollViewer x:Name="ReadablePanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Background="{DynamicResource Pane}"
+                          AutomationProperties.AutomationId="ReadableContent" AutomationProperties.Name="Readable stored record and provenance">
+              <StackPanel Margin="5,4,9,5"><TextBlock x:Name="ReadoutState" FontWeight="SemiBold" Foreground="{DynamicResource Teal}" TextWrapping="Wrap"/>
+                <TextBlock x:Name="ReadoutSummary" TextWrapping="Wrap" Margin="0,7,0,9"/>
+                <TextBlock x:Name="ReadoutLimit" TextWrapping="Wrap" Foreground="{DynamicResource Muted}"/>
+                <ItemsControl x:Name="ReadoutSections">
+                  <ItemsControl.ItemTemplate><DataTemplate><Expander Header="{Binding Heading}" Margin="0,4,0,0"
+                             Foreground="{DynamicResource Ink}" Background="{DynamicResource Input}" AutomationProperties.Name="{Binding Heading}">
+                    <Expander.Style><Style TargetType="Expander"><Setter Property="IsExpanded" Value="True"/>
+                      <Style.Triggers><DataTrigger Binding="{Binding Heading}" Value="Stored identity"><Setter Property="IsExpanded" Value="False"/></DataTrigger></Style.Triggers>
+                    </Style></Expander.Style>
+                    <TreeView ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ReadoutNodeTemplate}" Margin="2,4"
+                              AutomationProperties.Name="{Binding Heading}"/></Expander></DataTemplate></ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+            <TextBox x:Name="DetailText" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                     VerticalContentAlignment="Top" Padding="8" AutomationProperties.AutomationId="DetailContent" AutomationProperties.Name="Raw result and historical evidence"/>
+            <ScrollViewer x:Name="CommandPanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Background="{DynamicResource Pane}"><StackPanel x:Name="CommandFields" Margin="7"/></ScrollViewer>
+            <ScrollViewer x:Name="EditorPanel" Visibility="Collapsed" Background="{DynamicResource Pane}" VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="0,0,7,4">
+                <TextBlock Text="Name"/><TextBox x:Name="EditName" TextChanged="DraftChanged" AutomationProperties.AutomationId="EditName" AutomationProperties.Name="Record name"/>
+                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <StackPanel><TextBlock Text="Availability"/><ComboBox x:Name="EditAvailability" SelectionChanged="DraftSelectionChanged" AutomationProperties.AutomationId="EditAvailability" AutomationProperties.Name="Record availability"/></StackPanel>
+                  <StackPanel Grid.Column="2"><TextBlock Text="Priority"/><TextBox x:Name="EditPriority" TextChanged="DraftChanged" AutomationProperties.AutomationId="EditPriority" AutomationProperties.Name="Record priority"/></StackPanel>
+                </Grid>
+                <StackPanel x:Name="ScalarFields" Margin="0,7,0,0"/>
+                <Expander x:Name="AdvancedDataExpander" Header="Advanced · edit data JSON" IsExpanded="False" Margin="0,9,0,2" Foreground="{DynamicResource Ink}">
+                <TextBox x:Name="EditData" Height="240" MinHeight="150" AcceptsReturn="True" AcceptsTab="True" VerticalContentAlignment="Top"
+                         TextChanged="EditDataChanged" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                         FontFamily="Cascadia Code, Consolas" FontSize="11" AutomationProperties.AutomationId="EditData" AutomationProperties.Name="Advanced editable data JSON"/>
+                </Expander>
+                <TextBlock x:Name="EditHint" TextWrapping="Wrap" Foreground="{DynamicResource Muted}" Margin="0,8,0,8"/>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+          <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+            <Button x:Name="RunCommandInspectorButton" Content="Run read" Click="RunCommandClicked" Visibility="Collapsed" AutomationProperties.AutomationId="RunCommandInspector"/>
+            <Button x:Name="ReplayInspectorButton" Content="Replay exact request" Click="ReplayClicked" Visibility="Collapsed" AutomationProperties.AutomationId="ReplayPendingInspector"/>
+            <Button x:Name="CancelEditButton" Content="Discard" Click="CancelEditClicked" Visibility="Collapsed" AutomationProperties.AutomationId="DiscardEdit"/>
+            <Button x:Name="ReviewButton" Content="Review change" Click="ReviewClicked" Visibility="Collapsed" AutomationProperties.AutomationId="ReviewEdit"/>
+            <Button x:Name="SaveButton" Content="Save" Click="SaveClicked" Visibility="Collapsed" AutomationProperties.AutomationId="SaveEdit"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+    <Border Grid.Row="2" Background="{DynamicResource InkSoft}" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0">
+      <TextBlock x:Name="StatusText" Text="Loading interface…" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="11,0" TextTrimming="CharacterEllipsis"/>
+    </Border>
+  </Grid>
+</Window>

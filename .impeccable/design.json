@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-29T00:04:07Z",
+  "title": "Design System: Lodestar Loader",
+  "extensions": {
+    "nativePlatform": "Windows WPF",
+    "measurementUnit": "device-independent pixels (DIP)",
+    "colorMeta": {
+      "mint-action": { "role": "primary", "displayName": "Mint action", "canonical": "#5CE0C0" },
+      "mint-focus": { "role": "primary", "displayName": "Mint focus", "canonical": "#8FE8D3" },
+      "graphite-canvas": { "role": "neutral", "displayName": "Graphite canvas", "canonical": "#11161F" },
+      "graphite-pane": { "role": "neutral", "displayName": "Graphite pane", "canonical": "#141B26" },
+      "graphite-chrome": { "role": "neutral", "displayName": "Graphite chrome", "canonical": "#1B2330" },
+      "graphite-line": { "role": "neutral", "displayName": "Graphite line", "canonical": "#2A3543" },
+      "graphite-hover": { "role": "neutral", "displayName": "Graphite hover", "canonical": "#263446" },
+      "graphite-selection": { "role": "neutral", "displayName": "Graphite selection", "canonical": "#244940" },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#E7EDF4" },
+      "muted-ink": { "role": "neutral", "displayName": "Muted ink", "canonical": "#AAB9CA" }
+    },
+    "typographyMeta": {
+      "body": { "displayName": "Interface", "purpose": "Segoe UI throughout the window and standard controls; 12 DIP base." },
+      "code": { "displayName": "Advanced JSON", "purpose": "Cascadia Code with Consolas fallback in the editable JSON field; 11 DIP." }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      { "name": "compact inspector replacement", "value": "actual window width < 1180 DIP" }
+    ],
+    "nativeComponents": [
+      { "name": "Command bar", "source": "MainWindow.xaml", "detail": "44 DIP top row with Lodestar identity and global actions." },
+      { "name": "Project rail", "source": "MainWindow.xaml", "detail": "190 DIP initial width, 160–280 DIP resizing, navigation, finder, sort, history toggle, virtualized project list." },
+      { "name": "Data table", "source": "App.xaml; MainWindow.xaml", "detail": "28 DIP rows and headers, horizontal hairlines, alternating fill, sortable/reorderable/resizable columns." },
+      { "name": "Context inspector", "source": "MainWindow.xaml; MainWindow.xaml.cs", "detail": "360 DIP preferred width, 300–600 DIP resize range, readable/history/raw/edit views; replaces main pane below 1180 DIP." },
+      { "name": "Readable record", "source": "MainWindow.xaml", "detail": "State and summary above expanded, labeled nested sections; scrollable evidence." },
+      { "name": "Guarded editor", "source": "MainWindow.xaml; MainWindow.OperatorConsole.cs", "detail": "Labeled scalar fields and scrollable advanced JSON, followed by Discard, Review change, and Save." }
+    ],
+    "highContrast": "Dynamic WPF brushes switch to SystemColors on SystemParameters.HighContrast changes; actual colors depend on Windows theme."
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "Lodestar Workstation",
+    "overview": "This is the built native WPF operator console: a dense graphite workspace for observing Lodestar records, inspecting their provenance, and deliberately reviewing corrections. The restrained mint accent identifies action, selected navigation, recorded status, and focus. Text, tables, and source times carry the information; the interface does not imply a universal project status or turn an unchecked store into a healthy one.",
+    "keyCharacteristics": [
+      "Three working zones at wide sizes: project rail, main workspace, contextual inspector.",
+      "Compact rows, hairline boundaries, text labels, and quiet alternating table surfaces.",
+      "Readable record sections first, with exact raw/history evidence and guarded editing nearby.",
+      "Windows keyboard, splitter, scrolling, and high contrast behavior remain native."
+    ],
+    "rules": [
+      { "name": "The Observed State Rule", "body": "Health uses text such as “Not checked” and “unknown” until the operator explicitly runs the public Lodestar doctor read. Color never supplies a missing fact.", "section": "colors" },
+      { "name": "The Pane Rule", "body": "A selected record earns an inspector; an empty selection leaves the main workspace full width. At compact width, one content pane occupies that area at a time.", "section": "layout" }
+    ],
+    "dos": [
+      "Do keep dense, labeled WPF controls and expose source, saved time, and unknown state in text.",
+      "Do keep the rail/main/inspector geometry resizable and the below-1180-DIP compact replacement behavior.",
+      "Do preserve visible focus, Windows high contrast brushes, scrollable long evidence, and the Review then Save correction sequence."
+    ],
+    "donts": [
+      "Don't add general PC CPU, memory, or disk telemetry to Lodestar Health.",
+      "Don't imply unchecked integrity, current worker liveness, or filesystem freshness from stored records.",
+      "Don't replace the native work surfaces with decorative cards, charts, or a web-specific layout system."
+    ]
+  }
+}

@@ -4,8 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AGENT_BOOTSTRAP } from "../../src/bootstrap.mjs";
-import { COMMANDS, MUTATION_INPUTS, READ_OPERATIONS } from "../../src/cli-commands.mjs";
-import { decodeUtf8, parseJsonText } from "../../src/json.mjs";
+import { COMMANDS, capabilityOperations, MUTATION_INPUTS, READ_OPERATIONS } from "../../src/cli-commands.mjs";
+import { lodestarError } from "../../src/errors.mjs";
+import { decodeUtf8, JSON_INPUT_MAXIMUM_BYTES, parseJsonText } from "../../src/json.mjs";
 import { MUTATION_REQUEST_SCHEMA, PUT_INPUT_SCHEMA, DELETE_INPUT_SCHEMA } from "../../src/records.mjs";
 import { CONTRACT_VERSION } from "../../src/schema.mjs";
 import {
@@ -33,7 +34,7 @@ function requestSchema(inputSchema) {
 export const NATIVE_TOOLS = Object.freeze([
   {
     name: "lodestar_describe",
-    description: "Return the installed Lodestar contract, command declarations, and structured mutation inputs.",
+    description: "Return versioned operation descriptors, complete CLI inputs, safe form bindings, and structured mutation inputs.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -67,13 +68,19 @@ function reply(id, result, error) {
   const message = error
     ? { jsonrpc: "2.0", id, error: { code: -32000,
       message: error instanceof Error ? error.message : String(error),
-      ...(error?.envelope ? { data: error.envelope } : {}) } }
+      ...(error?.envelope ? { data: error.envelope } : error?.code ? { data: {
+        code: error.code, action: error.action, identifiers: error.identifiers } } : {}) } }
     : { jsonrpc: "2.0", id, result };
-  process.stdout.write(`${JSON.stringify(message)}\n`);
+  return new Promise((resolve, reject) => {
+    process.stdout.write(`${JSON.stringify(message)}\n`, (failure) => {
+      if (failure) { failure.mcpOutput = true; reject(failure); }
+      else resolve();
+    });
+  });
 }
 
 function replyToolResult(id, value, isError = false) {
-  reply(id, { content: [{ type: "text", text: JSON.stringify(value) }],
+  return reply(id, { content: [{ type: "text", text: JSON.stringify(value) }],
     structuredContent: value, isError });
 }
 
@@ -136,23 +143,41 @@ function validateMessage(message) {
 }
 
 async function* messageFrames(stream) {
-  let parts = [], length = 0;
+  let parts = [], length = 0, overflow = false;
+  const append = (tail) => {
+    if (overflow || !tail.length) return null;
+    length += tail.length;
+    if (length > JSON_INPUT_MAXIMUM_BYTES) {
+      overflow = true; parts = [];
+      return lodestarError("resource_limit", "MCP message exceeds the supported UTF-8 byte limit; no tool was dispatched.", {
+        identifiers: { resource: "mcp_message", bytes: length, maximum: JSON_INPUT_MAXIMUM_BYTES },
+        action: "Reduce the message to 16 MiB or less, including metadata. The rejected frame is discarded through its newline; resend a complete smaller request.",
+      });
+    }
+    // Copy only admitted bytes, so a small tail cannot retain a large input chunk.
+    parts.push(Buffer.from(tail));
+    return null;
+  };
   for await (const chunk of stream) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     let start = 0, newline;
     while ((newline = bytes.indexOf(0x0a, start)) !== -1) {
       const tail = bytes.subarray(start, newline);
-      if (tail.length) { parts.push(tail); length += tail.length; }
-      let frame = Buffer.concat(parts, length);
-      parts = []; length = 0;
-      if (frame.at(-1) === 0x0d) frame = frame.subarray(0, -1);
-      if (frame.length) yield frame;
+      const error = append(tail);
+      if (error) yield { error };
+      if (!overflow) {
+        let frame = Buffer.concat(parts, length);
+        if (frame.at(-1) === 0x0d) frame = frame.subarray(0, -1);
+        if (frame.length) yield { bytes: frame };
+      }
+      parts = []; length = 0; overflow = false;
       start = newline + 1;
     }
     const tail = bytes.subarray(start);
-    if (tail.length) { parts.push(tail); length += tail.length; }
+    const error = append(tail);
+    if (error) yield { error };
   }
-  if (length) yield Buffer.concat(parts, length);
+  if (!overflow && length) yield { bytes: Buffer.concat(parts, length) };
 }
 
 export async function callNativeTool(name, input = {}) {
@@ -160,6 +185,9 @@ export async function callNativeTool(name, input = {}) {
   if (name === "lodestar_describe") return {
     contract: CONTRACT_VERSION,
     package_version: packageVersion(),
+    capability_version: 1,
+    operations: capabilityOperations({ put: PUT_INPUT_SCHEMA, delete: DELETE_INPUT_SCHEMA,
+      mutationRequest: MUTATION_REQUEST_SCHEMA }),
     commands: COMMANDS,
     mutation_inputs: MUTATION_OPERATIONS,
     mutation_request: MUTATION_REQUEST_SCHEMA,
@@ -169,7 +197,7 @@ export async function callNativeTool(name, input = {}) {
   if (name === "lodestar_read") {
     const command = READ_COMMANDS[input.operation];
     if (!command) throw new Error(`Unknown read operation: ${input.operation}`);
-    return await runInstalledLodestar([...command, ...(input.arguments ?? [])]);
+    return await runInstalledLodestar([...command, ...(input.arguments ?? [])], { operation: input.operation, effect: "read" });
   }
   if (name === "lodestar_mutate") {
     if (!Object.hasOwn(MUTATION_OPERATIONS, input.operation)) {
@@ -177,42 +205,57 @@ export async function callNativeTool(name, input = {}) {
     }
     return await runInstalledLodestar(mutationCommand(input.operation, input.request), {
       input: `${JSON.stringify(input.request)}\n`,
+      operation: input.operation, effect: ["put", "delete"].includes(input.operation) ? "record_write" : "domain_write",
+      requestId: input.request?.request_id,
     });
   }
   throw new Error(`Unknown native tool: ${name}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  for await (const frame of messageFrames(process.stdin)) {
-    let message;
-    try {
-      message = parseJsonText(decodeUtf8(frame, { resource: "mcp_message" }), {
-        resource: "mcp_message",
-      });
-    } catch (error) {
-      reply(null, null, error);
-      continue;
+  // The write callback rejects the awaited response; retain an error listener
+  // until the process ends so its subsequent stream event cannot crash the host.
+  let outputFailure = false;
+  process.stdout.on("error", () => { outputFailure = true; });
+  try {
+    for await (const frame of messageFrames(process.stdin)) {
+      if (frame.error) { await reply(null, null, frame.error); continue; }
+      let message;
+      try {
+        message = parseJsonText(decodeUtf8(frame.bytes, { resource: "mcp_message" }), {
+          resource: "mcp_message", maximum: JSON_INPUT_MAXIMUM_BYTES,
+        });
+      } catch (error) {
+        await reply(null, null, error);
+        continue;
+      }
+      try {
+        validateMessage(message);
+        if (message.id === undefined) continue;
+        if (message.method === "initialize") await reply(message.id, {
+          protocolVersion: message.params?.protocolVersion ?? "2025-03-26",
+          capabilities: { tools: {} },
+          serverInfo: { name: "lodestar", version: packageVersion() },
+        });
+        else if (message.method === "ping") await reply(message.id, {});
+        else if (message.method === "tools/list") await reply(message.id, { tools: NATIVE_TOOLS });
+        else if (message.method === "tools/call") {
+          const result = await callNativeTool(message.params?.name, message.params?.arguments ?? {});
+          await replyToolResult(message.id, result);
+        } else await reply(message.id, null, new Error(`Method not found: ${message.method}`));
+      } catch (error) {
+        const id = typeof message?.id === "string" || typeof message?.id === "number" ? message.id : null;
+        // A valid tool invocation that fails in the core is an execution error.
+        // Keep its correction basis and next actions in model-visible tool content.
+        if (message?.method === "tools/call" && (error?.toolResult || error?.envelope)) await replyToolResult(id, error.toolResult ?? error.envelope, true);
+        else await reply(id, null, error);
+      }
     }
-    try {
-      validateMessage(message);
-      if (message.id === undefined) continue;
-      if (message.method === "initialize") reply(message.id, {
-        protocolVersion: message.params?.protocolVersion ?? "2025-03-26",
-        capabilities: { tools: {} },
-        serverInfo: { name: "lodestar", version: packageVersion() },
-      });
-      else if (message.method === "ping") reply(message.id, {});
-      else if (message.method === "tools/list") reply(message.id, { tools: NATIVE_TOOLS });
-      else if (message.method === "tools/call") {
-        const result = await callNativeTool(message.params?.name, message.params?.arguments ?? {});
-        replyToolResult(message.id, result);
-      } else reply(message.id, null, new Error(`Method not found: ${message.method}`));
-    } catch (error) {
-      const id = typeof message?.id === "string" || typeof message?.id === "number" ? message.id : null;
-      // A valid tool invocation that fails in the core is an execution error.
-      // Keep its correction basis and next actions in model-visible tool content.
-      if (message?.method === "tools/call" && error?.envelope) replyToolResult(id, error.envelope, true);
-      else reply(id, null, error);
-    }
+  } catch (error) {
+    const code = typeof error?.code === "string" && /^[A-Z0-9_]{1,40}$/u.test(error.code) ? error.code : "transport_error";
+    const operation = outputFailure || error?.mcpOutput ? "response delivery" : "transport";
+    process.exitCode = 1;
+    process.stderr.write(`Lodestar MCP ${operation} failed (${code}). Restore the client transport. A completed write may have committed; preserve the original request, reconcile its receipt and current records, then use exact replay.\n`);
+    process.stdin.destroy();
   }
 }

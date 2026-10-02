@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StartupObject>WindowLifecycleChecks</StartupObject>
+    <AssemblyName>Lodestar.Loader</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Lodestar.Loader.Tests/OperatorImprovementChecks.cs" Link="OperatorImprovementChecks.cs" />
+    <Compile Include="../Lodestar.Loader.Tests/AttentionHistoricalInventoryChecks.cs" Link="AttentionHistoricalInventoryChecks.cs" />
+    <Using Include="System.IO" />
+    <Compile Include="../Lodestar.Loader/App.xaml.cs" Link="App.xaml.cs" />
+    <Compile Include="../Lodestar.Loader/MainWindow*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../Lodestar.Loader/Models/**/*.cs" Link="Models/%(Filename)%(Extension)" />
+    <Compile Include="../Lodestar.Loader/Services/**/*.cs" Link="Services/%(Filename)%(Extension)" />
+    <ApplicationDefinition Include="../Lodestar.Loader/App.xaml" Link="App.xaml" />
+    <Page Include="../Lodestar.Loader/MainWindow.xaml" Link="MainWindow.xaml" />
+  </ItemGroup>
+</Project>

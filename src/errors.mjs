@@ -1,9 +1,12 @@
 import { boundedDiagnosticValue } from "./diagnostics.mjs";
 
 const DEFAULT_ACTION =
-  "Review the identifiers and retry with valid Lodestar input.";
+  "Preserve the exact command, request bytes and ID, selected database and adjacent journals. Use the configured Lodestar runtime with the same --db selection for read-only diagnosis: doctor and get --raw -- <id> to inspect any known receipt and current records. Reconcile a write against its receipt and current state before replaying only the exact saved request; inspect an affected read again after resolving its reported cause.";
 const INTERNAL_ACTION =
-  "Retry the command. If it fails again, run lodestar doctor.";
+  `This error does not establish whether a write was accepted. ${DEFAULT_ACTION}`;
+const COMMAND_ACTION = "Read lodestar --help for supported commands, then lodestar <command> --help for that command's arguments. Correct the reported command, operation or option before running it again.";
+const INPUT_ACTION = "Correct the reported input using lodestar <command> --help for its arguments and request schema, then run the command with the corrected input.";
+const READ_ACTION = "Inspect the reported read and its selected --db database. Use lodestar <command> --help to check its arguments; resolve the reported input or storage problem, then repeat that read. For a storage failure, inspect lodestar --db <database> doctor before reading again.";
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,127}$/u;
 const LODESTAR_ERRORS = new WeakSet();
 const COMPLETE_IDENTIFIER_CODES = new Set([
@@ -20,6 +23,7 @@ const COMPLETE_IDENTIFIER_CODES = new Set([
 const INPUT_ERROR_CODES = new Set([
   "direction_required",
   "identity_required",
+  "interactive_terminal_required",
   "invalid_input",
   "invalid_json",
   "invalid_mutation_contract",
@@ -28,6 +32,7 @@ const INPUT_ERROR_CODES = new Set([
   "missing_precondition",
   "reserved_record_type",
   "resource_limit",
+  "recovery_journal_invalid",
   "skills_read_only",
   "unknown_command",
   "unknown_operation",
@@ -53,6 +58,7 @@ const CONFLICT_ERROR_CODES = new Set([
   "record_exists",
   "record_not_found",
   "recovery_accounting_conflict",
+  "recovery_request_conflict",
   "request_conflict",
   "revision_conflict",
   "subject_conflict",
@@ -142,9 +148,13 @@ export function decorateError(error, identifiers = {}) {
   });
 }
 
-export function errorPayload(error) {
+export function errorPayload(error, context = {}) {
   const code = knownCode(error);
   const known = code !== null;
+  const fallback = ["unknown_command","unknown_operation","unknown_option"].includes(code) ? COMMAND_ACTION
+    : context.read === true ? READ_ACTION
+      : known && INPUT_ERROR_CODES.has(code) ? INPUT_ACTION
+        : known ? DEFAULT_ACTION : INTERNAL_ACTION;
   return {
     code: known ? code : "internal_error",
     message: known
@@ -159,21 +169,20 @@ export function errorPayload(error) {
         : boundedIdentifiers(property(error, "identifiers"))
       : {},
     action: known && property(error, "action")
-      ? boundedText(property(error, "action"), DEFAULT_ACTION)
-      : known
-        ? DEFAULT_ACTION
-        : INTERNAL_ACTION,
+      ? boundedText(property(error, "action"), fallback)
+      : fallback,
   };
 }
 
-export function errorEnvelope(error) {
+export function errorEnvelope(error, context = {}) {
   return {
     ok: false,
-    error: errorPayload(error),
+    error: errorPayload(error, context),
   };
 }
 
 function exitCodeForCode(code) {
+  if (code === "response_delivery_failed") return 5;
   if (CONFLICT_ERROR_CODES.has(code) || code.endsWith("_not_found") || code.endsWith("_conflict")) return 3;
   if (new Set([
     "record_requires_source_correction",
@@ -221,9 +230,9 @@ export function internalErrorResult() {
   };
 }
 
-export function errorResult(error) {
+export function errorResult(error, context = {}) {
   try {
-    const envelope = errorEnvelope(error);
+    const envelope = errorEnvelope(error, context);
     return {
       envelope,
       exitCode: exitCodeForCode(envelope.error.code),

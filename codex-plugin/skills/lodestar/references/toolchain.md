@@ -12,16 +12,24 @@ are read-only. Native environments retain ownership of their settings and instru
 
 `lodestar-agent-context` · [github.com/VerbalChainsaw/Lodestar](https://github.com/VerbalChainsaw/Lodestar) · MIT · Node 24.15+
 
+For current local evaluation, verify the candidate tarball against its own SHA-256
+inventory and use the isolated package procedure in the candidate's included
+`docs/installation.md`. Invoke that exact package with the selected Node runtime.
+Public npm/tag availability remains pending. After the verified 3.0.0 release is
+published, use these registry commands:
+
 ```bash
-npm install --global lodestar-agent-context@2.2.0
+npm install --global lodestar-agent-context@3.0.0
 lodestar setup --target all
 lodestar setup --target all --apply
-lodestar init
 lodestar skills verify --target all
 ```
 
-Install the published package from the npm registry; `setup` plans owned payload
-changes before `--apply` performs them.
+After publication, the npm registry supplies the released package. `setup` plans
+owned payload changes before `--apply` performs them.
+Use `lodestar init` only to create an explicitly new store. Existing schema-5
+stores need no migration; for schema-4 stores, follow the maintained
+[installation and migration guide](https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/installation.md).
 
 Review the setup plan before applying it. Existing locally changed or unowned
 content requires explicit `--replace-local`, which retains backups. Setup and
@@ -52,7 +60,7 @@ database.
 
 The part I care most about is what it refuses to claim. Record availability and semantic attribution stay explicit, and source observations identify the evidence actually inspected. Missing provenance is preserved as uncertainty rather than rewritten as user direction or a fresh observation. New writes provide complete semantics; the core rejects unsafe numeric input before JavaScript can round it.
 
-A missing record means only that Lodestar lacks that knowledge. It is not evidence the thing does not exist. Its published agent contract is five lines: use Lodestar before recursively searching, retrieve through stable IDs or aliases, follow explicit links for related context, treat a missing record as missing knowledge rather than proof of absence, and inspect the repository normally when Lodestar is insufficient. It does not infer readiness, score completeness, or claim its records fully describe anything.
+A missing record means only that Lodestar lacks that knowledge. It is not evidence the thing does not exist. Its published agent contract is five lines: use Lodestar before recursively searching, retrieve through stable IDs or aliases, follow explicit links for related context, treat a missing record as missing knowledge rather than proof of absence, and inspect the repository normally when Lodestar is insufficient. It reports read completeness and structural readiness for human review from supplied acceptance mappings and referenced evidence; these checks do not certify semantic completion or that records fully describe the project.
 
 Durability is ordinary SQLite done carefully: admitted `BEGIN IMMEDIATE` transactions, foreign keys, `synchronous=FULL`, read-only query-only connections for reads, explicit target revisions, one database revision per logical mutation, and idempotent request receipts. Writer fences reject retained old clients even when they still hold an open connection.
 
@@ -60,7 +68,8 @@ A note on the 1.0 rewrite, since it is relevant to the rules in this repo. The o
 
 ## center-geo, layer 7, survey
 
-Ships in the canonical `managed-assets/skills/center-multigeometry` bundle.
+Distributed independently by the canonical `center-geo` skill bundle. Lodestar
+does not install, verify, or receipt this external skill.
 
 A deterministic structural risk scanner. It reads a codebase as a graph and traverses it under six geometries (radial, cycle, boundary, anomaly, convergent, path), then fuses the signals into ranked hypotheses with anchors.
 

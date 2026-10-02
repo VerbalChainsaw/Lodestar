@@ -1,0 +1,42 @@
+name: desktop
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.15.0
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Native service checks
+        shell: pwsh
+        run: |
+          $env:LODESTAR_TEST_NODE = (Get-Command node).Source
+          dotnet run --project desktop/Lodestar.Loader.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build distributable archives
+        shell: pwsh
+        run: ./desktop/scripts/Build-Release.ps1 -OutputDirectory "$env:RUNNER_TEMP/release"
+      - name: Test portable setup and updates
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          Expand-Archive -LiteralPath "$env:RUNNER_TEMP/release/Lodestar-$version-win-x64.zip" -DestinationPath "$env:RUNNER_TEMP/extracted"
+          ./desktop/scripts/Test-Distribution.ps1 -BundlePath "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lodestar-windows
+          path: ${{ runner.temp }}/release/Lodestar-*-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14

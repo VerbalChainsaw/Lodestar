@@ -21,6 +21,14 @@ accepted revision, timestamps, application data, aliases, links, sources, and
 semantics. Application-owned JSON remains application-owned. Raw inspection and
 history preserve exact stored JSON text and associations. JSON numeric tokens outside
 JavaScript's safe integer domain fail normalized processing before rounding.
+Normalized JSON uses mathematical zero: `-0` becomes `0`, just as ordinary JSON
+serialization does. Store a sign-sensitive value as a string. The shared parser
+and canonical writer support at most 1,024 nested containers; deeper data returns
+`resource_limit` with flattening or linked-record guidance, without truncation.
+Persisted content and source metadata are validated against SQLite's lower
+1,000-container limit, including Lodestar's stored wrappers and receipt shape.
+The rejection identifies the actual limit and preserves the previous database.
+See [SQLite JSON compatibility](https://www.sqlite.org/json1.html#compatibility).
 
 Semantics identify basis (`asserted`, `observed`, `user_direction`, or
 `legacy_unverified`), lifecycle, context role, and project/checkout applicability. Local and
@@ -41,6 +49,19 @@ allocates one database revision, preserves raw before-images, applies the domain
 mutation, and commits its receipt in one admitted immediate transaction. Nested domain
 helpers reuse that revision. Lock contention fails immediately as retryable busy.
 
+Ordinary update/replacement checks both the existing and proposed applicability;
+retirement checks the existing target too. A null/global basis is valid for global
+applicability, and historical project-member scopes resolve through guarded current
+bindings. Read the target again and retain its complete basis after a mismatch.
+
+Project descriptors establish identity through observed target revisions, roots,
+peers and canonical links. Registration can use the pre-registration checkout
+basis. Normal project reads return the current canonical basis. Raw project reads
+return a target-observed null basis so a malformed or ambiguous mapping can be
+deliberately corrected; include each canonical target's observed revision.
+Distinct canonical project IDs cannot share one derived scope. Existing ambiguous
+mapping reads fail explicitly; raw reads remain available and no history is rewritten.
+
 Schema triggers call the connection-scoped `lodestar_write_contract()` guard on every
 state-table insert, update, and delete. A retained old connection or prepared statement
 cannot write after schema-5 activation.
@@ -58,6 +79,10 @@ Runtime contains one explicit schema-4 to schema-5 conversion. Ordinary operatio
 not migrate. Preflight identifies the exact source metadata, schema fingerprint,
 logical row digest, unsafe numeric rows, and deterministic accounting. A consistent
 backup is restore-inspected before a locked source recheck and atomic conversion.
+Before conversion, the claimed backup must resolve to a different physical file.
+Resolved-path and filesystem identity checks refuse the source itself and hard-link
+aliases. Missing or unavailable identity proof produces an actionable conflict;
+exact replay of an already completed migration uses its retained provenance.
 
 `doctor --migration-preflight` returns the source observation inside the normal
 contract-5 envelope. The migration request contains `{v,request_id,preflight,backup}`;

@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, mkdtemp, open as openFile, realpath, rmdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { backup as sqliteBackup } from "node:sqlite";
 
 import { admittedTransaction, assertSupportedSchema, openConnection,
   beginImmediate, readMetadata, rollback } from "./database.mjs";
-import { lodestarError, wrapError } from "./errors.mjs";
+import { decorateError, errorPayload, lodestarError, wrapError } from "./errors.mjs";
+import { nativeDatabasePath, nativeStorageCode, schemaVersionGuidance, sqliteError } from "./database-schema.mjs";
 import { assertJsonNumericDomain, canonicalStringify } from "./json.mjs";
 import { contentData, parseStoredContent, writeRecordSnapshot } from "./records.mjs";
 import { allocateRevision } from "./revisions.mjs";
@@ -22,6 +23,17 @@ const TABLE_COLUMNS = Object.freeze({
 });
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
+function rowsBy(rows, key) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const id = row[key];
+    const entries = grouped.get(id) ?? [];
+    entries.push(row);
+    grouped.set(id, entries);
+  }
+  return grouped;
+}
+
 function rawInventory(db) {
   return Object.fromEntries(Object.entries(TABLE_COLUMNS).map(([table, columns]) => [
     table,
@@ -35,7 +47,28 @@ function schemaFingerprint(db) {
   return sha256(canonicalStringify(rows));
 }
 
-function numericIssues(inventory) {
+function invalidMigrationJson(error, file, table, row, field) {
+  throw lodestarError("invalid_database", "The preserved migration source contains malformed or ambiguous stored JSON.", {
+    identifiers: { database: file, table, id: row.id ?? row.record_id,
+      origin: row.origin ?? null, field,
+      preflight_args: ["--db", file, "doctor", "--migration-preflight"] },
+    action: "Preserve the original database. Inspect the named row and field with matching schema4 tools; restore valid JSON from an accepted backup or source before rerunning migration preflight on a separate copy.",
+    cause: error,
+  });
+}
+
+function migrationJson(file, table, row, field) {
+  try {
+    const value = JSON.parse(row[field]);
+    if (table === "records" && (value === null || typeof value !== "object" || Array.isArray(value))) {
+      throw new TypeError("Stored record content requires an object container.");
+    }
+    return value;
+  }
+  catch (error) { invalidMigrationJson(error, file, table, row, field); }
+}
+
+function numericIssues(inventory, file) {
   const issues = [];
   for (const [table, rows, jsonField] of [
     ["records", inventory.records, "content_json"],
@@ -43,7 +76,7 @@ function numericIssues(inventory) {
   ]) for (const row of rows) {
     try { assertJsonNumericDomain(row[jsonField]); }
     catch (error) {
-      if (error?.code !== "unsupported_numeric_value") throw error;
+      if (error?.code !== "unsupported_numeric_value") invalidMigrationJson(error, file, table, row, jsonField);
       issues.push({ table, id: row.id ?? row.record_id, origin: row.origin ?? null,
         field: jsonField, pointer: error.identifiers?.pointer ?? "",
         value: error.identifiers?.value ?? null });
@@ -52,12 +85,23 @@ function numericIssues(inventory) {
   return issues;
 }
 
-function legacyChanges(inventory, issues) {
-  const records = inventory.records.filter((row) => !issues.some((issue) => issue.table === "records" && issue.id === row.id)
-    && !JSON.parse(row.content_json)._lodestar?.semantics);
+function legacyChanges(inventory, issues, file) {
+  const recordIssues = new Set(), sourceIssues = new Map();
+  for (const issue of issues) {
+    if (issue.table === "records") recordIssues.add(issue.id);
+    else if (issue.table === "sources") {
+      // Keep both identity components: IDs and origins can contain delimiters.
+      const origins = sourceIssues.get(issue.id) ?? new Set();
+      origins.add(issue.origin);
+      sourceIssues.set(issue.id, origins);
+    }
+  }
+  const records = inventory.records.filter((row) => !recordIssues.has(row.id)
+    && !migrationJson(file, "records", row, "content_json")._lodestar?.semantics);
   const sources = inventory.sources.filter((row) => {
-    if (issues.some((issue) => issue.table === "sources" && issue.id === row.record_id && issue.origin === row.origin)) return false;
-    try { validateSourceMetadata(JSON.parse(row.metadata_json)); return false; }
+    if (sourceIssues.get(row.record_id)?.has(row.origin)) return false;
+    const metadata = migrationJson(file, "sources", row, "metadata_json");
+    try { validateSourceMetadata(metadata); return false; }
     catch { return true; }
   });
   return { records, sources };
@@ -66,10 +110,10 @@ function legacyChanges(inventory, issues) {
 function inspectV4Connection(db, file = null) {
   const metadata = readMetadata(db, file);
   if (metadata.schema_version !== String(SCHEMA_V4_VERSION)) {
+    const guidance = schemaVersionGuidance(file, metadata.schema_version);
     throw lodestarError("unsupported_schema", "Only the inspected schema-4 store can be converted.", {
-      identifiers: { database: file, expected: SCHEMA_V4_VERSION,
-        actual: metadata.schema_version ?? null },
-      action: "Use the matching Lodestar release to inspect another preserved legacy store.",
+      identifiers: { ...guidance.identifiers, expected: SCHEMA_V4_VERSION },
+      action: guidance.action,
     });
   }
   if (!/^[0-9a-f]{64}$/u.test(metadata.database_instance_id ?? "")) {
@@ -91,8 +135,8 @@ function inspectV4Connection(db, file = null) {
       action: "Preserve the store and resolve its exact schema before migration.",
     });
   const inventory = rawInventory(db);
-  const issues = numericIssues(inventory);
-  const changes = legacyChanges(inventory, issues);
+  const issues = numericIssues(inventory, file);
+  const changes = legacyChanges(inventory, issues, file);
   return {
     schema_version: SCHEMA_V4_VERSION,
     database_instance_id: metadata.database_instance_id,
@@ -135,37 +179,128 @@ export async function migrationPreflight(file) {
 }
 
 export async function createMigrationBackup(file, destination) {
-  const source = openConnection(file, { readOnly: true });
-  try { await sqliteBackup(source, destination); }
+  let source, staging, snapshot, restored, input, output;
+  let destinationCreated = false, bytesWritten = 0;
+  let phase = "staging_creation", failureFile = destination;
+  try {
+    // SQLite's backup API replaces an existing target. Keep that API inside an
+    // owned sibling directory; copy through a newly reserved destination handle.
+    const parent = path.dirname(path.resolve(destination));
+    const nativeStaging = await mkdtemp(nativeDatabasePath(path.join(parent, ".lodestar-backup-")));
+    staging = path.join(parent, path.basename(nativeStaging));
+    snapshot = path.join(staging, "snapshot.db");
+    phase = "source_open"; failureFile = file;
+    source = openConnection(file, { readOnly: true });
+    phase = "snapshot_creation"; failureFile = snapshot;
+    await sqliteBackup(source, nativeDatabasePath(snapshot));
+    source.close();
+    source = null;
+    phase = "snapshot_verification";
+    restored = await migrationPreflight(snapshot);
+    phase = "destination_copy";
+    input = await openFile(snapshot, "r");
+    failureFile = destination;
+    output = await openFile(destination, "wx", 0o600);
+    destinationCreated = true;
+    const buffer = Buffer.alloc(64 * 1024);
+    while (true) {
+      const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      let offset = 0;
+      while (offset < bytesRead) {
+        const written = await output.write(buffer, offset, bytesRead - offset, null);
+        if (written.bytesWritten === 0) throw new Error("The backup copy made no write progress.");
+        offset += written.bytesWritten;
+        bytesWritten += written.bytesWritten;
+      }
+    }
+    if (bytesWritten !== restored.source.bytes) throw new Error("The backup copy size does not match its verified snapshot.");
+    phase = "destination_flush";
+    await output.sync();
+    phase = "destination_close";
+    await output.close(); output = null;
+    await input.close(); input = null;
+    phase = "destination_verification";
+    const copied = await migrationPreflight(destination);
+    if (copied.logical_digest !== restored.logical_digest
+      || copied.schema_fingerprint !== restored.schema_fingerprint) {
+      throw new Error("The completed backup does not restore to its verified snapshot.");
+    }
+  }
   catch (error) {
-    throw wrapError(error, "migration_backup_failed",
+    const failure = { phase, cause: errorPayload(sqliteError(error, failureFile)) };
+    if (!destinationCreated && nativeStorageCode(error) === "EEXIST") {
+      throw lodestarError("migration_backup_conflict", "The backup destination already exists.", {
+        identifiers: { database: file, backup: destination, ...failure },
+        action: "Preserve the existing destination and choose a fresh backup path.", cause: error,
+      });
+    }
+    if (destinationCreated) {
+      throw lodestarError("migration_backup_failed", "The new backup was not accepted; its destination is preserved.", {
+        identifiers: { database: file, backup: destination, destination_created: true,
+          backup_accepted: false, bytes_written: bytesWritten, ...failure },
+        action: "Preserve the unaccepted backup at the reported path. Inspect the reported failure phase and cause using the configured runtime before choosing a fresh destination and retrying; do not migrate using this output.",
+        cause: error,
+      });
+    }
+    throw decorateError(wrapError(error, "migration_backup_failed",
       "Lodestar could not create the migration backup.", {
         identifiers: { database: file, backup: destination },
-        action: "Choose a writable backup destination and retry before migration.",
-      });
-  } finally { source.close(); }
-  const restored = await migrationPreflight(destination);
+        action: "Preserve the selected source and inspect the reported failure phase and cause. Resolve the selected path or storage failure before choosing a fresh backup destination and retrying migration preparation.",
+      }), failure);
+  } finally {
+    source?.close();
+    await output?.close().catch(() => {});
+    await input?.close().catch(() => {});
+    // Never remove the requested destination, even after a failed copy/flush.
+    if (snapshot) await unlink(snapshot).catch(() => {});
+    if (staging) await rmdir(staging).catch(() => {});
+  }
   return { path: path.resolve(destination), logical_digest: restored.logical_digest,
     schema_fingerprint: restored.schema_fingerprint };
 }
 
 function validateMigrationRequest(value) {
-  if (!value || Object.getPrototypeOf(value) !== Object.prototype
-    || value.v !== CONTRACT_VERSION) {
-    throw lodestarError("invalid_mutation_contract", "Migration requires a contract-5 request.");
+  const invalid = (field, requirement) => {
+    throw lodestarError("invalid_mutation_contract", `Migration ${field} ${requirement}.`, {
+      identifiers: { field },
+      action: "Preserve the source database. Correct the named migration request field using complete doctor --migration-preflight data and a separate restore-tested backup; do not replace missing evidence with guessed values.",
+    });
+  };
+  const plain = (object) => object !== null && typeof object === "object"
+    && Object.getPrototypeOf(object) === Object.prototype;
+  const hash = (text) => typeof text === "string" && /^[0-9a-f]{64}$/u.test(text);
+  if (!plain(value)) invalid("request", "must be a JSON object");
+  if (value.v !== CONTRACT_VERSION) invalid("v", "must be contract version 5");
+  try { validateIdentifier(value.request_id, "request_id"); }
+  catch { invalid("request_id", "must be a valid nonempty identifier"); }
+  if (!plain(value.preflight)) invalid("preflight", "must contain the complete source preflight object");
+  if (!plain(value.backup)) invalid("backup", "must contain independent restore-tested backup evidence");
+  const { preflight, backup } = value;
+  if (preflight.v !== CONTRACT_VERSION) invalid("preflight.v", "must be contract version 5");
+  if (preflight.schema_version !== SCHEMA_V4_VERSION) invalid("preflight.schema_version", "must identify schema 4");
+  if (!hash(preflight.database_instance_id)) invalid("preflight.database_instance_id", "must be the observed 64-character lowercase hexadecimal instance ID");
+  if (preflight.database_epoch !== null && !hash(preflight.database_epoch)) {
+    invalid("preflight.database_epoch", "must be the observed epoch or null for a source without one");
   }
-  validateIdentifier(value.request_id, "request_id");
-  if (!value.preflight || !value.backup) {
-    throw lodestarError("invalid_mutation_contract",
-      "Migration requires preflight and backup evidence.");
+  if (!Number.isSafeInteger(preflight.database_revision) || preflight.database_revision < 0) {
+    invalid("preflight.database_revision", "must be the observed nonnegative safe integer revision");
   }
-  if (value.backup.logical_digest !== value.preflight.logical_digest) {
-    throw lodestarError("migration_source_conflict",
-      "The backup does not match the migration preflight.", {
-        identifiers: { preflight_digest: value.preflight.logical_digest,
-          backup_digest: value.backup.logical_digest ?? null },
-        action: "Create and restore-test a fresh backup from the preflight source.",
+  for (const [name, evidence] of [["preflight", preflight], ["backup", backup]]) {
+    for (const field of ["schema_fingerprint", "logical_digest"]) {
+      if (!hash(evidence[field])) invalid(`${name}.${field}`, "must be a 64-character lowercase hexadecimal digest");
+    }
+  }
+  if (typeof backup.path !== "string" || backup.path.length === 0 || /[\u0000\uD800-\uDFFF]/u.test(backup.path)) {
+    invalid("backup.path", "must be a nonempty Unicode path without NUL");
+  }
+  for (const field of ["logical_digest", "schema_fingerprint"]) {
+    if (backup[field] !== preflight[field]) {
+      throw lodestarError("migration_source_conflict", "The backup does not match the migration preflight.", {
+        identifiers: { field, preflight_digest: preflight[field], backup_digest: backup[field] },
+        action: "Preserve the source. Create a fresh preflight and separate restore-tested backup with matching schema fingerprint and logical digest.",
       });
+    }
   }
   canonicalStringify(value);
   return value;
@@ -202,6 +337,30 @@ export async function migrateDatabase(file, { request, now = () => new Date() } 
       }
       return { ...provenance.result, replayed: true };
     }
+    try {
+      const [sourcePath, backupPath, sourceInfo, backupInfo] = await Promise.all([
+        realpath(file), realpath(accepted.backup.path), stat(file, { bigint: true }),
+        stat(accepted.backup.path, { bigint: true }),
+      ]);
+      if (sourcePath === backupPath || (sourceInfo.ino !== 0n &&
+        sourceInfo.dev === backupInfo.dev && sourceInfo.ino === backupInfo.ino)) {
+        throw lodestarError("migration_source_conflict", "The claimed backup is the migration source itself.", {
+          identifiers: { database: file, backup: accepted.backup.path },
+          action: "Create and restore-test a separate independent backup file, then prepare a new migration request from that evidence.",
+        });
+      }
+      if (sourceInfo.ino === 0n || backupInfo.ino === 0n) {
+        throw lodestarError("migration_source_conflict", "Filesystem identity could not prove an independent backup.", {
+          identifiers: { database: file, backup: accepted.backup.path },
+          action: "Create and restore-test a separate backup on a local filesystem that exposes file identity, then prepare the migration request again.",
+        });
+      }
+    } catch (error) {
+      throw wrapError(error, "migration_source_conflict", "The backup's independent file identity could not be inspected.", {
+        identifiers: { database: file, backup: accepted.backup.path ?? null, cause_code: error.code ?? null },
+        action: "Preserve the source. Create and restore-test a separate independent backup in a readable local path before migration.",
+      });
+    }
     let restoredBackup;
     try {
       restoredBackup = await migrationPreflight(accepted.backup.path);
@@ -213,14 +372,15 @@ export async function migrateDatabase(file, { request, now = () => new Date() } 
           action: "Create and restore-test a fresh backup from the preflight source.",
         });
     }
-    if (restoredBackup.logical_digest !== accepted.backup.logical_digest) {
-      throw lodestarError("migration_source_conflict",
-        "The backup on disk does not match the supplied backup evidence.", {
-          identifiers: { backup: accepted.backup.path ?? null,
-            expected_digest: accepted.backup.logical_digest,
-            actual_digest: restoredBackup.logical_digest ?? null },
-          action: "Create and restore-test a fresh backup from the preflight source.",
-        });
+    for (const field of ["logical_digest", "schema_fingerprint"]) {
+      if (restoredBackup[field] !== accepted.backup[field]) {
+        throw lodestarError("migration_source_conflict",
+          "The backup on disk does not match the supplied backup evidence.", {
+            identifiers: { backup: accepted.backup.path, field,
+              expected_digest: accepted.backup[field], actual_digest: restoredBackup[field] },
+            action: "Preserve the source. Create a fresh preflight and separate restore-tested backup with matching schema fingerprint and logical digest.",
+          });
+      }
     }
     return admittedTransaction(db, () => {
       const actual = inspectV4Connection(db, file);
@@ -240,12 +400,22 @@ export async function migrateDatabase(file, { request, now = () => new Date() } 
       validateTimestamp(timestamp, "timestamp");
       const revision = allocateRevision(db);
       const original = rawInventory(db);
-      const changes = legacyChanges(original, actual.numeric_issues);
+      const changes = legacyChanges(original, actual.numeric_issues, file);
       const affected = new Set([...changes.records.map(({ id }) => id), ...changes.sources.map(({ record_id }) => record_id)]);
+      const aliasesByRecord = rowsBy(original.aliases, "record_id");
+      const linksByRecord = rowsBy(original.links, "from_id");
+      const sourcesByRecord = rowsBy(original.sources, "record_id");
       const beforeImages = original.records.filter(({ id }) => affected.has(id)).map((row) => ({ raw_record: row,
-        raw_associations: { aliases: original.aliases.filter(({ record_id }) => record_id === row.id),
-          links: original.links.filter(({ from_id }) => from_id === row.id),
-          sources: original.sources.filter(({ record_id }) => record_id === row.id) } }));
+        raw_associations: { aliases: aliasesByRecord.get(row.id) ?? [],
+          links: linksByRecord.get(row.id) ?? [],
+          sources: sourcesByRecord.get(row.id) ?? [] } }));
+      const originalRecordsById = new Map(beforeImages.map(({ raw_record }) => [raw_record.id, raw_record]));
+      const changedSourcesByRecord = new Map();
+      for (const source of changes.sources) {
+        const origins = changedSourcesByRecord.get(source.record_id) ?? new Map();
+        origins.set(source.origin, source);
+        changedSourcesByRecord.set(source.record_id, origins);
+      }
       const epoch = createDatabaseInstanceId();
       const update = db.prepare("UPDATE metadata SET value=? WHERE key=?");
       update.run(String(CONTRACT_VERSION), "schema_version");
@@ -285,8 +455,8 @@ export async function migrateDatabase(file, { request, now = () => new Date() } 
       const foreignKeys = db.prepare("SELECT * FROM pragma_foreign_key_check").all();
       const after = rawInventory(db);
       const restored = { ...after, metadata: original.metadata,
-        records: after.records.filter((row) => row.id !== id).map((row) => beforeImages.find((image) => image.raw_record.id === row.id)?.raw_record ?? row),
-        sources: after.sources.map((row) => changes.sources.find((source) => source.record_id === row.record_id && source.origin === row.origin) ?? row) };
+        records: after.records.filter((row) => row.id !== id).map((row) => originalRecordsById.get(row.id) ?? row),
+        sources: after.sources.map((row) => changedSourcesByRecord.get(row.record_id)?.get(row.origin) ?? row) };
       if (canonicalStringify(restored) !== canonicalStringify(original)) throw lodestarError("database_integrity", "Migration before-images do not reconstruct the exact source rows.");
       const counts = Object.fromEntries(["records", "aliases", "links", "sources"]
         .map((table) => [table,
@@ -426,8 +596,11 @@ export async function promoteRecoveredDatabase(file, {
       assertSupportedSchema(db, file);
       assertSupportedSchema(acceptedDb, accepted.recovery.accepted_source.path);
       const acceptedDigest = sha256(canonicalStringify(rawInventory(acceptedDb)));
-      if (acceptedDigest !== accepted.recovery.accepted_source.logical_digest
-        || acceptedDigest !== sha256(canonicalStringify(rawInventory(db)))) {
+      if (acceptedDigest !== accepted.recovery.accepted_source.logical_digest) {
+        throw lodestarError("recovery_accounting_conflict", "The locked images do not match the complete accepted recovery evidence.");
+      }
+      const recoveredDigest = sha256(canonicalStringify(rawInventory(db)));
+      if (acceptedDigest !== recoveredDigest) {
         throw lodestarError("recovery_accounting_conflict", "The locked images do not match the complete accepted recovery evidence.");
       }
       const current = readMetadata(db, file);
@@ -441,7 +614,7 @@ export async function promoteRecoveredDatabase(file, {
               actual_epoch: current.database_epoch },
           });
       }
-      if (sha256(canonicalStringify(rawInventory(db))) !== accepted.recovery.recovered.logical_digest) {
+      if (recoveredDigest !== accepted.recovery.recovered.logical_digest) {
         throw lodestarError("recovery_accounting_conflict", "The recovered state changed before the promotion lock was acquired.");
       }
       const timestamp = now().toISOString();

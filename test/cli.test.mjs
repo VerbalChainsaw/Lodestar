@@ -4,12 +4,14 @@ import { createHash } from "node:crypto";
 import {
   access,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
-import { Readable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -229,7 +231,8 @@ test("the spawned CLI leaves its argument boundary to the host OS", () => {
   assert.match(hostFailure.code, /^(E2BIG|EINVAL|ENAMETOOLONG)$/u);
 });
 
-test("the CLI does not trust or amplify forged Lodestar errors", async () => {
+test("the CLI does not trust or amplify forged Lodestar errors", async t => {
+  const f = await fixture(t);
   const forged = new Error("x".repeat(100_000));
   forged.name = "LodestarError";
   forged.code = { not: "a stable error code" };
@@ -242,7 +245,7 @@ test("the CLI does not trust or amplify forged Lodestar errors", async () => {
     },
   };
 
-  const exitCode = await runCli(["put"], result.io);
+  const exitCode = await runCli(["--db", f.database, "put"], result.io);
   assert.equal(exitCode, 1);
   assert.equal(result.output().stdout, "");
   assert.ok(Buffer.byteLength(result.output().stderr, "utf8") < 4096);
@@ -254,13 +257,13 @@ test("the CLI does not trust or amplify forged Lodestar errors", async () => {
     database_instance_id: null, database_epoch: null, request: null,
     scope: { project: null, cwd: null, session: null, actor: null },
     error: {
-      action: "Retry the command. If it fails again, run lodestar doctor.",
-      code: "internal_error",
-      identifiers: {},
-      message: "Lodestar could not complete the operation.",
+      action: "Preserve existing journals, the exact request bytes and ID, and the selected database. Correct the reported input, binding or local storage access before retrying this undispatched request. For older uncertain attempts, use the configured Lodestar runtime with the same --db selection: doctor and get --raw -- <id> for the known receipt and current record. Reconcile those attempts before an exact saved-request replay.",
+      code: "recovery_journal_failed",
+      identifiers: { committed: false, journal_root: path.join(f.root, "cli-pending") },
+      message: "No current write was dispatched; exact recovery storage could not be prepared.",
     },
     more: false,
-    next: ["Retry the command. If it fails again, run lodestar doctor."],
+    next: ["Preserve existing journals, the exact request bytes and ID, and the selected database. Correct the reported input, binding or local storage access before retrying this undispatched request. For older uncertain attempts, use the configured Lodestar runtime with the same --db selection: doctor and get --raw -- <id> for the known receipt and current record. Reconcile those attempts before an exact saved-request replay."],
   });
 });
 
@@ -315,13 +318,13 @@ test("the CLI always normalizes unreadable genuine error diagnostics", async () 
     database_instance_id: null, database_epoch: null, request: null,
     scope: { project: null, cwd: null, session: null, actor: null },
     error: {
-      action: "Review the identifiers and retry with valid Lodestar input.",
+      action: "Correct the reported input using lodestar <command> --help for its arguments and request schema, then run the command with the corrected input.",
       code: "invalid_input",
       identifiers: {},
       message: "The injected input is invalid.",
     },
     more: false,
-    next: ["Review the identifiers and retry with valid Lodestar input."],
+    next: ["Correct the reported input using lodestar <command> --help for its arguments and request schema, then run the command with the corrected input."],
   });
 });
 
@@ -397,6 +400,166 @@ test('an occupied --output path fails with a typed conflict and preserves the fi
   assert.equal(result.exitCode, 3);
   assert.equal(JSON.parse(result.stderr).error.code, 'output_conflict');
   assert.equal(await readFile(target, 'utf8'), '{"keep":true}');
+});
+
+test('a committed put retains its request, receipt and verified output after stdout receipt failure', async (t) => {
+  const f = await fixture(t);
+  const id = 'knowledge:receipt-lost';
+  const body = await f.request({ mode: 'create', record: { id, kind: 'knowledge', name: id,
+    scope: 'global', availability: 'known', data: { value: 1 }, aliases: [], links: [],
+    sources: [] } }, [{ kind: 'record', id }]);
+  const target = path.join(f.root, 'response.json');
+  const captured = capture(JSON.stringify(body));
+  captured.io.stdout.write = () => { throw new Error('receipt stream unavailable'); };
+  const code = await runCli(['--db', f.database, '--output', target, 'put'], captured.io);
+  const error = JSON.parse(captured.output().stderr);
+  const stored = await f.cli(['get', id]);
+  const outputBytes = await readFile(target);
+  const saved = JSON.parse(outputBytes.toString('utf8'));
+  assert.equal(stored.value.data.id, id);
+  assert.notEqual(code, 0);
+  assert.equal(error.error.code, 'response_delivery_failed');
+  assert.equal(error.error.identifiers.request_id, body.request_id);
+  assert.equal(error.error.identifiers.committed_revision, saved.revision);
+  assert.equal(error.error.identifiers.receipt_id, saved.receipt_id);
+  assert.deepEqual(error.error.identifiers.receipt_read_args,
+    ['--db', f.database, 'get', saved.receipt_id]);
+  assert.equal((await f.cli(['get', saved.receipt_id])).value.data.id, saved.receipt_id);
+  assert.equal(error.error.identifiers.output_file.path, target);
+  assert.equal(error.error.identifiers.output_file.bytes, outputBytes.length);
+  assert.equal(error.error.identifiers.output_file.sha256,
+    createHash('sha256').update(outputBytes).digest('hex'));
+  assert.match(error.error.action, /inspect|verify/i);
+  assert.doesNotMatch(error.error.action, /^Retry the command\./);
+});
+
+test('a committed put retains receipt recovery when stdout was its only response channel', async (t) => {
+  const f = await fixture(t);
+  const id = 'knowledge:stdout-lost';
+  const body = await f.request({ mode: 'create', record: { id, kind: 'knowledge', name: id,
+    scope: 'global', availability: 'known', data: { value: 1 }, aliases: [], links: [],
+    sources: [] } }, [{ kind: 'record', id }]);
+  const captured = capture(JSON.stringify(body));
+  captured.io.stdout.write = () => { throw new Error('private stdout marker'); };
+  const code = await runCli(['--db', f.database, 'put'], captured.io);
+  const failure = JSON.parse(captured.output().stderr);
+  assert.equal(code, 5);
+  assert.equal(failure.error.code, 'response_delivery_failed');
+  assert.equal(failure.error.identifiers.request_id, body.request_id);
+  assert.ok(Number.isSafeInteger(failure.error.identifiers.committed_revision));
+  assert.equal(failure.error.identifiers.output_file, undefined);
+  assert.equal((await f.cli(failure.error.identifiers.receipt_read_args.slice(2))).code, 0);
+  assert.equal((await f.cli(['get', id])).value.data.id, id);
+  assert.doesNotMatch(captured.output().stderr, /private stdout marker/);
+});
+
+test('asynchronous stdout failure after commit is observed before runCli returns', async (t) => {
+  const f = await fixture(t);
+  const id = 'knowledge:async-stdout';
+  const body = await f.request({ mode: 'create', record: { id, kind: 'knowledge', name: id,
+    scope: 'global', availability: 'known', data: { value: 1 }, aliases: [], links: [],
+    sources: [] } }, [{ kind: 'record', id }]);
+  const captured = capture(JSON.stringify(body));
+  captured.io.stdout = new Writable({ write(_chunk, _encoding, callback) {
+    setImmediate(() => callback(new Error('private async stdout marker')));
+  } });
+  const code = await runCli(['--db', f.database, 'put'], captured.io);
+  const failure = JSON.parse(captured.output().stderr);
+  assert.equal(code, 5);
+  assert.equal(failure.error.code, 'response_delivery_failed');
+  assert.equal(failure.error.identifiers.request_id, body.request_id);
+  assert.equal((await f.cli(['get', id])).value.data.id, id);
+  assert.doesNotMatch(captured.output().stderr, /private async stdout marker/);
+});
+
+test('asynchronous stderr failure preserves the CLI failure status without an unhandled stream error', async () => {
+  const stderr = new Writable({ write(_chunk, _encoding, callback) {
+    setImmediate(() => callback(new Error('private async stderr marker')));
+  } });
+  const code = await runCli(['unknown-command'], {
+    stdin: Readable.from([]), stdout: { write() {} }, stderr,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(code, 2);
+});
+
+for (const failedStage of ['writeFile', 'sync']) {
+  test(`a committed put identifies ${failedStage} response delivery failure without claiming a complete file`, async (t) => {
+    const f = await fixture(t);
+    const id = `knowledge:output-${failedStage}`;
+    const body = await f.request({ mode: 'create', record: { id, kind: 'knowledge', name: id,
+      scope: 'global', availability: 'known', data: { value: 1 }, aliases: [], links: [],
+      sources: [] } }, [{ kind: 'record', id }]);
+    const target = path.join(f.root, 'response.json');
+    const probe = await open(path.join(f.root, 'probe'), 'wx');
+    const prototype = Object.getPrototypeOf(probe);
+    await probe.close();
+    const original = prototype[failedStage];
+    prototype[failedStage] = async function (...args) {
+      const own = await this.stat();
+      const output = await stat(target);
+      const isOutput = own.ino === output.ino && own.dev === output.dev;
+      if (isOutput && this.fd !== undefined && args[0]?.includes?.('"operation":"put"')) {
+        throw new Error('injected output failure');
+      }
+      if (isOutput && failedStage === 'sync') throw new Error('injected output sync failure');
+      return original.apply(this, args);
+    };
+    const captured = capture(JSON.stringify(body));
+    let code;
+    try { code = await runCli(['--db', f.database, '--output', target, 'put'], captured.io); }
+    finally { prototype[failedStage] = original; }
+    const error = JSON.parse(captured.output().stderr);
+    const stored = await f.cli(['get', id]);
+    assert.equal(stored.value.data.id, id);
+    assert.notEqual(code, 0);
+    assert.equal(error.error.code, 'response_delivery_failed');
+    assert.equal(error.error.identifiers.request_id, body.request_id);
+    assert.equal(error.error.identifiers.committed_revision, stored.value.revision);
+    assert.equal(error.error.identifiers.output_file, undefined);
+    assert.match(error.error.action, /inspect|receipt/i);
+    assert.doesNotMatch(error.error.action, /^Retry the command\./);
+  });
+}
+
+test('a committed put retains its recovery envelope when output close reports failure', async (t) => {
+  const f = await fixture(t);
+  const id = 'knowledge:output-close';
+  const body = await f.request({ mode: 'create', record: { id, kind: 'knowledge', name: id,
+    scope: 'global', availability: 'known', data: { value: 1 }, aliases: [], links: [],
+    sources: [] } }, [{ kind: 'record', id }]);
+  const target = path.join(f.root, 'response.json');
+  const probe = await open(path.join(f.root, 'probe'), 'wx');
+  const prototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const originalWriteFile = prototype.writeFile;
+  let outputHandle;
+  prototype.writeFile = async function (...args) {
+    if (!outputHandle) {
+      outputHandle = this;
+      const originalClose = this.close;
+      this.close = async function (...closeArgs) {
+        await originalClose.apply(this, closeArgs);
+        throw new Error('injected output close failure');
+      };
+    }
+    return originalWriteFile.apply(this, args);
+  };
+  const captured = capture(JSON.stringify(body));
+  let code;
+  let thrown;
+  try { code = await runCli(['--db', f.database, '--output', target, 'put'], captured.io); }
+  catch (error) { thrown = error; }
+  finally { prototype.writeFile = originalWriteFile; }
+  const stored = await f.cli(['get', id]);
+  assert.equal(stored.value.data.id, id);
+  assert.ifError(thrown);
+  assert.notEqual(code, 0);
+  const failure = JSON.parse(captured.output().stderr);
+  assert.equal(failure.error.code, 'response_delivery_failed');
+  assert.equal(failure.error.identifiers.request_id, body.request_id);
+  assert.equal(failure.error.identifiers.committed_revision, stored.value.revision);
+  assert.equal(failure.error.identifiers.output_file, undefined);
 });
 
 test('limited reads signal more at the envelope level', async (t) => {

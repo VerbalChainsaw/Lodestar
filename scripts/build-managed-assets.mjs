@@ -1,5 +1,8 @@
 // Managed-asset integrity build (see AGENTS.md "Repository verification invariants").
-//   default --check: verify skill payloads, Golden mirrors, bootstrap stub/docs, and the byte manifest.
+//   default --check: verify maintained skill payloads, the byte manifest,
+//     the Lodestar Codex plugin mirror, and bootstrap stub/document copies.
+//   --check --source-root <golden-rules-root>: additionally verify the four
+//     Golden-owned skill trees against their original selected source.
 //   --write: regenerate generated copies; requires --source-root <golden-rules-root>.
 // After editing managed-assets/skills/**, run:
 //   npm run assets:build -- --source-root "<Golden-Rules-root>"
@@ -21,7 +24,6 @@ const DISTRIBUTION_OWNER = "npm:lodestar-agent-context";
 const SOURCE_IDS = Object.freeze({
   "director-protocol": "golden-rules:director-protocol",
   codeplan: "golden-rules:codeplan",
-  "center-multigeometry": "golden-rules:center-multigeometry",
   "center-audit": "golden-rules:center-audit",
   "ladder-audit": "golden-rules:ladder-audit",
   lodestar: "lodestar-repository:lodestar",

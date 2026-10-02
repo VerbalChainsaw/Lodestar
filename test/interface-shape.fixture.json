@@ -1,0 +1,12 @@
+{
+  "capability_version": 1,
+  "required_operations": [
+    { "id": "get", "argv": ["get"], "effect": "read" },
+    { "id": "find", "argv": ["find"], "effect": "read" },
+    { "id": "decision.show", "argv": ["decision", "show"], "effect": "read" },
+    { "id": "decision.status", "argv": ["decision", "status"], "effect": "domain_write" },
+    { "id": "put", "argv": ["put"], "effect": "record_write" },
+    { "id": "setup", "argv": ["setup"], "effect": "external_write" },
+    { "id": "manager", "argv": ["manager"], "effect": "interactive" }
+  ]
+}
