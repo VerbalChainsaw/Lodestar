@@ -1,10 +1,12 @@
-# Lodestar
+# Lodestar 3
 
-**Give your next session a head start.**
+**Useful memory. A clear next step.**
 
-![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
+![A mountain trail at dawn beneath a guiding star — explore Lodestar 3](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Operator recipes](docs/operator-recipes.md) · [Release notes](docs/releases/v3.0.0.md) · [FAQ](Q&A.md)
+**[Explore the splash page](https://verbalchainsaw.github.io/Lodestar/) · [Download 3.0.0](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0) · [Installation guide](docs/installation.md)**
+
+[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [Release notes](docs/releases/v3.0.0.md) · [FAQ](Q&A.md)
 
 Lodestar keeps project context, decisions, evidence, and unfinished work in one
 local registry. Open **Loader** to see what needs attention, capture a useful
@@ -16,6 +18,20 @@ Use it when new sessions keep rediscovering project facts, revisiting settled
 decisions, or losing the thread of unfinished work. It provides a current starting
 point and a checked correction path. You and your native project instructions
 keep authority over the work.
+
+## Meet Loader and Manager
+
+![Lodestar Loader: project navigation, sortable records and a readable inspector in the graphite Windows console](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/site/assets/lodestar3-loader.png)
+
+*Actual Loader application window with demonstration data. [View full size](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/site/assets/lodestar3-loader.png).*
+
+| Loader · Windows desktop | Manager · Terminal menu | CLI · Coding agents |
+| --- | --- | --- |
+| Browse projects, sort and group records, inspect history, and review changes before saving. | Find records and use guided actions from a text menu. | Retrieve relevant context and make guarded updates through typed commands. |
+
+**One local store.** Decisions, evidence and unfinished work stay available across
+all three interfaces. [See the product](https://verbalchainsaw.github.io/Lodestar/#product)
+or follow an [operator recipe](docs/operator-recipes.md).
 
 ## New in 3.0
 
