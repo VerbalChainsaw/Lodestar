@@ -305,6 +305,14 @@ database before dispatch. After delivering a complete success response, the CLI
 retires only the duplicate journal created by that invocation. Interrupted or
 uncertain responses retain exact request bytes and receipt identity for
 reconciliation. Completed receipts do not count as unresolved saves.
+Manager journals include their selected interface config path so the CLI can
+verify the producer's complete binding before reusing its capture. Older or
+incomplete contexts without that path retain their files and receive a separate
+CLI capture; their presence alone cannot suppress recovery evidence.
+If replay response storage fails, a matching success receipt establishes a
+commit. A rejection from that replay leaves the earlier unresolved attempt
+unknown, even when the latest rejection says it did not commit. Receipt-read
+arguments are included only when an actual receipt ID is available.
 These directories contain private request data; keep them in trusted local
 storage and preserve their permissions. POSIX CLI journal files use mode 0600
 and directories 0700; Windows inherits the selected local directory's access
@@ -362,6 +370,10 @@ not change the current decisions. Bare `decision` means `decision show`;
 
 `export` produces private raw JSON evidence. It is not a SQLite backup image and
 cannot be supplied as a recovered image to doctor/recovery promotion.
+
+Manager catalog reads cap each CLI page at the remaining record budget. Their
+continuation uses the core's offset and revision, so resuming a bounded read
+does not repeat delivered records or silently switch to a newer snapshot.
 
 ## Review research freshness
 

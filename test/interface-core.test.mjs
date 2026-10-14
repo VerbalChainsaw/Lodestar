@@ -101,10 +101,15 @@ test("capabilities classify every command and preserve mutation schemas", async 
     ["--args-file <JSON-array-file>", "--args-stdin"]);
 });
 
-test("packaged toolchain install matches current version and qualifies init", async () => {
+test("packaged toolchain routes the local candidate to versioned artifact installation and qualifies init", async () => {
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const guide = await readFile(new URL("../managed-assets/skills/lodestar/references/toolchain.md", import.meta.url), "utf8");
-  assert.ok(guide.includes(`npm install --global lodestar-agent-context@${pkg.version}`));
+  const installation = await readFile(new URL("../docs/installation.md", import.meta.url), "utf8");
+  assert.match(guide, /candidate tarball against its own SHA-256\s+inventory/u);
+  assert.match(guide, /isolated package procedure in the candidate's included\s+`docs\/installation\.md`/u);
+  assert.ok(installation.includes(`npm install --prefix "<local-package-directory>" --ignore-scripts "<candidate-directory>/lodestar-agent-context-${pkg.version}.tgz"`));
+  assert.ok(installation.includes(`npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-${pkg.version}.tgz"`));
+  assert.ok(!guide.includes(`npm install --global lodestar-agent-context@${pkg.version}`));
   assert.match(guide, /lodestar init.*only to create an explicitly new store/u);
   assert.match(guide, /installation and migration guide/u);
   assert.equal(/lodestar-agent-context@2\.2\.0/u.test(guide), false);

@@ -37,7 +37,7 @@ async function fixture(t, version = '3.0.0') {
   await mkdir(source);
   await mkdir(path.join(bundle, 'core'), { recursive: true });
   await cp(path.join(ROOT, 'docs'), path.join(source, 'docs'), { recursive: true });
-  if (version !== '3.0.0') {
+  if (!['3.0.0', '3.0.1'].includes(version)) {
     await writeFile(path.join(source, `docs/releases/v${version}.md`),
       `# Lodestar ${version}\n\nComplete future note, with new link contexts.\n`
       + '[Operator recipes](../operator-recipes.md)\n'
@@ -86,7 +86,7 @@ async function inspectLinks(file) {
   return { text, links, broken };
 }
 
-for (const version of ['3.0.0', '4.1.2']) {
+for (const version of ['3.0.0', '3.0.1', '4.1.2']) {
   test(`actual release export keeps complete ${version} notes and usable local links`, { skip: !windows }, async (t) => {
     const f = await fixture(t, version);
     const canonical = path.join(f.bundle, `core/docs/releases/v${version}.md`);

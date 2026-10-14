@@ -129,7 +129,9 @@ export async function sourceIdentity(configRoot, cli) {
       }
     }
     for (const name of ["src", "managed-assets", "codex-plugin", "docs"]) await visit(path.join(sourceRoot, name));
-    if (!selected.size) selected.set(path.basename(cli), { file: cli });
+    // The configured entry may use a nonstandard filename. Its actual bytes
+    // belong to the binding even when standard package files were also found.
+    selected.set(path.relative(sourceRoot, cli).replaceAll("\\", "/"), { file: cli });
   }
   let content = "";
   for (const [name, entry] of [...selected].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {

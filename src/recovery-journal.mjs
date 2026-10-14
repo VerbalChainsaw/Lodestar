@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { MUTATION_INPUTS } from "./cli-commands.mjs";
-import { revalidateSelection, sourceDigest } from "./interface-config.mjs";
+import { loadInterfaceConfig, revalidateSelection, sourceDigest } from "./interface-config.mjs";
 import { assertTextBytes, JSON_INPUT_MAXIMUM_BYTES, parseJsonText, readTextFileComplete, readStreamComplete } from "./json.mjs";
 import { normalizeMutationRequest } from "./records.mjs";
 import { lodestarError, wrapError } from "./errors.mjs";
@@ -85,9 +85,33 @@ function settles(response, request, operation, priorUnknown) {
 
 // Read adapters preserve legacy native/Manager bytes. They verify the producer's
 // actual binding rather than interpreting a different producer's hash as equal.
+function nativeDispatchHash(contextText, context, operation) {
+  // Native context and dispatch use the same .NET serializer. Preserve its
+  // scalar spellings instead of translating Unicode/HTML escaping into JS JSON.
+  // The caller strictly parsed the complete document (including duplicate keys).
+  const expected = new Map([["operation", operation], ["project_root", context.project_root ?? null],
+    ["request_sha256", context.request_sha256]]);
+  const tokens = new Map();
+  let depth = 0;
+  for (const token of contextText.matchAll(/"(?:\\.|[^"\\])*"|[{}\[\]]/gu)) {
+    if (token[0] === "{" || token[0] === "[") { depth++; continue; }
+    if (token[0] === "}" || token[0] === "]") { depth--; continue; }
+    if (depth !== 1) continue;
+    const key = parseJsonText(token[0]);
+    if (!expected.has(key)) continue;
+    const value = /^\s*:\s*("(?:\\.|[^"\\])*"|null)(?=\s*[,}])/u
+      .exec(contextText.slice(token.index + token[0].length));
+    if (value && parseJsonText(value[1]) === expected.get(key)) tokens.set(key, value[1]);
+  }
+  if (tokens.size !== expected.size) return null;
+  return hash(`{"operation":${tokens.get("operation")},"cwd":${tokens.get("project_root")},"request_sha256":${tokens.get("request_sha256")}}`);
+}
 async function admit(selection, folder, proof) {
   await plain(folder);
-  const context=await json(path.join(folder,"context.json"));
+  const contextFile=path.join(folder,"context.json");
+  await plain(contextFile);
+  const contextText=await readTextFileComplete(contextFile,{resource:"recovery journal",maximum:journalLimit(contextFile)});
+  const context=parseJsonText(contextText);
   await plain(path.join(folder,"request.json"));
   const text=await readTextFileComplete(path.join(folder,"request.json"),{resource:"saved request"});
   const bytes=Buffer.from(text,"utf8");
@@ -121,7 +145,9 @@ async function admit(selection, folder, proof) {
     const legacy = operation==='put' && request.input.mode==='update' && parseJsonText(text).write_basis;
     if(!legacy && !(request.actor?.id?.startsWith('user:') && request.actor.agent==='human' && request.actor.harness==='loader' && request.actor.session===null))throw fail("Native journal actor is not its original human operator binding.",folder);
     if(context.project_root && (context.project_root!==request.checkout || context.project_scope!==request.project_scope))throw fail("Native project binding conflicts with its saved request.",folder);
-    if(context.dispatch_sha256!==undefined && context.dispatch_sha256!==hash(JSON.stringify({operation,cwd:context.project_root??null,request_sha256:context.request_sha256})))throw fail("Native dispatch binding conflicts with its saved request.",folder);
+    if(context.dispatch_sha256!==undefined && (!identity(context.dispatch_sha256) ||
+      (context.dispatch_sha256!==hash(JSON.stringify({operation,cwd:context.project_root??null,request_sha256:context.request_sha256})) &&
+      context.dispatch_sha256!==nativeDispatchHash(contextText,context,operation))))throw fail("Native dispatch binding conflicts with its saved request.",folder);
     const cwd=context.project_root;
     args=[...operation.split("."),...(cwd&&!['put','delete'].includes(operation)?["--cwd",cwd]:[]),"--file",file];
   }else{
@@ -279,9 +305,18 @@ async function prepareJournal(selection, operation, parsed, arguments_, io) {
       if(context?.recovery_v===undefined && context?.database===selection.database && context.operation===operation &&
         context.request_sha256===hash(bytes) && context.database_instance_id===request.database_instance_id &&
         context.database_epoch===request.database_epoch){
-        // An interface already froze these exact bytes before dispatch. Avoid a
-        // second capture; recovery admission still validates its full binding.
-        return null;
+        // The child normally has a direct runtime selection, while its producer
+        // is config-bound. Load that actual config before trusting its journal.
+        // Older contexts without a config path keep their evidence and receive
+        // an independent invocation-owned capture below.
+        const configPath=context.config??context.config_path;
+        if(configPath){
+          const producer=await loadInterfaceConfig(configPath,{requireLoader:false});
+          if(producer.node!==selection.node||producer.cli!==selection.cli||producer.database!==selection.database)
+            throw fail("Producer recovery config does not select this CLI runtime and database.",folder);
+          await admit(producer,folder,await proofs(producer));
+          return null;
+        }
       }
     }
   }
@@ -394,12 +429,16 @@ export async function recoveryReplay(selection,key,execute){
     effect:journal.operation.includes(".")?"domain_write":"record_write"});
   if(result.envelope){
     try{await publish(path.join(journal.folder,"response.json"),result.envelope);}
-    catch(error){throw lodestarError("response_delivery_failed","The exact replay completed but its local response could not be saved.",{
-      identifiers:{journal:journal.folder,committed:true,request_id:journal.request.request_id,
+    catch(error){
+      const committed=result.kind==="EnvelopeSuccess" && settles(result.envelope,journal.request,journal.operation,true)
+        ? true : "unknown";
+      const receipt=result.envelope.receipt_id;
+      throw lodestarError("response_delivery_failed","The exact replay returned a response but its local response could not be saved.",{
+      identifiers:{journal:journal.folder,committed,request_id:journal.request.request_id,
         database_instance_id:journal.request.database_instance_id,database_epoch:journal.request.database_epoch,
-        committed_revision:result.envelope.revision,receipt_id:result.envelope.receipt_id,
-        receipt_read_args:["--db",selection.database,"get",result.envelope.receipt_id]},
-      action:`Preserve '${journal.folder}'. Read the named original receipt before any further replay; restore writable local storage.`,cause:error});}
+        ...(committed===true?{committed_revision:result.envelope.revision}:{}),
+        ...(typeof receipt==="string" && receipt ? {receipt_id:receipt,receipt_read_args:["--db",selection.database,"get",receipt]} : {})},
+      action:`Preserve '${journal.folder}'. Reconcile the saved request and original receipt before any further replay; restore writable local storage.`,cause:error});}
   }
   return result;
 }

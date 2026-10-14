@@ -8,14 +8,14 @@
       "source_entrypoint": "skills/adderall/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "17e7b7020e836f7141dec897dda636112e4166663bba0eb91da5e4e2f816e0e1"
+        "value": "fcd88c28e5de01cbf2f76428dd0f4a178c4ce03eee203872d6d01f1538fed64c"
       },
       "payload_root": "skills/adderall",
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 3430,
-          "sha256": "d83d35ff61828e6b224fc22fb05aec96873c54b3c2647c4c695e6a96f250dd56"
+          "bytes": 1373,
+          "sha256": "9f2a27fbe1a702135f8bb9a9f3513c0004c050e46ceb36666e2346ee18cdf650"
         }
       ],
       "distribution_owner": "npm:lodestar-agent-context"
@@ -188,7 +188,7 @@
       "source_entrypoint": "skills/lodestar/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "a95fb587173967de454f7b65eeec86946300b3faaa8734b7f8fd643f51c4ea7e"
+        "value": "15ab9f720ee5a6df61f8a9f4a825582842ea72946284b9a37d0cc9c328f1dedc"
       },
       "payload_root": "skills/lodestar",
       "files": [
@@ -244,8 +244,8 @@
         },
         {
           "path": "references/toolchain.md",
-          "bytes": 8411,
-          "sha256": "a7b4d990fadc0f139522846e817407e0686fea787f5ac6253016df9723d0aab0"
+          "bytes": 8425,
+          "sha256": "bdc41496166cc07a1979df681f313dc62bfcede31e14e34c112cc745f01fcefd"
         },
         {
           "path": "references/work-presence.md",

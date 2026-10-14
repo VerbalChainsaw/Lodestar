@@ -9,7 +9,8 @@ const root = path.resolve(import.meta.dirname, '..');
 
 const guides = ['README.md', 'Q&A.md', 'HEADACHES.md', 'docs/README.md',
   'docs/installation.md', 'docs/operator-recipes.md', 'docs/intent-evidence.md',
-  'docs/limitations.md', 'docs/schema.md', 'docs/publishing.md', 'docs/releases/v3.0.0.md'];
+  'docs/limitations.md', 'docs/schema.md', 'docs/publishing.md', 'docs/releases/v3.0.0.md',
+  'docs/releases/v3.0.1.md'];
 
 function decode(text) {
   return text.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"')
@@ -150,6 +151,7 @@ async function checkNavigation(directory, file) {
 }
 
 test('current splash actions and guide fragments resolve to the exact canonical guide export', async (t) => {
+  const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const directory = await build(t);
   const splash = await checkNavigation(directory, 'index.html');
   assert.match(splash, /href="guides\/docs\/operator-recipes\.html"/u);
@@ -173,7 +175,7 @@ test('current splash actions and guide fragments resolve to the exact canonical 
     const page = `guides/${file.replace(/\.md$/u, '.html')}`;
     const html = await checkNavigation(directory, page);
     const note = /<p class="guide-note">([^<]+)<\/p>/u.exec(html)?.[1];
-    assert.match(note ?? '', /Lodestar 3\.0\.0 reference/u);
+    assert.ok(note?.startsWith(`Lodestar ${version} reference`), `${file}: reference version must match the built package`);
     assert.match(note ?? '', /See the installation guide for prerequisites and upgrade steps\./u);
     assert.doesNotMatch(note ?? '', /Generated|formatting remains visible/u);
     const source = await readFile(path.join(root, file));

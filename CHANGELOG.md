@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.0.1 - 2026-10-14
+
+Local candidate; npm and GitHub publication are not part of this patch delivery.
+See the [3.0.1 candidate notes](docs/releases/v3.0.1.md) for local installation
+and compatibility.
+
+- Preserve explicit JSON `null` through record create, read, replacement, history
+  and exact replay instead of coercing it to an empty object.
+- Bound raw interface pagination to the remaining client record budget, retaining
+  the core's exact continuation cursor and database revision.
+- Report recovery commitment only when a matching successful receipt proves it;
+  retain unresolved outcomes and avoid unusable receipt recovery instructions.
+- Require complete Manager configuration and request admission before reusing a
+  captured recovery context; preserve incomplete prior evidence and capture anew.
+- Preserve native dispatch serialization when admitting recovery journals, including
+  Unicode and escaped characters in project paths.
+- Include the configured CLI file's bytes in runtime source identity, including
+  executables with a nonstandard filename.
+- Support guarded ordinary-record checkout rebinds within the same canonical
+  project, preserving record identity, content, associations, history and replay.
+- Replace obsolete dose/roleplay and automatic overengineering guidance in the
+  packaged Adderall compatibility skill with bounded project-local routing.
+- Bound concurrent test files to four while retaining the per-file deadline and
+  behavioral checks for process shutdown, recovery and exact request replay.
+
+Contract 5 and schema 5 are unchanged; existing schema-5 stores need no migration.
+
 ## 3.0.0 - 2026-10-02
 
 - Add shared read-only `work prepare-capture` and `work attention` contracts.

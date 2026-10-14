@@ -139,7 +139,7 @@ test('OI P1 active dependency precedes noisy orientation at node frontier; whole
 
 test('OI I1 help/version publish existing constants; selected identity labels source bytes and digests differ for same release',async t=>{
   const f=await fixture(t);
-  for(const args of [['help'],['version']]){const d=ok(await f.cli(args));assert.equal(d.version,'3.0.0');assert.equal(d.contract_version,5);assert.equal(d.schema_version,5);}
+  for(const args of [['help'],['version']]){const d=ok(await f.cli(args));assert.equal(d.version,'3.0.1');assert.equal(d.contract_version,5);assert.equal(d.schema_version,5);}
   const h=ok(await f.cli(['help'])),cap=h.operations.find(o=>o.id==='work.prepare-capture');
   assert.equal(cap.effect,'read');assert.equal(cap.input_schema,null);assert.equal(cap.mutation_request,null);assert.ok(cap.draft_schema.oneOf);
   const selected=await directInterfaceSelection(f.database);assert.match(selected.coreSourceDigest,/^[a-f0-9]{64}$/);assert.equal(selected.coreSourceBasis,'source_inventory');

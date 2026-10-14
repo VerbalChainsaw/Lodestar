@@ -39,10 +39,10 @@ checksums are published together by the release workflow.
 
 ```powershell
 dotnet run --project desktop/Lodestar.Loader.Tests -c Release
-pwsh -NoProfile -File desktop/scripts/Test-Distribution.ps1 -BundlePath C:\build\extracted\Lodestar-3.0.0-win-x64
+pwsh -NoProfile -File desktop/scripts/Test-Distribution.ps1 -BundlePath C:\build\extracted\Lodestar-3.0.1-win-x64
 pwsh -NoProfile -File desktop/scripts/Test-BundleUpdate.ps1
 pwsh -NoProfile -File desktop/scripts/Test-BuildSourceExport.ps1 -SourceRoot C:\build\exported-source
-pwsh -NoProfile -File desktop/scripts/Test-DistributionFaults.ps1 -BundleArchive C:\build\lodestar-release\Lodestar-3.0.0-win-x64.zip
+pwsh -NoProfile -File desktop/scripts/Test-DistributionFaults.ps1 -BundleArchive C:\build\lodestar-release\Lodestar-3.0.1-win-x64.zip
 ```
 
 The first command tests native service contracts. It uses `LODESTAR_TEST_NODE`
@@ -66,7 +66,7 @@ pass an explicit disposable bundle and output directory. `-CaseScope All` is the
 default and runs the full existing suite. `-CaseScope Recovery` runs only the
 interrupted-save, restart and exact-replay journey after the same bundle manifest
 and fixture setup checks. For that focused check, use
-`powershell.exe -NoProfile -File desktop/tests/Invoke-LoaderUIRegression.ps1 -BundleRoot C:\build\extracted\Lodestar-3.0.0-win-x64 -OutputDirectory C:\build\ui-evidence -CaseScope Recovery`.
+`powershell.exe -NoProfile -File desktop/tests/Invoke-LoaderUIRegression.ps1 -BundleRoot C:\build\extracted\Lodestar-3.0.1-win-x64 -OutputDirectory C:\build\ui-evidence -CaseScope Recovery`.
 The JSON report records `case_scope` and `full_suite`; a Recovery PASS proves the
 selected journey. It opens test windows, so use it deliberately in an interactive
 desktop session. Benchmark and large
