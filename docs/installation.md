@@ -289,8 +289,17 @@ it, so plugin installation could report success while its server failed to start
 Update custom marketplace paths to the complete package root and reinstall the
 plugin. A global npm upgrade cannot refresh a separately cached Codex plugin.
 
-Keep one active Lodestar plugin installation. Inspect existing plugin IDs before
-switching marketplaces and disable or remove an older plugin through Codex. Keep
+Keep one active Lodestar plugin installation. Inspect existing plugin IDs and
+capabilities before switching marketplaces. A separately versioned native host
+adapter may provide opt-in compaction checkpoints, context restoration and
+session-bound tools through the shared installed CLI. The packaged MCP plugin
+does not provide those host hooks and is not a feature-equivalent replacement.
+Keep such an adapter when those capabilities are required, upgrade its shared CLI,
+and verify its compatibility. Do not infer the core version from an adapter's own
+version number or enable both integrations under the same skill/server name.
+
+When deliberately switching equivalent integrations, disable or remove the prior
+plugin through Codex and retain its pending request evidence. Keep
 native skill enablement under your own host settings; installation does not
 override a disabled skill or remove user-owned instructions. Start a fresh task
 and verify `lodestar_describe`, `lodestar_read`, and `lodestar_mutate` are available.
