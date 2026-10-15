@@ -29,8 +29,14 @@ async function create(record) {
   const absent = call('get', record.id);
   if (absent.body.error?.code !== 'record_not_found' || !absent.body.error?.identifiers?.write_basis)
     throw new Error('Expected missing record and write basis: ' + record.id);
+  let basis = absent.body.error.identifiers.write_basis;
+  const project = record.kind === 'project' ? null : record.semantics?.applicability?.project;
+  if (project) {
+    const context = good('read project ' + project, call('get', project)).data.write_basis;
+    basis = { ...context, targets: [...context.targets, ...basis.targets.filter((target) => target.id !== project)] };
+  }
   const request = { v: 5, request_id: 'fixture-' + randomUUID(),
-    write_basis: absent.body.error.identifiers.write_basis,
+    write_basis: basis,
     input: { mode: 'create', record: { availability: 'known', priority: 1,
       aliases: [], links: [], sources: [], ...record } } };
   const path = join(root, record.id.replaceAll(':', '-') + '-create.json');

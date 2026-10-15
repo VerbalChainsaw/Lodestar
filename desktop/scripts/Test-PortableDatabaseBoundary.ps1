@@ -60,6 +60,7 @@ function Run-Update($Fixture){
     $output=@(& pwsh -NoProfile -File (Join-Path $payload Update.ps1) -Destination $Fixture.App 2>&1)
     return @{Code=$LASTEXITCODE;Text=($output|Out-String)}
 }
+# Cases run synchronously; plain scriptblocks retain script helpers and current loop variables.
 function Run-Case([string]$Name,[scriptblock]$Body){
     if($Name -notlike $CaseFilter){return}
     try{& $Body;$results.Add(@{name=$Name;status='pass'})}catch{$results.Add(@{name=$Name;status='fail';error=$_.Exception.Message})}
@@ -93,7 +94,7 @@ foreach($placement in @('internal','internal-corrupt','reparse')){
             Check ((Inventory $f.Root) -ceq $before) 'Refused partial recovery moved/changed app, config, SQLite or journal.'
             Check (-not [IO.Directory]::Exists($f.Paths.Stage)) 'Refused partial recovery moved target to Stage.'
         }finally{if($alias -and [IO.Directory]::Exists($alias)){[IO.Directory]::Delete($alias)}}
-    }.GetNewClosure()
+    }
 }
 Run-Case 'partial_swap_recovery_restores_ordinary_corrupt_runtime' {
     $f=New-Fixture 'partial-corrupt-control';Prepare-PartialSwap $f
@@ -126,7 +127,7 @@ foreach($placement in @('relative','case','stage','previous','payload')){
             Check (-not [IO.File]::Exists($f.Paths.Journal)) 'Refusal created a transaction journal.'
             if($placement -notin @('stage','previous')){Check (-not [IO.Directory]::Exists($f.Paths.Stage) -and -not [IO.Directory]::Exists($f.Paths.Previous)) 'Refusal created stage/previous.'}
         }finally{if($placement -eq 'payload'){[IO.File]::Delete($f.Db)}}
-    }.GetNewClosure()
+    }
 }
 Run-Case 'public_update_external_prefix_preserves_real_store' {
     $f=New-Fixture 'external-prefix';Move-SelectedStore $f (Join-Path ($f.App+'-external') 'selected.db')
@@ -193,7 +194,7 @@ foreach($suffix in @('.lodestar-stage','.lodestar-previous')){
         try{Get-InstallSelection $payload $fresh $node $database '' $true (Join-Path $f.Root host) $false|Out-Null}catch{$failure=$_.Exception.Message}
         Check ($failure -match 'install_database_inside_app') ('Fresh selection missed transaction sibling: '+$failure)
         Check ((Inventory $f.Root) -ceq $before) 'Refused Install selection changed fixture bytes/state.'
-    }.GetNewClosure()
+    }
 }
 $report=@{v=1;root=$root;test_fixture='Current PS owners over exact candidate; regenerated fixture inventories only.';cases=$results.ToArray();pass=@($results|Where-Object status -eq pass).Count;fail=@($results|Where-Object status -eq fail).Count}
 if($results.Count -eq 0){throw 'No matching cases.'}

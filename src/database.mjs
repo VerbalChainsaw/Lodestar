@@ -5,6 +5,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isPromise } from "node:util/types";
 
 import { errorPayload, lodestarError, wrapError } from "./errors.mjs";
 import {
@@ -25,6 +26,18 @@ import { validateTimestamp } from "./validate.mjs";
 export const DATABASE_BUSY_TIMEOUT_MS = 0;
 
 const connectionState = new WeakMap();
+const promiseThen = Function.prototype.call.bind(Promise.prototype.then);
+const promiseResolve = Promise.resolve.bind(Promise);
+
+export function consumeAsyncResult(value) {
+  const nativePromise = isPromise(value);
+  if (!nativePromise && !(value && typeof value.then === "function")) return false;
+  // Native promises may override then/catch; use their internal Promise state
+  // without reading or invoking either callback-owned method.
+  try { promiseThen(nativePromise ? value : promiseResolve(value), undefined, () => {}); }
+  catch { /* Custom species or thenables may refuse handler attachment. */ }
+  return true;
+}
 
 function stateFor(db) {
   const state = connectionState.get(db);
@@ -174,8 +187,7 @@ export function transaction(db, operation, file = null) {
   }
   if (db.isTransaction === true) {
     const nested = operation();
-    if (nested && typeof nested.then === "function") {
-      try { Promise.resolve(nested).catch(() => {}); } catch { /* hostile thenable */ }
+    if (consumeAsyncResult(nested)) {
       throw lodestarError(
         "invalid_transaction",
         "Synchronous SQLite transactions cannot accept an async callback.",
@@ -187,8 +199,7 @@ export function transaction(db, operation, file = null) {
   let result;
   try {
     result = operation();
-    if (result && typeof result.then === "function") {
-      try { Promise.resolve(result).catch(() => {}); } catch { /* hostile thenable */ }
+    if (consumeAsyncResult(result)) {
       throw lodestarError(
         "invalid_transaction",
         "Synchronous SQLite transactions cannot accept an async callback.",

@@ -176,7 +176,7 @@ async function saveJournal(selection, request, { operation = "put", cwd = null,
   }
   const folder = path.join(journalRoot(selection), request.request_id);
   const requestBytes = Buffer.from(`${JSON.stringify(request)}\n`, "utf8");
-  const context = { generation: selection.generation, fingerprint: selection.fingerprint,
+  const context = { config_path: selection.configPath, generation: selection.generation, fingerprint: selection.fingerprint,
     runtime_fingerprint: selection.runtimeFingerprint, request_sha256: sha256(requestBytes),
     node: selection.node, cli: selection.cli, database: selection.database,
     database_instance_id: request.database_instance_id ?? request.write_basis?.database_instance_id,

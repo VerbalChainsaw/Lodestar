@@ -88,15 +88,18 @@ export async function sourceIdentity(configRoot, cli) {
   try { manifest = bindingDocument(await readFile(manifestPath), manifestPath, { manifest: true }); }
   catch (error) { if (error.code !== "ENOENT") throw error; }
   const selected = new Map();
-  if (manifest) {
-    if (manifest.v !== 1 || !Array.isArray(manifest.files)) throw invalid("Unsupported portable bundle manifest.");
+  if (manifest !== undefined) {
+    if (!manifest || manifest.v !== 1 || !Array.isArray(manifest.files)) {
+      throw invalid("Unsupported portable bundle manifest.", { path: manifestPath, pointer: "/" });
+    }
     const coreRoot = path.join(configRoot, "core");
-    for (const entry of manifest.files) {
-      if (typeof entry.path !== "string" || !entry.path.startsWith("core/")) continue;
-      if (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0 ||
+    for (const [index, entry] of manifest.files.entries()) {
+      if (typeof entry?.path !== "string" || !entry.path.startsWith("core/")) continue;
+      if (!validPath(entry.path) || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 ||
+        typeof entry.sha256 !== "string" ||
         !/^[0-9a-f]{64}$/iu.test(entry.sha256 ?? "") ||
         entry.path.includes("\\") || entry.path.split("/").some((part) => !part || part === "." || part === "..")) {
-        throw invalid("Invalid core manifest entry.");
+        throw invalid("Invalid core manifest entry.", { path: manifestPath, pointer: `/files/${index}` });
       }
       const file = path.resolve(configRoot, entry.path);
       if (!file.startsWith(`${coreRoot}${path.sep}`) || selected.has(entry.path)) {
@@ -129,7 +132,9 @@ export async function sourceIdentity(configRoot, cli) {
       }
     }
     for (const name of ["src", "managed-assets", "codex-plugin", "docs"]) await visit(path.join(sourceRoot, name));
-    if (!selected.size) selected.set(path.basename(cli), { file: cli });
+    // The configured entry may use a nonstandard filename. Its actual bytes
+    // belong to the binding even when standard package files were also found.
+    selected.set(path.relative(sourceRoot, cli).replaceAll("\\", "/"), { file: cli });
   }
   let content = "";
   for (const [name, entry] of [...selected].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {

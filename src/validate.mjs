@@ -368,8 +368,8 @@ export function validatePutInput(value) {
     if (!Object.hasOwn(value, field)) invalid(field, "missing or empty");
   }
   if (value.priority !== undefined
-    && (!Number.isSafeInteger(value.priority) || value.priority < 0)) {
-    invalid("priority", "not a nonnegative safe integer");
+    && !Number.isSafeInteger(value.priority)) {
+    invalid("priority", "not a safe integer");
   }
   const aliases = arrayValue(
     Object.hasOwn(value, "aliases") ? value.aliases : undefined,

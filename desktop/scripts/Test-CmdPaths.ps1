@@ -69,15 +69,15 @@ try {
         Assert-That ($witnessActual -ceq $expected) "Child file arguments changed at CMD/PowerShell boundary. Expected: $expected Received file: $witnessActual Received stdout: $actual"
         Assert-That ($null -eq $witness.db) 'Child file witness shows inherited alternate database environment.'
     }
-    foreach ($name in @('Setup.cmd','Manager.cmd','Loader.cmd','Update.cmd')) {
-        Run-Case "${name}_help_reports_actual_missing_script_exit" {
-            $app=Join-Path $caseRoot $name; [IO.Directory]::CreateDirectory($app)|Out-Null
-            [IO.File]::Copy((Join-Path $distribution $name),(Join-Path $app $name))
-            $run=Invoke-OwnedCmd $app "$name --help"
+    foreach ($wrapperName in @('Setup.cmd','Manager.cmd','Loader.cmd','Update.cmd')) {
+        Run-Case "${wrapperName}_help_reports_actual_missing_script_exit" {
+            $app=Join-Path $caseRoot $wrapperName; [IO.Directory]::CreateDirectory($app)|Out-Null
+            [IO.File]::Copy((Join-Path $distribution $wrapperName),(Join-Path $app $wrapperName))
+            $run=Invoke-OwnedCmd $app "$wrapperName --help"
             Assert-That ($run.exit -ne 0) 'Wrapper reported success when PowerShell rejected its missing script.'
             Assert-That (($run.stdout+$run.stderr).Length -gt 0) 'Rejected launch produced no diagnostic.'
             Assert-That (($run.stdout+$run.stderr) -match 'Next action:') 'Missing-script rejection gives no corrective action.'
-        }.GetNewClosure()
+        }
     }
 } finally {
     # Delete only this exact, generated fixture root after all owned children exited.

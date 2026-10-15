@@ -1,4 +1,5 @@
 import { globSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 import { finished } from "node:stream/promises";
 import { run } from "node:test";
@@ -14,7 +15,10 @@ export async function runOwnedTests({ files, deadlineMs = 300000 } = {}) {
   const selected = new Set(files), active = new Map();
   const controller = new AbortController();
   let failed = false;
-  const stream = run({ files, concurrency: true, signal: controller.signal });
+  // Each file also launches real CLI processes and touches isolated SQLite stores.
+  // CPU-count concurrency oversubscribes those journeys on large Windows hosts.
+  const concurrency = Math.max(1, Math.min(4, availableParallelism() - 1));
+  const stream = run({ files, concurrency, signal: controller.signal });
   stream.on("test:fail", () => { failed = true; });
   stream.on("data", ({ type, data }) => {
     if (data.nesting !== 0 || !selected.has(data.name)) return;

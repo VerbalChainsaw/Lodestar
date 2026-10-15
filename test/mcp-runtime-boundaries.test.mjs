@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { Writable } from "node:stream";
 import vm from "node:vm";
@@ -10,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { runInstalledLodestar } from "../codex-plugin/scripts/lodestar-runtime.mjs";
 import { canonicalStringify, JSON_INPUT_MAXIMUM_BYTES } from "../src/json.mjs";
 import { fixture, temporaryDirectory } from "./helpers/contract.mjs";
+import { spawnOwnedProcess, writeOwnedFrame } from "./helpers/owned-process.mjs";
 
 const mcp = fileURLToPath(new URL("../codex-plugin/scripts/lodestar-mcp.mjs", import.meta.url));
 const envelope = (operation = "get", ok = true) => ({ v: 5, operation, ok,
@@ -94,16 +94,15 @@ test("MCP refuses oversized mutation before dispatch and preserves input bytes",
 });
 
 async function communicate(t, frames, env = process.env) {
-  const child = spawn(process.execPath, [mcp], { env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill(); });
-  const chunks = [], errors = [];
-  child.stdout.on("data", chunk => chunks.push(chunk)); child.stderr.on("data", chunk => errors.push(chunk));
-  const done = new Promise((resolve, reject) => { child.on("error", reject); child.on("close", code => resolve(code)); });
-  child.stdin.on("error", () => {});
-  for (const frame of frames) if (!child.stdin.write(frame)) await new Promise(resolve => child.stdin.once("drain", resolve));
-  child.stdin.end();
-  assert.equal(await done, 0, Buffer.concat(errors).toString("utf8"));
-  return Buffer.concat(chunks).toString("utf8").trim().split("\n").map(JSON.parse);
+  const owned = spawnOwnedProcess(t, process.execPath, [mcp], { env, stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    for (const frame of frames) await writeOwnedFrame(owned, frame);
+    owned.child.stdin.end();
+    const result = await owned.completed;
+    assert.equal(result.error, undefined, JSON.stringify(result));
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim().split("\n").map(JSON.parse);
+  } finally { await owned.stop(); }
 }
 const ping = '{"jsonrpc":"2.0","id":"after","method":"ping"}\n';
 test("MCP rejects oversized frame incrementally and preserves the next message", async (t) => {
@@ -219,15 +218,14 @@ test("MCP response writer waits for its output callback before another request",
   release(); await pending; assert.equal(complete, true); sink.destroy();
 });
 test("MCP closed output reports bounded recovery guidance instead of an unhandled crash", async (t) => {
-  const child = spawn(process.execPath, [mcp], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const owned = spawnOwnedProcess(t, process.execPath, [mcp], { stdio: ["pipe", "pipe", "pipe"] });
+  const { child } = owned;
   child.stdout.destroy();
-  const errors = []; child.stderr.on("data", chunk => errors.push(chunk));
-  child.stdin.on("error", () => {});
-  const done = new Promise((resolve, reject) => { child.on("error", reject); child.on("close", code => resolve(code)); });
   child.stdin.end(ping);
-  assert.equal(await done, 1);
-  const message = Buffer.concat(errors).toString("utf8");
+  const result = await owned.completed;
+  assert.equal(result.error, undefined, JSON.stringify(result));
+  assert.equal(result.status, 1, result.stderr);
+  const message = result.stderr;
   assert.match(message, /Lodestar MCP response delivery failed/);
   assert.match(message, /original request.*receipt.*exact replay/);
   assert.ok(message.length < 1024); assert.doesNotMatch(message, /Unhandled 'error'|node:events/);

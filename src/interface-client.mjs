@@ -398,6 +398,15 @@ export async function loadFindPages(selection, args, { execute = executeCli, max
   const records = [], recordErrors = [], advisories = [];
   const seen = new Set();
   while (records.length < maxRecords && pages < maxPages) {
+    // Bound the raw page before dispatch. Returned records exclude damaged rows,
+    // so a cursor synthesized from their count could skip or repeat source rows.
+    const optionEnd = current.indexOf("--");
+    const limitIndex = current.slice(0, optionEnd < 0 ? current.length : optionEnd).indexOf("--limit");
+    const remaining = maxRecords - records.length;
+    if (limitIndex >= 0) {
+      const requested = Number(current[limitIndex + 1]);
+      if (Number.isSafeInteger(requested) && requested > remaining) current[limitIndex + 1] = String(remaining);
+    } else current.splice(optionEnd < 0 ? current.length : optionEnd, 0, "--limit", String(remaining));
     const result = await execute(selection, { operation: "find", args: ["find", ...current] });
     pages += 1;
     if (result.kind !== "EnvelopeSuccess") return { ...result, records, complete: false,
@@ -417,7 +426,7 @@ export async function loadFindPages(selection, args, { execute = executeCli, max
       records, complete: false, recordErrors, advisories };
     recordErrors.push(...envelope.data.record_errors);
     advisories.push(...(envelope.next ?? []).filter((entry) => typeof entry === "string"));
-    let truncated = false;
+    const pageRecords = [];
     for (const [index, record] of envelope.data.records.entries()) {
       if (!record || typeof record !== "object" || Array.isArray(record) || typeof record.id !== "string" || !record.id) {
         return { kind: "TransportError", code: "invalid_envelope",
@@ -427,13 +436,15 @@ export async function loadFindPages(selection, args, { execute = executeCli, max
       if (seen.has(record.id)) return { kind: "TransportError", code: "repeated_record",
         message: "Find repeated a record across pages.", records, complete: false, recordErrors, advisories };
       seen.add(record.id);
-      if (records.length < maxRecords) records.push(record);
-      else truncated = true;
+      pageRecords.push(record);
     }
-    if (truncated) break;
-    const more = Boolean(envelope.more || envelope.data.more || envelope.data.complete === false);
+    if (pageRecords.length > remaining) return { kind: "TransportError", code: "invalid_envelope",
+      message: "Find returned more records than the requested remaining budget; no partial page was accepted.",
+      records, complete: false, recordErrors, advisories };
+    records.push(...pageRecords);
+    const more = Boolean(envelope.more || envelope.data.more);
     if (!more) return { kind: "ReadSnapshot", records, revision, database_instance_id: instance,
-      database_epoch: epoch, readAt: new Date().toISOString(), complete: recordErrors.length === 0,
+      database_epoch: epoch, readAt: new Date().toISOString(), complete: envelope.data.complete !== false && recordErrors.length === 0,
       recordErrors, advisories };
     const next = (envelope.next ?? []).find((entry) => validContinuation(entry,
       { args: current, operation: "find", revision }));

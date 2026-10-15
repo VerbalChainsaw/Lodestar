@@ -344,9 +344,10 @@ async function retainedFixture(t) {
     if (invocation.operation !== "put") return executeCli(selected, invocation);
     state.writes += 1;
     state.requestPath = invocation.args[invocation.args.indexOf("--file") + 1];
-    if (state.writes > 1 && state.replayHook) await state.replayHook();
     const accepted = await executeCli(selected, invocation);
     assert.equal(accepted.kind, "EnvelopeSuccess");
+    // Replace retained evidence after core admission, before Manager journals the response.
+    if (state.writes > 1 && state.replayHook) await state.replayHook();
     const envelope = { ...accepted.envelope, ok: false,
       error: { code: "database_commit_outcome_unknown", message: "Original retained report.",
         identifiers: { committed: "unknown", request_id: accepted.envelope.request.id },

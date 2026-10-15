@@ -15,8 +15,8 @@ are read-only. Native environments retain ownership of their settings and instru
 For current local evaluation, verify the candidate tarball against its own SHA-256
 inventory and use the isolated package procedure in the candidate's included
 `docs/installation.md`. Invoke that exact package with the selected Node runtime.
-Public npm/tag availability remains pending. After the verified 3.0.0 release is
-published, use these registry commands:
+The registry commands below select the retained 3.0.0 release. Do not substitute
+a local candidate version until its matching package has been published:
 
 ```bash
 npm install --global lodestar-agent-context@3.0.0
@@ -25,7 +25,7 @@ lodestar setup --target all --apply
 lodestar skills verify --target all
 ```
 
-After publication, the npm registry supplies the released package. `setup` plans
+The npm registry supplies the released package. `setup` plans
 owned payload changes before `--apply` performs them.
 Use `lodestar init` only to create an explicitly new store. Existing schema-5
 stores need no migration; for schema-4 stores, follow the maintained
