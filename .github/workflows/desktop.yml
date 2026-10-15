@@ -41,6 +41,15 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           ./desktop/scripts/Test-Install.ps1 -BundlePath "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+      - name: Check desktop smoke fixture contracts
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $bundle = "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+          $node = (Get-Command node).Source
+          node desktop/tests/create-ui-fixture.mjs "$env:RUNNER_TEMP/ui-fixture" "$bundle/core/lodestar.mjs" $node "$bundle/Lodestar.Loader.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./desktop/Lodestar.Loader/Smoke/create-fixture.ps1 -OutputDirectory "$env:RUNNER_TEMP/loader-fixture" -NodePath $node -CliPath "$bundle/core/lodestar.mjs"
       - name: Test distribution fault handling
         shell: pwsh
         run: |
