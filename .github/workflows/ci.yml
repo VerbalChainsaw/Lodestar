@@ -37,18 +37,18 @@ jobs:
         run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
       - name: Package the independent native Codex adapter
         if: runner.os == 'Windows'
-        run: node scripts/build-native-codex.mjs .native-package
+        run: node scripts/build-native-codex.mjs "${{ runner.temp }}/lodestar-native-package"
       - name: Qualify native archive against the exact packed core
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $version = node -p "require('./native-codex/.codex-plugin/plugin.json').version"
-          node scripts/smoke-native-codex.mjs ".native-package/lodestar-native-codex-$version.tgz" .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
+          node scripts/smoke-native-codex.mjs "$env:RUNNER_TEMP/lodestar-native-package/lodestar-native-codex-$version.tgz" .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Retain the qualified native archive
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lodestar-native-codex
-          path: .native-package/*
+          path: ${{ runner.temp }}/lodestar-native-package/*
           if-no-files-found: error
