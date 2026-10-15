@@ -306,6 +306,54 @@ and verify `lodestar_describe`, `lodestar_read`, and `lodestar_mutate` are avail
 The release checks exercise the isolated cached runtime; actual model selection
 still depends on the task and host configuration.
 
+## Native Codex adapter
+
+The separate `native-codex/` plugin supplies capabilities beyond the generic MCP
+plugin. Native adapter **1.4.7** is the candidate paired with core **3.0.1**.
+The adapter source, generated skill, tests and packaging live in this repository;
+the core npm tarball remains a separate installation. The
+[adapter guide](../native-codex/README.md) owns its runtime and test details.
+
+Its declared hooks have these effects:
+
+- `SessionStart` supplies current Lodestar context to the host.
+- `UserPromptSubmit` records the current prompt's authorization for the native
+  work and handoff tools. `PreToolUse` checks those tool calls and can deny a call
+  that lacks matching host authorization; it is not a general project audit gate.
+- `Stop` captures the assistant's final message as pending context, subject to the
+  adapter's bounds and redaction. Pending capture is not verified project truth.
+- `PreCompact` checkpoints and subsequent startup restores bounded context only
+  for an explicitly activated project/session compaction binding.
+
+The host owns event delivery. Installing files, listing hooks, or passing synthetic
+tests does not prove that a natural Desktop compaction event has run. Enable only
+the intended Lodestar plugin and retain Codex's own hook trust and skill settings.
+
+For a new installation, first install the verified core, then register the
+verified native archive's extracted plugin root or the repository's `native-codex`
+directory. Replace the path with its absolute location:
+
+```text
+codex plugin marketplace add "<checkout>/native-codex"
+codex plugin add lodestar@lodestar-native
+```
+
+For an existing installation such as `lodestar@personal`, retain that marketplace
+and plugin name. Update its existing marketplace source to the verified native
+plugin root and reinstall that same selector. Do not switch to the example's
+marketplace or remove the installed plugin merely to upgrade it. Codex's plugin
+data directory retains pending requests, attestations and compaction evidence;
+preserve it through upgrades. A global core upgrade alone does not refresh the
+cached native plugin. Restart Codex after reinstalling to load the new server.
+
+Windows discovery selects the newest numerically ordered Node installation under
+`<home>/.local/opt` that contains both `node.exe` and the Lodestar package entry.
+Set **both** `LODESTAR_NODE` and `LODESTAR_ENTRY` to select a different runtime and
+installed core explicitly. Do not infer that the hook's own Node executable, a
+CLI shim, or a Loader configuration selects that pair. Native adapter installation
+qualification is Windows-specific; generic CLI/MCP support on other platforms
+does not establish native host acceptance there.
+
 ## Windows and WSL
 
 The package manager installs the Windows CLI. Setup discovers the standard launcher

@@ -1098,6 +1098,9 @@ Add("native singular project roots preserve context", NativeProtocolChecks.Singu
 
 Add("RL14 queued mutation whole-call deadline", NativeLeadChecks.QueuedDeadlineAsync);
 Add("VM3 inherited response pipes obey whole-call deadline", NativeLeadChecks.PipeDeadlineAsync);
+Add("VM3 fixture setup failure leaves no directory", NativeLeadChecks.PipeSetupFailureAsync);
+if (OperatingSystem.IsWindows())
+    Add("VM3 fixture marker sharing preserves bounded ownership reads", NativeLeadChecks.MarkerSharingAsync);
 Add("RL10 actual core guarded source attestation", NativeLeadChecks.SourceAttestationAsync);
 Add("FQ01 real filesystem attribute cause remains actionable", ErrorCauseChecks.AttributeCauseAsync);
 Add("GAP-D1 actual cross-surface recovery", RecoveryBridgeChecks.RunAsync);

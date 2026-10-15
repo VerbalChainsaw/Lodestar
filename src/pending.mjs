@@ -7,15 +7,15 @@ import { validateDomainInput } from "./cli-commands.mjs";
 export const pendingScope = (project) => `pending:${project.scope}`;
 const candidateScopes = (project) => [...new Set([project.scope, pendingScope(project),
   ...(project.historical_scopes ?? []).flatMap((scope) => [scope, `pending:${scope}`])])];
-export function pendingList(db, project, limit = null) {
+export function pendingList(db, project, limit = null, offset = 0) {
   const scopes = candidateScopes(project);
   const result = normalizedRowsResult(db, "SELECT id FROM records WHERE type='pending' AND scope IN ("
     + scopes.map(() => "?").join(",") + ") AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'unresolved') NOT IN ('historical','superseded') "
     + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
-  const selected = limit === null ? result.records : result.records.slice(0, limit);
+  const selected = limit === null ? result.records : result.records.slice(offset, offset + limit);
   return { count: result.records.length,
     records: selected,
-    more: selected.length < result.records.length,
+    more: offset + selected.length < result.records.length,
     record_errors: result.record_errors, complete: result.record_errors.length === 0,
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
       targets: [...selected.map(({ id }) => ({ kind: "record", id })),

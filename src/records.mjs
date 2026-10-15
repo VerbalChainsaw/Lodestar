@@ -8,6 +8,7 @@ import { lodestarError } from "./errors.mjs";
 import {
   admittedTransaction,
   assertSupportedSchema,
+  consumeAsyncResult,
   readMetadata,
   transactionRevision,
 } from "./database.mjs";
@@ -642,6 +643,14 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
     const basis = value.write_basis;
     if (!plain(basis)) invalidMutation("write_basis must be an object.");
     exactKeys(basis, Object.keys(WRITE_BASIS_SCHEMA.properties), "write_basis");
+    if (!Array.isArray(basis.targets)) {
+      invalidMutation("write_basis.targets must be an array.", { field: "write_basis.targets" });
+    }
+    for (const field of ["project_scope", "checkout"]) {
+      if (!Object.hasOwn(basis, field) || (basis[field] !== null && typeof basis[field] !== "string")) {
+        invalidMutation(`write_basis.${field} must be null or a string.`, { field: `write_basis.${field}` });
+      }
+    }
     request = {
       v: CONTRACT_VERSION,
       request_id: value.request_id,
@@ -650,7 +659,7 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
       project_scope: basis.project_scope ?? null,
       checkout: basis.checkout ?? null,
       actor,
-      preconditions: (basis.targets ?? []).map((entry, index) => {
+      preconditions: basis.targets.map((entry, index) => {
         if (!plain(entry) || !Object.hasOwn(entry, "expected_revision")) {
           invalidMutation("Each write-basis target needs expected_revision.", { index });
         }
@@ -911,7 +920,7 @@ export function mutate(db, operation, value, callback, {
     } finally {
       activeMutations.delete(db);
     }
-    if (callbackResult && typeof callbackResult.then === "function") {
+    if (consumeAsyncResult(callbackResult)) {
       invalidMutation("Mutation callbacks must be synchronous.");
     }
     const data = plain(callbackResult) && Object.hasOwn(callbackResult, "data")

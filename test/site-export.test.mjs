@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const guides = ['README.md', 'Q&A.md', 'HEADACHES.md', 'docs/README.md',
   'docs/installation.md', 'docs/operator-recipes.md', 'docs/intent-evidence.md',
   'docs/limitations.md', 'docs/schema.md', 'docs/publishing.md', 'docs/releases/v3.0.0.md',
-  'docs/releases/v3.0.1.md'];
+  'docs/releases/v3.0.1.md', 'native-codex/README.md'];
 
 function decode(text) {
   return text.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"')
@@ -34,6 +34,8 @@ async function sourceFixture(t) {
   }
   await mkdir(path.join(fixture, 'desktop'));
   await cp(path.join(root, 'desktop/README.md'), path.join(fixture, 'desktop/README.md'));
+  await mkdir(path.join(fixture, 'native-codex'));
+  await cp(path.join(root, 'native-codex/README.md'), path.join(fixture, 'native-codex/README.md'));
   await cp(path.join(root, 'desktop/Lodestar.Loader/Assets'),
     path.join(fixture, 'desktop/Lodestar.Loader/Assets'), { recursive: true });
   for (const file of ['package.json', 'README.md', 'CHANGELOG.md', 'SECURITY.md', 'LICENSE', 'Q&A.md', 'HEADACHES.md']) {

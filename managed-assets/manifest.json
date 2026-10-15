@@ -188,7 +188,7 @@
       "source_entrypoint": "skills/lodestar/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "15ab9f720ee5a6df61f8a9f4a825582842ea72946284b9a37d0cc9c328f1dedc"
+        "value": "20a8fe386b5c0c00ca5ad0350fe347dd320ce14f093edf262425e43093487779"
       },
       "payload_root": "skills/lodestar",
       "files": [
@@ -224,8 +224,8 @@
         },
         {
           "path": "references/continuity.md",
-          "bytes": 10481,
-          "sha256": "18b467f6035f8eac51da8cfbb5f94f63de3820aa204d530647b96f73b1a6cec5"
+          "bytes": 11985,
+          "sha256": "8afd4c5a078987717a6ff1c6b077fb72c8d286af48f34ef3ab4fcf3edb04465c"
         },
         {
           "path": "references/decisions.md",
@@ -249,13 +249,13 @@
         },
         {
           "path": "references/work-presence.md",
-          "bytes": 1050,
-          "sha256": "69916efb4e5ce8acc537ceb0070a8a5e487f70cb33b03fc7b4debd9cc1e34982"
+          "bytes": 1711,
+          "sha256": "8a7c675cafe253b6dac34219d29deeae9af6ea7c5403cb5ece187344a8fcb456"
         },
         {
           "path": "SKILL.md",
-          "bytes": 6661,
-          "sha256": "ea58090bc2f395499a278def2e3b90ce603ea2b8124bf0ad9710d7fdad47123c"
+          "bytes": 7172,
+          "sha256": "c51b52e03b1175dd1682b0e0d47782e59e50f943806bec08e55e41995382b494"
         }
       ],
       "distribution_owner": "npm:lodestar-agent-context"

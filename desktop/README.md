@@ -43,6 +43,8 @@ pwsh -NoProfile -File desktop/scripts/Test-Distribution.ps1 -BundlePath C:\build
 pwsh -NoProfile -File desktop/scripts/Test-BundleUpdate.ps1
 pwsh -NoProfile -File desktop/scripts/Test-BuildSourceExport.ps1 -SourceRoot C:\build\exported-source
 pwsh -NoProfile -File desktop/scripts/Test-DistributionFaults.ps1 -BundleArchive C:\build\lodestar-release\Lodestar-3.0.1-win-x64.zip
+pwsh -NoProfile -File desktop/scripts/Test-Install.ps1 -BundlePath C:\build\extracted\Lodestar-3.0.1-win-x64
+pwsh -NoProfile -File desktop/scripts/Test-PortableDatabaseBoundary.ps1 -BundlePath C:\build\extracted\Lodestar-3.0.1-win-x64
 ```
 
 The first command tests native service contracts. It uses `LODESTAR_TEST_NODE`
@@ -52,6 +54,12 @@ launch arguments, invalid inputs, update and recovery. The third injects faults
 around staged replacement. The export-build check requires a complete source
 export without Git metadata; it checks a successful caller exit and rejected
 invalid source using a disposable store. None is a substitute for visual acceptance.
+
+The desktop CI job runs native service, extracted-distribution, installer,
+distribution-fault and portable-database-boundary checks against its candidate.
+Installer checks use test-mode host fixtures by default; actual HKCU integration
+is separately opt-in. The verified ZIP is uploaded with its originating checksum
+for comparison by the release workflow.
 
 For a single native service group, set `LODESTAR_TEST_FILTER` to part of its
 registered name, run the first command, then clear the variable. A filter that

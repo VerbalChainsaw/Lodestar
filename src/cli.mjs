@@ -222,7 +222,7 @@ function parseCommand(command, args) {
     });
   }
   if (command === "work" && positionals[0] === "check") {
-    for (const flag of ["--limit", "--file"]) if (Object.hasOwn(options, flag)) {
+    for (const flag of ["--limit", "--offset", "--file"]) if (Object.hasOwn(options, flag)) {
       throw lodestarError("unknown_option", "The work check read does not accept this option.", {
         identifiers: { command: "work.check", option: flag },
         action: "Use work check <intent-record-id> [--cwd <path>] [--at-revision <n>]; see docs/intent-evidence.md.",
@@ -230,7 +230,7 @@ function parseCommand(command, args) {
     }
   }
   if (["work.prepare-capture", "work.attention"].includes(operation)) {
-    const forbidden = ["--limit", "--session", "--agent", "--harness", ...(operation === "work.attention" ? ["--file"] : [])];
+    const forbidden = ["--limit", "--offset", "--session", "--agent", "--harness", ...(operation === "work.attention" ? ["--file"] : [])];
     for (const flag of forbidden) if (Object.hasOwn(options, flag)) throw lodestarError("unknown_option", "This project preparation or attention read does not accept the option.", {
       identifiers: { command: operation, option: flag }, action: "Use work prepare-capture --cwd <root> --file <draft.json>, or work attention [<intent-id>] --cwd <root>." });
     if (!options["--cwd"] || (operation === "work.prepare-capture" && !options["--file"])) throw lodestarError("missing_argument", "An explicit project root and capture draft file are required for this read.", {

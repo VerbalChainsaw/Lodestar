@@ -27,10 +27,12 @@ These guides explain the workflow; the installed reference owns command schemas.
 Lodestar has one installed one-shot executable, one Windows-owned SQLite
 database, one contract-5 JSON envelope, and one guarded mutation owner. The
 one-shot core has no daemon, embedded hooks, App Server calls, session rotation,
-startup cache, or private governance payload. An optional native host integration
-owns the compaction hooks: it saves recorded work before compaction and restores
-bounded Lodestar context afterward. The host owns hook delivery; the core remains
-a one-shot record service.
+startup cache, or private governance payload. The optional native Codex adapter
+supplies startup context, prompt authorization, guarded host-bound tools, pending
+note capture, and opt-in compaction continuity. The host owns hook delivery; the
+core remains a one-shot record service. See the
+[native adapter installation](installation.md#native-codex-adapter) for its hook
+behavior, data ownership, and separate activation requirements.
 
 `start`, `get`, `find`, and `links` are ordinary reads. They return project and
 checkout identity, source observations, current records, conflicts, and the basis
@@ -38,9 +40,13 @@ needed for a later checked update. Work, decision, handoff, pending, generic put
 retirement mutations all pass through the same receipt, precondition, transaction,
 revision, and writer-fence path.
 
-The Codex integration is a native skill plus MCP adapter. Its tool schemas import the
+The generic Codex integration is a native skill plus MCP adapter. Its tool schemas import the
 same command, mutation-input, request, and contract declarations as the CLI. The
 adapter spawns the installed package for each call and owns no durable state.
+The separately versioned native adapter retains its own host authorization and
+exact-request recovery files in Codex's plugin data directory. Those files support
+delivery to the same core; they are not a second project record store. Both plugin
+skill distributions are generated from the maintained Lodestar skill.
 
 The separate Windows Loader console and compatible menu Manager use this same core.
 See [installation](installation.md), [schema](schema.md), [limitations](limitations.md),

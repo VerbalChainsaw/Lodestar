@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +11,7 @@ import { MUTATION_REQUEST_SCHEMA, PUT_INPUT_SCHEMA, DELETE_INPUT_SCHEMA } from "
 import { CONTRACT_VERSION } from "../src/schema.mjs";
 import { LODESTAR_VERSION } from "../src/version.mjs";
 import { callNativeTool, NATIVE_TOOLS } from "../codex-plugin/scripts/lodestar-mcp.mjs";
+import { spawnOwnedProcess } from "./helpers/owned-process.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SERVER = path.join(ROOT, "codex-plugin", "scripts", "lodestar-mcp.mjs");
@@ -56,21 +56,16 @@ test("the plugin declares MCP and skill capabilities without hooks", async () =>
 
 test("the MCP stdio transport lists and executes the installed contract-5 runtime", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "lodestar-native-mcp-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const child = spawn(process.execPath, [SERVER], {
+  const owned = spawnOwnedProcess(t, process.execPath, [SERVER], {
     cwd: directory,
     env: { ...process.env, LODESTAR_NODE: process.execPath,
       LODESTAR_ENTRY: path.join(ROOT, "lodestar.mjs"),
       LODESTAR_DB: path.join(directory, "absent.db") },
     stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
   });
-  let stdout = "", stderr = "";
-  child.stdout.setEncoding("utf8").on("data", (text) => { stdout += text; });
-  child.stderr.setEncoding("utf8").on("data", (text) => { stderr += text; });
-  const completed = new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
-  });
+  // The process fallback hook precedes removal, including failed assertions.
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { child } = owned;
   for (const message of [
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -83,7 +78,10 @@ test("the MCP stdio transport lists and executes the installed contract-5 runtim
         arguments: ["--target", "codex", "--home", path.join(directory, "missing-home")] } } },
   ]) child.stdin.write(`${JSON.stringify(message)}\n`);
   child.stdin.end();
-  assert.equal(await completed, 0);
+  const result = await owned.completed;
+  assert.equal(result.error, undefined, JSON.stringify(result));
+  assert.equal(result.status, 0, JSON.stringify(result));
+  const { stdout, stderr } = result;
   assert.equal(stderr, "");
   const replies = stdout.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(replies[0].result.serverInfo.version, LODESTAR_VERSION);

@@ -197,7 +197,7 @@ to stderr using the same contract-5 envelope.
 
 ## Native integration
 
-The optional [Codex plugin bundle](.codex-plugin/plugin.json) provides the automatic
+The optional generic [Codex plugin bundle](.codex-plugin/plugin.json) provides the automatic
 Lodestar skill and three MCP tools:
 
 - `lodestar_describe` returns the maintained operating guide and installed command
@@ -211,11 +211,20 @@ the adapter and shared core remain together. Do not install `codex-plugin/` alon
 that was the broken layout in 2.1.3 and earlier. Follow the
 [optional plugin installation](docs/installation.md#optional-codex-plugin) steps.
 
-The adapter does not maintain hooks, a session cache, a receipt store, or its own
+The generic adapter does not maintain hooks, a session cache, a receipt store, or its own
 authority rules. It passes actor identity only when an actual host invocation can
 supply it; ordinary MCP transport cannot manufacture an authenticated user or
 session. Windows and WSL callers still cross the Windows-owned one-shot shim and
 never open SQLite from WSL.
+
+The separately versioned [native Codex adapter](native-codex/README.md) adds
+automatic startup context, prompt-bound work and handoff tools, pending-note
+capture, and opt-in compaction continuity. It preserves host authorization and
+exact-request recovery evidence in the plugin data directory while calling the
+same installed core. Its source and compatibility checks now live in this
+repository, and its skill is generated from the same maintained instructions.
+Choose the integration matching the required capabilities; keep one Lodestar
+plugin enabled. See [native installation](docs/installation.md#native-codex-adapter).
 
 ## Skills and package integrity
 

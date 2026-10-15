@@ -49,6 +49,14 @@ allocates one database revision, preserves raw before-images, applies the domain
 mutation, and commits its receipt in one admitted immediate transaction. Nested domain
 helpers reuse that revision. Lock contention fails immediately as retryable busy.
 
+A newly accepted request receives a receipt even if its input leaves the target
+record unchanged. The envelope's `revision` identifies that accepted transaction;
+the unchanged record's `data.revision` remains its last content revision. Retrying
+the exact same request ID and body replays the original receipt without advancing
+either revision. Use a new request ID for a new logical operation, not to recover
+a lost response. A new accepted receipt can invalidate a revision-pinned read even
+when the target content did not change.
+
 Ordinary update/replacement checks both the existing and proposed applicability;
 retirement checks the existing target too. A null/global basis is valid for global
 applicability, and historical project-member scopes resolve through guarded current

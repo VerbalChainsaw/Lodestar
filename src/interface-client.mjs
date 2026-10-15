@@ -442,9 +442,9 @@ export async function loadFindPages(selection, args, { execute = executeCli, max
       message: "Find returned more records than the requested remaining budget; no partial page was accepted.",
       records, complete: false, recordErrors, advisories };
     records.push(...pageRecords);
-    const more = Boolean(envelope.more || envelope.data.more || envelope.data.complete === false);
+    const more = Boolean(envelope.more || envelope.data.more);
     if (!more) return { kind: "ReadSnapshot", records, revision, database_instance_id: instance,
-      database_epoch: epoch, readAt: new Date().toISOString(), complete: recordErrors.length === 0,
+      database_epoch: epoch, readAt: new Date().toISOString(), complete: envelope.data.complete !== false && recordErrors.length === 0,
       recordErrors, advisories };
     const next = (envelope.next ?? []).find((entry) => validContinuation(entry,
       { args: current, operation: "find", revision }));

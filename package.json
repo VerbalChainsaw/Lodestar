@@ -18,6 +18,7 @@
     "codex-plugin/",
     "docs/agent-bootstrap.json",
     "docs/README.md",
+    "native-codex/README.md",
     "docs/publishing.md",
     "desktop/README.md",
     "docs/limitations.md",
@@ -48,7 +49,9 @@
     "assets:build": "node scripts/build-managed-assets.mjs --write",
     "assets:check": "node scripts/build-managed-assets.mjs --check",
     "test": "npm run assets:check && node scripts/run-tests.mjs",
-    "pack:check": "npm pack --dry-run --json"
+    "pack:check": "npm pack --dry-run --json",
+    "native:pack": "node scripts/build-native-codex.mjs",
+    "native:smoke": "node scripts/smoke-native-codex.mjs"
   },
   "engines": {
     "node": ">=24.15.0"

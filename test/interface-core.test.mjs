@@ -53,9 +53,9 @@ test("capabilities classify every command and preserve mutation schemas", async 
   for (const operation of operations) {
     const declared = COMMANDS[operation.argv[0]];
     const allowed = operation.id === "work.check"
-      ? declared.values.filter((flag) => !["--limit", "--file"].includes(flag))
+      ? declared.values.filter((flag) => !["--limit", "--offset", "--file"].includes(flag))
       : ["work.prepare-capture", "work.attention"].includes(operation.id)
-        ? declared.values.filter((flag) => !["--limit", "--session", "--agent", "--harness",
+        ? declared.values.filter((flag) => !["--limit", "--offset", "--session", "--agent", "--harness",
           ...(operation.id === "work.attention" ? ["--file"] : [])].includes(flag))
         : declared.values;
     assert.deepEqual(operation.cli_inputs.command_values.map(({ flag }) => flag), allowed);

@@ -119,13 +119,13 @@ export const COMMANDS = Object.freeze({
   export: { usage: "lodestar export [--db <path>]", summary: "Export exact raw rows and metadata as private recovery evidence.", values: [], booleans: [], positionals: 0 },
   work: domain("lodestar work <status|history|check <intent-record-id>|prepare-capture --file <draft.json>|attention [<intent-record-id>]|start|report|done|expire> [--cwd <path>]",
     "Read advisory work, check recorded intent evidence, or record consequential outcomes through the shared contract.",
-    { min: 0, max: 2 }),
+    { min: 0, max: 2 }, { paging: true }),
   handoff: domain("lodestar handoff <status|history|arm|checkpoint|now|claim|disarm> [--file <request.json>]",
     "Read continuity or explicitly update/claim a transfer; never creates sessions.", { min: 0, max: 1 }, { paging: true }),
   decision: domain("lodestar decision <show|status|set|drop|inject> [key] [--file <request.json>]",
     "Read exact decision streams with show (the default); status is a guarded write requiring structured input.", { min: 0, max: 2 }, { paging: true }),
   pending: domain("lodestar pending <list|add|promote|drop> [--file <request.json>]",
-    "Keep candidates unresolved until an explicit checked promotion.", { min: 0, max: 1 }),
+    "Keep candidates unresolved until an explicit checked promotion.", { min: 0, max: 1 }, { paging: true }),
   recovery: { usage: "lodestar recovery <list|replay <key>> [--interface-config <path>]",
     summary: "Inspect local CLI, Manager and Loader journals or deliberately replay one exact guarded request. Replay returns the original operation envelope; preserve unresolved requests and receipts.",
     values: ["--interface-config"], booleans: [], positionals: { min: 1, max: 2 } },
@@ -160,7 +160,7 @@ const option = (name, flag, schema = string) => ({ name, binding: "option", flag
 const flag = (name, spelling) => ({ name, binding: "flag", flag: spelling, required: false, schema: { type: "boolean" } });
 const page = [option("limit", "--limit", { ...number, minimum: 1 }), option("offset", "--offset", number),
   option("at_revision", "--at-revision", number)];
-const domainPage = [page[0], page[2]];
+const domainPage = page;
 const domainRevision = [page[2]];
 const cwd = option("cwd", "--cwd");
 const bindings = Object.freeze({
@@ -246,9 +246,9 @@ function cliInputs(id, argv, inputSchema) {
       : { min: Math.max(0, counts.min - occupied), max: Math.max(0, counts.max - occupied) };
   return {
     role: "complete CLI parser contract; parameters above are only the safe generic form adapter",
-    command_values: definition.values.filter((name) => id === "work.check" ? !["--limit", "--file"].includes(name)
+    command_values: definition.values.filter((name) => id === "work.check" ? !["--limit", "--offset", "--file"].includes(name)
       : !(["work.attention", "work.prepare-capture"].includes(id) &&
-        (["--limit", "--session", "--agent", "--harness"].includes(name) || (id !== "work.prepare-capture" && name === "--file")))).map((name) => ({ flag: name,
+        (["--limit", "--offset", "--session", "--agent", "--harness"].includes(name) || (id !== "work.prepare-capture" && name === "--file")))).map((name) => ({ flag: name,
       schema: valueSchemas[name] ?? { type: "string", minLength: 1 },
       ...(name === "--file" && (inputSchema || id === "init")
         ? { body: inputSchema ? "mutation_request with input_schema" : initBody } : {}),
@@ -257,9 +257,9 @@ function cliInputs(id, argv, inputSchema) {
     remaining_positionals: { ...remaining, type: "string" },
     global: globalCliInputs,
     constraints: id === "work.check"
-      ? ["Use one exact current knowledge record ID; --limit and --file do not apply to this read."]
-      : id === "work.prepare-capture" ? ["Requires --cwd and --file with exact version 1 draft_schema. --limit and actor context do not apply; preparation writes no rows."]
-        : id === "work.attention" ? ["Requires --cwd; optional exact intent ID. --limit and --file do not apply; section coverage is separate."] : cliConstraints[id] ?? [],
+      ? ["Use one exact current knowledge record ID; --limit, --offset and --file do not apply to this read."]
+      : id === "work.prepare-capture" ? ["Requires --cwd and --file with exact version 1 draft_schema. --limit, --offset and actor context do not apply; preparation writes no rows."]
+        : id === "work.attention" ? ["Requires --cwd; optional exact intent ID. --limit, --offset and --file do not apply; section coverage is separate."] : cliConstraints[id] ?? [],
     ...(inputSchema ? { mutation_body: "mutation_request envelope; operation-specific input_schema below" } : {}),
     ...(id === "init" ? { mutation_body: initBody } : {}),
   };

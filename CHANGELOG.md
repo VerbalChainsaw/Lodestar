@@ -2,7 +2,7 @@
 
 ## 3.0.1 - 2026-10-14
 
-Local candidate; npm and GitHub publication are not part of this patch delivery.
+Release candidate; a source branch does not establish npm or tagged publication.
 See the [3.0.1 candidate notes](docs/releases/v3.0.1.md) for local installation
 and compatibility.
 
@@ -24,6 +24,16 @@ and compatibility.
   packaged Adderall compatibility skill with bounded project-local routing.
 - Bound concurrent test files to four while retaining the per-file deadline and
   behavioral checks for process shutdown, recovery and exact request replay.
+- Reject malformed write bases and unsafe asynchronous mutation callbacks before
+  accepting persistence; validate portable runtime inventory paths and hashes.
+- Preserve native JSON values by rejecting unsupported numbers, duplicate keys,
+  excessive nesting and malformed frames before authorization or dispatch.
+- Maintain the separate native Codex adapter 1.4.7 in this repository, generate its
+  skill from the canonical source, and qualify it against the packed core.
+- Keep damaged-record diagnostics distinct from pagination exhaustion and document
+  unchanged-content request receipts and their transaction revisions.
+- Return revision-pinned continuations for bounded work status/history and pending
+  lists; keep non-paginated work commands explicit about unsupported offsets.
 
 Contract 5 and schema 5 are unchanged; existing schema-5 stores need no migration.
 
