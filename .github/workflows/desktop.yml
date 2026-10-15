@@ -55,6 +55,9 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           ./desktop/scripts/Test-DistributionFaults.ps1 -BundleArchive "$env:RUNNER_TEMP/release/Lodestar-$version-win-x64.zip" -DistributionSource "$(Get-Location)/desktop/distribution"
+      - name: Test CMD launcher paths
+        shell: pwsh
+        run: ./desktop/scripts/Test-CmdPaths.ps1 -NodePath (Get-Command node).Source
       - name: Test portable database boundary
         shell: pwsh
         run: |
