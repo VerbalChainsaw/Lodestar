@@ -300,6 +300,9 @@ export async function dispatch(command, { options, positionals }, database, io) 
   if (command === "doctor" && options["--migration-preflight"] && options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "Choose conversion or recovery preflight.");
   }
+  if (command === "doctor" && options["--quick"] && (options["--migration-preflight"] || options["--recovery-preflight"])) {
+    throw lodestarError("invalid_input", "--quick cannot replace conversion or recovery preflight validation.");
+  }
   if (command === "doctor" && options["--source"] && !options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "--source applies only to recovery preflight.");
   }
@@ -311,7 +314,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
     return operationResult(await recoveryPreflight(database, resolveInputPath(options["--source"])));
   }
   if (command === "doctor") return withDatabase(openDiagnosticDatabase, database, (db) => {
-    const result = diagnoseDatabase(db, { database });
+    const result = diagnoseDatabase(db, { database, quick: options["--quick"] === true });
     let metadata = {}, revision = null;
     try { metadata = readMetadata(db); revision = currentRevision(db); } catch { /* Doctor reports missing metadata. */ }
     return operationResult(result, { revision, database_instance_id: metadata.database_instance_id,

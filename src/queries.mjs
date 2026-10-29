@@ -1,3 +1,4 @@
+import { decodeReceiptRow } from "./receipt-storage.mjs";
 import { Buffer } from "node:buffer";
 
 import { lodestarError } from "./errors.mjs";
@@ -88,6 +89,12 @@ export function findRecords(
     explain = false,
   } = {},
 ) {
+  // Physical compressed/catalog fields are not a complete historical text index.
+  if ((type === 'mutation-receipt' || (history && type === undefined)) &&
+      db.prepare("SELECT 1 FROM records WHERE type='mutation-receipt' AND json_extract(content_json,'$._lodestar_storage.format')='lodestar-receipt-storage-v1' LIMIT 1").get()) {
+    throw lodestarError('archive_search_required', 'Receipt history is compressed; searching physical catalog fields would omit historical matches.',
+      {action:'Use exact receipt reads or explicit bounded archive restore and export for historical search. Current-record searches remain available.'});
+  }
   if (!["contains", "terms"].includes(match)) throw lodestarError("invalid_input", "Unsupported find match mode.",
     { action: "Use --match contains for contiguous substrings or --match terms for explicit AND terms." });
   if (all && match === "terms") throw lodestarError("invalid_input", "Terms matching requires a query.",
@@ -404,12 +411,14 @@ export function linkedRecords(
 export function exportRegistry(db) {
   // Export is exact evidence, including payloads that cannot be normalized safely.
   // It is not a current-context projection and never strips reserved metadata.
-  const document = { v: SCHEMA_VERSION, schema_version: SCHEMA_VERSION,
+  const storageVersion = Number(readMetadata(db).schema_version);
+  const document = { v: storageVersion, schema_version: storageVersion,
     metadata: Object.fromEntries(db.prepare("SELECT key,value FROM metadata ORDER BY key").all()
       .map(({ key, value }) => [key, value])), private_state: true };
   for (const [table, order] of [["records", "id"], ["aliases", "alias"],
     ["links", "from_id,relationship,to_id"], ["sources", "record_id,origin"]]) {
     document[table] = db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
+    if (table === "records") document[table] = document[table].map(decodeReceiptRow);
   }
   document.schema = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema "
     + "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type,name").all();

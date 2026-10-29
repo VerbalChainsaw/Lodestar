@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { decodeReceiptStorage, isRetiredReceipt } from "./receipt-storage.mjs";
 import { lodestarError } from "./errors.mjs";
 import { canonicalStringify } from "./json.mjs";
 import {
@@ -39,14 +40,16 @@ export function requireStoredRecordSemantics(content, { id } = {}) {
 
 // Validate the shape actually emitted by mutate. Historical before-images retain
 // their original content bytes, including legacy/source-correction representations.
-export function validateStoredReceipt(content, { id, databaseInstanceId = null, expected = null } = {}) {
+export function validateStoredReceipt(content, {
+  id, databaseInstanceId = null, expected = null, contentValidated = false,
+} = {}) {
   let field = "content";
   const require = (condition, name) => {
     field = name;
     if (!condition) throw new Error("Invalid stored receipt field.");
   };
   try {
-    validateContent(content);
+    if (!contentValidated) validateContent(content, { serialize: false });
     require(content.state === "known" && object(content.value), "value");
     const data = content.value;
     for (const name of ["request_id", "operation"]) {
@@ -136,13 +139,19 @@ function* recordIssues(db, { databaseInstanceId } = {}) {
       yield { code: "record_fields_invalid", message: "A record has invalid stored fields.",
         identifiers: details(error, { id: row.id }) };
     }
-    let content;
+    let content, contentValidated = false, retired = false;
     try {
-      content = JSON.parse(row.content_json);
-      validateContent(content);
+      retired = row.type === "mutation-receipt" && isRetiredReceipt(row.content_json,{id:row.id});
+      content = JSON.parse(decodeReceiptStorage(row.content_json, {id:row.id,allowRetired:retired}));
+      validateContent(content, { serialize: false });
+      contentValidated = true;
       requireStoredRecordSemantics(content, { id: row.id });
     }
     catch (error) {
+      if (error.code === "archive_restore_required") {
+        yield {code:error.code,message:error.message,identifiers:error.identifiers,action:error.action};
+        continue;
+      }
       if (error.code === "record_requires_source_correction") {
         yield { code: error.code, message: error.message,
           identifiers: error.identifiers, action: error.action };
@@ -151,8 +160,8 @@ function* recordIssues(db, { databaseInstanceId } = {}) {
           identifiers: details(error, { id: row.id }) };
       }
     }
-    if (row.type === "mutation-receipt") {
-      try { validateStoredReceipt(content, { id: row.id, databaseInstanceId }); }
+    if (row.type === "mutation-receipt" && !retired) {
+      try { validateStoredReceipt(content, { id: row.id, databaseInstanceId, contentValidated }); }
       catch (error) {
         yield { code: error.code, message: error.message,
           identifiers: error.identifiers, action: error.action };

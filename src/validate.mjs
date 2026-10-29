@@ -1,5 +1,5 @@
 import { lodestarError } from "./errors.mjs";
-import { canonicalStringify } from "./json.mjs";
+import { canonicalStringify, validateJsonValue } from "./json.mjs";
 
 export const KNOWLEDGE_STATES = Object.freeze([
   "known",
@@ -150,7 +150,7 @@ export function validateTimestamp(value, field = "timestamp") {
   return value;
 }
 
-export function validateContent(value) {
+export function validateContent(value, { serialize = true } = {}) {
   plainObject(value, "content");
   if (
     !Object.hasOwn(value, "state")
@@ -173,7 +173,8 @@ export function validateContent(value) {
       validateSemantics(value._lodestar.semantics);
     }
   }
-  return canonicalStringify(value, { maximumDepth: 1000 });
+  return serialize ? canonicalStringify(value, { maximumDepth: 1000 })
+    : validateJsonValue(value, { maximumDepth: 1000 });
 }
 
 export function validateResearchReview(data) {

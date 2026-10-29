@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "3.0.1",
+  "version": "3.0.2-lean.3",
   "description": "Local contract-5 project context, evidence, decisions, work, and continuity",
   "type": "module",
   "bin": {
@@ -43,7 +43,9 @@
     "HEADACHES.md",
     "CHANGELOG.md",
     "SECURITY.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/lean-storage.md",
+    "tools/restore-archive.py"
   ],
   "scripts": {
     "assets:build": "node scripts/build-managed-assets.mjs --write",

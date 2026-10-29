@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 
 export const CONTRACT_VERSION = 5;
-export const SCHEMA_VERSION = CONTRACT_VERSION;
+export const SCHEMA_VERSION = 6;
+export const SCHEMA_V5_VERSION = 5;
 export const SCHEMA_V4_VERSION = 4;
 
 export function createDatabaseInstanceId() {
@@ -79,12 +80,13 @@ export const WRITE_FENCE_SQL = WRITE_FENCE_TABLES.flatMap((table) =>
   ["INSERT", "UPDATE", "DELETE"].map((operation) => String.raw`
 CREATE TRIGGER lodestar_contract_${table}_${operation.toLowerCase()}
 BEFORE ${operation} ON ${table}
-WHEN lodestar_write_contract() IS NOT ${CONTRACT_VERSION}
+WHEN lodestar_write_contract() IS NOT ${SCHEMA_VERSION}
 BEGIN
   SELECT RAISE(ABORT, 'lodestar_write_contract_required');
 END;`)
 ).join("\n");
 export const SCHEMA_SQL = `${SCHEMA_V4_SQL}\n${WRITE_FENCE_SQL}`;
+export const SCHEMA_V5_SQL = SCHEMA_SQL.replaceAll("IS NOT 6", "IS NOT 5");
 
 function normalizedSql(value) {
   // Compare SQL tokens, preserving string literals. SQLite's table-renaming
@@ -115,11 +117,13 @@ function expectedDefinitions(schemaSql) {
 
 export const SCHEMA_V4_EXPECTED_SCHEMA_DEFINITIONS = expectedDefinitions(SCHEMA_V4_SQL);
 export const EXPECTED_SCHEMA_DEFINITIONS = expectedDefinitions(SCHEMA_SQL);
+const SCHEMA_V5_EXPECTED_DEFINITIONS = expectedDefinitions(SCHEMA_V5_SQL);
 
 export function inspectSchemaDefinitions(db, { version = SCHEMA_VERSION } = {}) {
   const expected = version === SCHEMA_V4_VERSION
     ? SCHEMA_V4_EXPECTED_SCHEMA_DEFINITIONS
-    : version === SCHEMA_VERSION ? EXPECTED_SCHEMA_DEFINITIONS : null;
+    : version === SCHEMA_V5_VERSION ? SCHEMA_V5_EXPECTED_DEFINITIONS
+      : version === SCHEMA_VERSION ? EXPECTED_SCHEMA_DEFINITIONS : null;
   if (!expected) throw new Error(`Unsupported schema inspection version: ${version}`);
   const rows = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema "
     + "WHERE type IN ('table','index','trigger','view') ORDER BY name").all()

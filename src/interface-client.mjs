@@ -30,7 +30,7 @@ const DIAGNOSTIC_VALUE_FLAGS = new Set(["--db", "--output", "--source", "--cwd",
   "--target", "--home", "--codex-root", "--codex-home", "--claude-home",
   "--xdg-config-home", "--hermes-home", "--opencode-root", "--wsl-shim", "--posix-shim"]);
 const DIAGNOSTIC_BOOLEAN_FLAGS = new Set(["--human", "--apply", "--replace-local",
-  "--migration-preflight", "--recovery-preflight"]);
+  "--migration-preflight", "--recovery-preflight", "--quick"]);
 function diagnosticExitAllowed(operation, args) {
   const prefix = DIAGNOSTIC_ARGV.get(operation);
   if (!prefix) return false;

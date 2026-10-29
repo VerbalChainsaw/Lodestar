@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { encodeReceiptStorage, decodeReceiptStorage, decodeReceiptRow, isRetiredReceipt } from "./receipt-storage.mjs";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { inspectLocalSourceSync } from "./bootstrap.mjs";
@@ -237,7 +238,7 @@ function storedJson(text, validate, identifiers) {
   }
 }
 export function parseStoredContent(text, identifiers = {}) {
-  return storedJson(text, validateContent, {
+  return storedJson(decodeReceiptStorage(text, identifiers), validateContent, {
     field: "content_json",
     ...identifiers,
   });
@@ -250,6 +251,7 @@ export function parseStoredMetadata(text, identifiers = {}) {
   });
 }
 function parsedRecord(row) {
+  row = decodeReceiptRow(row);
   const stored = parseStoredContent(row.content_json, { id: row.id });
   const metadata = stored._lodestar ?? {};
   requireStoredRecordSemantics(stored, { id: row.id });
@@ -520,7 +522,8 @@ function replaceRecord(
     input.type,
     input.name,
     input.scope,
-    input.content_json,
+    input.type === "mutation-receipt" && readMetadata(db).schema_version === "6"
+      ? encodeReceiptStorage(input.content_json, input.id) : input.content_json,
     current?.created_at ?? createdAt,
     updatedAt,
   );
@@ -737,6 +740,12 @@ function beforeImage(db, id) {
 
 function targetRevision(db, target, decisionHeads) {
   if (target.kind === "record") {
+    if (target.id.startsWith("mutation-receipt:")) {
+      const receipt = rawRecordById(db, target.id);
+      if (!receipt) return null;
+      if (isRetiredReceipt(receipt.content_json, { id: target.id })) return Number(JSON.parse(receipt.content_json)._lodestar.revision);
+      return Number(parseStoredContent(receipt.content_json, { id: target.id })._lodestar.revision);
+    }
     const row = db.prepare("SELECT id, json_extract(content_json, '$._lodestar.revision') "
       + "AS revision FROM records WHERE id=?").get(target.id);
     if (!row) return null;
@@ -1456,7 +1465,8 @@ function rawReadWriteBasis(db, row) {
 
 export function getRawRecord(db, identifier) {
   const id = resolveRecordId(db, identifier);
-  const rawRecord = rawRecordById(db, id);
+  const stored = rawRecordById(db, id);
+  const rawRecord = stored ? decodeReceiptRow(stored) : stored;
   return {
     raw_record: rawRecord,
     raw_associations: rawAssociations(db, id),
@@ -1467,12 +1477,14 @@ export function getRawRecord(db, identifier) {
 export function getRecordHistory(db, identifier) {
   const id = resolveRecordId(db, identifier);
   const versions = [];
+  const removed_receipts = [];
   const receipts = db.prepare("SELECT id,type,content_json FROM records "
     + "WHERE type IN ('mutation-receipt','migration-source') "
     + "ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
     .all();
   const databaseInstanceId = readMetadata(db).database_instance_id;
   for (const receipt of receipts) {
+    if(receipt.type === "mutation-receipt" && isRetiredReceipt(receipt.content_json,{id:receipt.id})) { removed_receipts.push(receipt.id); continue; }
     const content = parseStoredContent(receipt.content_json, { id: receipt.id });
     const data = receipt.type === "mutation-receipt"
       ? validateStoredReceipt(content, { id: receipt.id, databaseInstanceId }) : contentData(content);
@@ -1486,9 +1498,11 @@ export function getRecordHistory(db, identifier) {
       });
     }
   }
+  versions.sort((a,b)=>a.revision-b.revision||a.receipt_id.localeCompare(b.receipt_id)||a.sequence-b.sequence);
   return {
     id,
     versions,
+    ...(removed_receipts.length ? {removed_receipts,complete:false} : {}),
     current: beforeImage(db, id),
     write_basis: rawReadWriteBasis(db, rawRecordById(db, id)),
   };

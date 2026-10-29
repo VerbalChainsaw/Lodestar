@@ -99,11 +99,13 @@ export function openConnection(
       allowExtension: false,
     });
     rememberDatabaseFile(db, file);
-    const state = { admission: 0, revision: null };
+    const existingMetadata = db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='metadata'").get();
+    const storedVersion = existingMetadata ? db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value : null;
+    const state = { admission: 0, revision: null, schemaContract: storedVersion === "5" ? 5 : SCHEMA_VERSION };
     connectionState.set(db, state);
     if (!readOnly) {
       db.function("lodestar_write_contract", {}, () =>
-        state.admission > 0 ? SCHEMA_VERSION : 0);
+        state.admission > 0 ? state.schemaContract : 0);
     }
     if (typeof db.enableDefensive === "function") {
       db.enableDefensive(true);
@@ -437,7 +439,7 @@ export async function initializeDatabase(
       const metadata = readMetadata(existing, file);
       return {
         database: file,
-        schema_version: SCHEMA_VERSION,
+        schema_version: Number(metadata.schema_version),
         created: false,
         created_at: metadata.created_at,
         database_instance_id: metadata.database_instance_id,
@@ -489,7 +491,7 @@ export async function initializeDatabase(
       const metadata = readMetadata(existing, file);
       return {
         database: file,
-        schema_version: SCHEMA_VERSION,
+        schema_version: Number(metadata.schema_version),
         created: false,
         created_at: metadata.created_at,
         database_instance_id: metadata.database_instance_id,
