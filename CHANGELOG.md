@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.2 - 2026-10-29
+
+- Lean schema-6 receipt storage with explicit archive/recovery boundaries.
+- Bounded full diagnostic reporting, exact counts and truthful incomplete health.
+- Verified cache generation checks and interrupted restore-receipt reconciliation.
+- Current/legacy schema and compressed-receipt compatibility corrections.
+- Local candidate only; no npm or GitHub release publication.
+
 ## 3.0.1 - 2026-10-14
 
 Release candidate; a source branch does not establish npm or tagged publication.

@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
@@ -10,7 +11,7 @@ test("source correction advertises literal public raw-read arguments", async (t)
   const created = await f.create(id, "fact", { note: "preserve source" });
   assert.equal(created.code, 0);
   const damaged = new DatabaseSync(f.database);
-  damaged.function("lodestar_write_contract", () => 5);
+  damaged.function("lodestar_write_contract", () => SCHEMA_VERSION);
   damaged.prepare("UPDATE records SET content_json=json_remove(content_json, '$._lodestar.semantics') WHERE id=?").run(id);
   damaged.close();
   const before = await readFile(f.database);

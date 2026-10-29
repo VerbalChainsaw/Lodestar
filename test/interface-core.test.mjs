@@ -49,7 +49,7 @@ test("capabilities classify every command and preserve mutation schemas", async 
   assert.equal(operations.find(({ id }) => id === "decision.status").effect, "domain_write");
   const find = operations.find(({ id }) => id === "find");
   assert.deepEqual(find.constraints, [{ kind: "exactly_one", parameters: ["query", "all"] }]);
-  assert.deepEqual(operations.find(({ id }) => id === "doctor").parameters, []);
+  assert.deepEqual(operations.find(({ id }) => id === "doctor").parameters, [{ name: "quick", binding: "flag", flag: "--quick", required: false, schema: { type: "boolean" } }]);
   for (const operation of operations) {
     const declared = COMMANDS[operation.argv[0]];
     const allowed = operation.id === "work.check"
@@ -78,7 +78,7 @@ test("capabilities classify every command and preserve mutation schemas", async 
       item.flag === flag && item.schema.type === "string"), `${id} ${flag}`);
   }
   assert.deepEqual(operations.find(({ id }) => id === "doctor").cli_inputs.command_booleans,
-    ["--migration-preflight", "--recovery-preflight"]);
+    ["--quick", "--migration-preflight", "--recovery-preflight"]);
   assert.deepEqual(operations.find(({ id }) => id === "setup").cli_inputs.command_booleans,
     ["--apply", "--replace-local"]);
   assert.equal(operations.find(({ id }) => id === "find").cli_inputs.command_values

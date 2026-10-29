@@ -1,6 +1,6 @@
 {
   "name": "lodestar",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Native contract-5 tools and automatic project context guidance",
   "author": {
     "name": "VerbalChainsaw"

@@ -1,3 +1,4 @@
+import { decodeReceiptStorage } from '../src/receipt-storage.mjs';
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -58,9 +59,9 @@ test("the shipped decision replay recipe uses original scope and exact saved byt
     assert.equal(eventRows.length, 1);
     assert.equal(eventRows[0].scope, "project:recipe");
     const receiptRows = db.prepare("SELECT id, content_json FROM records WHERE type='mutation-receipt'").all();
-    const matching = receiptRows.filter((row) => JSON.parse(row.content_json).value.request_id === request.request_id);
+    const matching = receiptRows.filter((row) => JSON.parse(decodeReceiptStorage(row.content_json)).value.request_id === request.request_id);
     assert.equal(matching.length, 1);
-    assert.equal(JSON.parse(matching[0].content_json).value.committed_revision, first.envelope.revision);
+    assert.equal(JSON.parse(decodeReceiptStorage(matching[0].content_json)).value.committed_revision, first.envelope.revision);
     assert.equal(createHash("sha256").update(await readFile(requestFile)).digest("hex"),
       createHash("sha256").update(bytes).digest("hex"));
   } finally { db.close(); }

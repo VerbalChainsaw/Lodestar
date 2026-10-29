@@ -101,7 +101,7 @@ export function openConnection(
     rememberDatabaseFile(db, file);
     const existingMetadata = db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='metadata'").get();
     const storedVersion = existingMetadata ? db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value : null;
-    const state = { admission: 0, revision: null, schemaContract: storedVersion === "5" ? 5 : SCHEMA_VERSION };
+    const state = { admission: 0, revision: null, schemaContract: ["4", "5"].includes(storedVersion) ? 5 : SCHEMA_VERSION };
     connectionState.set(db, state);
     if (!readOnly) {
       db.function("lodestar_write_contract", {}, () =>

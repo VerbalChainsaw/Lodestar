@@ -85,8 +85,9 @@ BEGIN
   SELECT RAISE(ABORT, 'lodestar_write_contract_required');
 END;`)
 ).join("\n");
+export const WRITE_FENCE_V5_SQL = WRITE_FENCE_SQL.replaceAll(`IS NOT ${SCHEMA_VERSION}`, `IS NOT ${SCHEMA_V5_VERSION}`);
 export const SCHEMA_SQL = `${SCHEMA_V4_SQL}\n${WRITE_FENCE_SQL}`;
-export const SCHEMA_V5_SQL = SCHEMA_SQL.replaceAll("IS NOT 6", "IS NOT 5");
+export const SCHEMA_V5_SQL = `${SCHEMA_V4_SQL}\n${WRITE_FENCE_V5_SQL}`;
 
 function normalizedSql(value) {
   // Compare SQL tokens, preserving string literals. SQLite's table-renaming

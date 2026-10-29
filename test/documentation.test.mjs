@@ -15,9 +15,9 @@ test("current local candidate has one dated changelog entry and exact artifact i
   const entries = [...changelog.matchAll(/^## ([^\r\n]*)/gmu)]
     .filter((match) => match[1].startsWith(`${version} - `));
   assert.equal(entries.length, 1, "Current changes must share one release entry");
-  assert.equal(entries[0][1], `${version} - 2026-10-14`);
+  assert.equal(entries[0][1], `${version} - 2026-10-29`);
   const notes = await readFile(path.join(root, `docs/releases/v${version}.md`), "utf8");
-  assert.match(notes, /^Candidate date: 2026-10-14\.?$/mu);
+  assert.match(notes, /^Candidate date: 2026-10-29\.?$/mu);
   for (const file of ["README.md", "docs/installation.md", `docs/releases/v${version}.md`]) {
     const text = await readFile(path.join(root, file), "utf8");
     assert.ok(text.includes(`npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-${version}.tgz"`), file);

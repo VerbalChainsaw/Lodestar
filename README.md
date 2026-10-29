@@ -6,12 +6,12 @@
 
 **[Explore the splash page](https://verbalchainsaw.github.io/Lodestar/) · [Published 3.0.0 downloads](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0) · [Installation guide](docs/installation.md)**
 
-[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [3.0.1 candidate notes](docs/releases/v3.0.1.md) · [FAQ](Q&A.md)
+[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [3.0.2 candidate notes](docs/releases/v3.0.2.md) · [FAQ](Q&A.md)
 
-This checkout is the **3.0.1 local candidate**. It preserves explicit JSON `null`,
-fixes bounded pagination and recovery evidence, detects changes to configured
-CLI files, and supports guarded same-project checkout rebinds. See the
-[patch notes](docs/releases/v3.0.1.md). Version 3.0.1 has not been published to
+This checkout is the **3.0.2 local candidate**. It adds lean receipt storage,
+bounded diagnostics with truthful incomplete-history status, and verified
+archive-cache recovery while preserving contract-5 operations. See the
+[patch notes](docs/releases/v3.0.2.md). Version 3.0.2 has not been published to
 npm or GitHub; the public download link above retains the 3.0.0 release.
 
 Lodestar keeps project context, decisions, evidence, and unfinished work in one
@@ -93,8 +93,8 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 
 The Windows package requires **Node.js 24.15.0 or newer**, **.NET 10
 Desktop Runtime (x64)** and **PowerShell 7**. For the local candidate, use the
-locally built `Lodestar-3.0.1-win-x64.zip` and its matching SHA-256 inventory;
-see [local candidate installation](docs/installation.md#local-301-candidate).
+locally built `Lodestar-3.0.2-win-x64.zip` and its matching SHA-256 inventory;
+see [local candidate installation](docs/installation.md#local-302-candidate).
 The [published 3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
 remains available separately. Verify and extract the complete archive. Run `Install.cmd`,
 then open Loader or Manager from the Start Menu.
@@ -106,7 +106,7 @@ The CLI alone requires **Node.js 24.15.0 or newer**. Install the exact local
 candidate tarball, replacing the placeholder with its verified absolute path:
 
 ```text
-npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.1.tgz"
+npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.2.tgz"
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init

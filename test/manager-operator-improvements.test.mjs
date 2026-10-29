@@ -1,3 +1,5 @@
+import { decodeReceiptStorage } from '../src/receipt-storage.mjs';
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -74,7 +76,8 @@ test('C1 guided create and associate are two separately confirmed exact puts; p 
   assert.equal(result.evidence[0].data_sha256,createHash('sha256').update(canonicalStringify(captured.data)).digest('hex'));
   const db=new DatabaseSync(s.f.database,{readOnly:true});try {
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM records WHERE id=?').get(id).n,1);
-    for(const request of requests) assert.equal(db.prepare("SELECT COUNT(*) AS n FROM records WHERE type='mutation-receipt' AND json_extract(content_json,'$.value.request_id')=?").get(request.request_id).n,1);
+    const receipts=db.prepare("SELECT content_json FROM records WHERE type='mutation-receipt'").all().map(row=>JSON.parse(decodeReceiptStorage(row.content_json)).value);
+    for(const request of requests) assert.equal(receipts.filter(receipt=>receipt.request_id===request.request_id).length,1);
   }finally{db.close();}
   assert.match(r.output,/Record saved; association not yet saved/);
   assert.equal((await readdir(path.join(s.f.root,'pending'))).length,2);
@@ -84,7 +87,7 @@ test('I1 Connection reads exact selected source identity and help support consta
   const s=await setup(t);let opened=false;
   const r=await journey(s,({title,menu})=> { if(title==='Main menu'){if(opened)return 'q';opened=true;return option(menu,'Connection');}return 'q';});
   assert.match(r.output,/coreSourceDigest/);assert.ok(r.output.includes(s.selection.coreSourceDigest));
-  assert.match(r.output,/source_inventory/);assert.match(r.output,/"contract_version": 5/);assert.match(r.output,/"schema_version": 5/);
+  assert.match(r.output,/source_inventory/);assert.match(r.output,/"contract_version": 5/);assert.ok(r.output.includes(`"schema_version": ${SCHEMA_VERSION}`));
   assert.match(r.output,/packaged payload unverified/);
 });
 

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {openConnection, initializeConnection, admittedTransaction} from '../src/database.mjs';
@@ -54,7 +55,7 @@ test('mixed cold warnings and omitted real failures never become healthy or comp
   admittedTransaction(db, () => {
     for(let i=0;i<900;i++) insert(db, `invalid:${i}:${'x'.repeat(400)}`, 'note', '{"state":"known","value":{}}');
     const id = `mutation-receipt:${'a'.repeat(64)}`;
-    insert(db,id,'mutation-receipt',archivedReceiptPointer(id,1,'C:/missing-doctor-fixture/manifest.json','b'.repeat(64)));
+    insert(db,id,'mutation-receipt',archivedReceiptPointer(id,1,path.resolve('missing-doctor-fixture/manifest.json'),'b'.repeat(64)));
   });
   const report=diagnoseDatabase(db);
   assert.equal(report.healthy,false);

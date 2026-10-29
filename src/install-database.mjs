@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION, SCHEMA_V5_VERSION, SCHEMA_V4_VERSION } from "./schema.mjs";
 import { randomUUID } from "node:crypto";
 import { lstat, open, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -24,9 +25,9 @@ async function inspect(file) {
   const db = await openDiagnosticDatabase(file);
   try {
     const schema = readMetadata(db, file).schema_version;
-    if (schema !== "5" && schema !== "4") throw lodestarError("unsupported_schema", "The selected store is incompatible with this installation.", {
-      identifiers: { database: file, actual: schema, supported: [4, 5] },
-      action: "Preserve this database and use its matching Lodestar release. Only inspected schema 4 can be explicitly migrated; schema 5 requires no migration.",
+    if (![SCHEMA_V4_VERSION, SCHEMA_V5_VERSION, SCHEMA_VERSION].map(String).includes(schema)) throw lodestarError("unsupported_schema", "The selected store is incompatible with this installation.", {
+      identifiers: { database: file, actual: schema, supported: [SCHEMA_V4_VERSION, SCHEMA_V5_VERSION, SCHEMA_VERSION] },
+      action: "Preserve this database and use its matching Lodestar release. Only inspected schema 4 can be explicitly migrated; supported schemas 5 and 6 require no migration.",
     });
     if (schema === "4") return { schema_version: 4 };
     const report = diagnoseDatabase(db, { database: file });
