@@ -1,3 +1,5 @@
+import { decodeReceiptStorage } from '../src/receipt-storage.mjs';
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from 'node:assert/strict';
 import { backup as sqliteBackup, DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
@@ -22,10 +24,10 @@ async function acceptedReceipt(t) {
 
 function damage(database, id, change) {
   const db = new DatabaseSync(database);
-  db.function('lodestar_write_contract', () => 5);
+  db.function('lodestar_write_contract', () => SCHEMA_VERSION);
   try {
     const original = db.prepare('SELECT content_json FROM records WHERE id=?').get(id).content_json;
-    const content = JSON.parse(original);
+    const content = JSON.parse(decodeReceiptStorage(original, {id}));
     change(content.value, content);
     const bytes = JSON.stringify(content);
     db.prepare('UPDATE records SET content_json=? WHERE id=?').run(bytes, id);
@@ -156,7 +158,7 @@ test('receipt history preserves legacy and source-correction before-image conten
   const { f, request } = await acceptedReceipt(t);
   const legacy = '{"state":"known","value":{"exact":9007199254740993},"_lodestar":{"priority":0,"revision":1}}';
   const raw = new DatabaseSync(f.database);
-  raw.function('lodestar_write_contract', () => 5);
+  raw.function('lodestar_write_contract', () => SCHEMA_VERSION);
   raw.prepare('UPDATE records SET content_json=? WHERE id=?').run(legacy, 'fact:receipt');
   raw.close();
   const db = await openWriteDatabase(f.database);

@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -14,7 +15,7 @@ for (const field of ["content_json", "metadata_json"]) {
       await f.create(id, "knowledge", { numeric_marker: 0 });
       const raw = new DatabaseSync(f.database);
       // The fixture deliberately admits a legacy unsafe number to test the public correction path.
-      raw.function("lodestar_write_contract", () => 5);
+      raw.function("lodestar_write_contract", () => SCHEMA_VERSION);
       let original;
       try {
         if (field === "content_json") {

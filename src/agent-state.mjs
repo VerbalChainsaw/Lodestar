@@ -300,6 +300,9 @@ export async function dispatch(command, { options, positionals }, database, io) 
   if (command === "doctor" && options["--migration-preflight"] && options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "Choose conversion or recovery preflight.");
   }
+  if (command === "doctor" && options["--quick"] && (options["--migration-preflight"] || options["--recovery-preflight"])) {
+    throw lodestarError("invalid_input", "--quick cannot replace conversion or recovery preflight validation.");
+  }
   if (command === "doctor" && options["--source"] && !options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "--source applies only to recovery preflight.");
   }
@@ -311,7 +314,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
     return operationResult(await recoveryPreflight(database, resolveInputPath(options["--source"])));
   }
   if (command === "doctor") return withDatabase(openDiagnosticDatabase, database, (db) => {
-    const result = diagnoseDatabase(db, { database });
+    const result = diagnoseDatabase(db, { database, quick: options["--quick"] === true });
     let metadata = {}, revision = null;
     try { metadata = readMetadata(db); revision = currentRevision(db); } catch { /* Doctor reports missing metadata. */ }
     return operationResult(result, { revision, database_instance_id: metadata.database_instance_id,
@@ -415,8 +418,8 @@ export async function dispatch(command, { options, positionals }, database, io) 
           : `Use lodestar ${command} --help for the read form.`,
       });
     }
-    if (operationName === "work.check" && (options["--limit"] !== undefined || options["--file"] !== undefined)) {
-      throw lodestarError("unknown_option", "The work check read does not accept --limit or --file.", {
+    if (operationName === "work.check" && (options["--limit"] !== undefined || options["--offset"] !== undefined || options["--file"] !== undefined)) {
+      throw lodestarError("unknown_option", "The work check read does not accept --limit, --offset or --file.", {
         identifiers: { operation: operationName }, action: "Use work check <intent-record-id> [--cwd <path>] [--at-revision <n>].",
       });
     }
@@ -433,12 +436,12 @@ export async function dispatch(command, { options, positionals }, database, io) 
             ? checkWorkEvidence(db, project, positionals[1])
             : action === "prepare-capture" ? prepareCapture(db, project, captureDraft)
               : action === "attention" ? projectAttention(db, project, positionals[1] ?? null)
-                : workStatus(db, project, action === "history", limit)
+                : workStatus(db, project, action === "history", limit, offset)
             : command === "handoff" ? handoffStatus(db, project, caller, { history: action === "history", limit, offset })
-              : pendingList(db, project, limit);
+              : pendingList(db, project, limit, offset);
         return dbResult(db, data, { scope: scope(project, caller), more: data?.more === true,
           ...(operationName === "work.check" ? { next: data.next } : {}),
-          ...(data.more && ["handoff", "decision"].includes(command) ? { next: [{ command,
+          ...(data.more && ["work", "handoff", "decision", "pending"].includes(command) ? { next: [{ command,
             args: [action, ...(positionals[1] ? [positionals[1]] : []), "--cwd", project.cwd,
               "--limit", String(limit), "--offset", String(offset + limit), "--at-revision", String(currentRevision(db))] }] } : {}) });
       });

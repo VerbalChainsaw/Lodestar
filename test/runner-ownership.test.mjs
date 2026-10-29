@@ -97,27 +97,29 @@ test("deadline exits its runner while a finite fixture descendant still holds re
   const root = await mkdtemp(path.join(os.tmpdir(), "lodestar-test-pipe-deadline-"));
   const ready = path.join(root, "ready"), done = path.join(root, "done");
   t.after(async () => {
-    const until = Date.now() + 5000;
+    const until = Date.now() + 10000;
     while (Date.now() < until && !(await readFile(done, "utf8").catch(() => null)))
       await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(await readFile(done, "utf8"), "done", "The exact finite descendant must finish naturally before fixture removal.");
     await rm(root, { recursive: true, force: true });
   });
   await mkdir(path.join(root, "test"));
-  const child = 'const fs=require("node:fs");fs.writeFileSync(process.argv[1],"ready");setTimeout(()=>fs.writeFileSync(process.argv[2],"done"),2000);';
+  // Allow both Windows process startups before the deadline, while keeping the
+  // inherited pipe open well beyond it. Readiness and non-completion are checked.
+  const child = 'const fs=require("node:fs");fs.writeFileSync(process.argv[1],"ready");setTimeout(()=>fs.writeFileSync(process.argv[2],"done"),8000);';
   await writeFile(path.join(root, "test", "pipes.test.mjs"),
     `import {spawn} from "node:child_process";import test from "node:test";spawn(process.execPath,["-e",${JSON.stringify(child)},${JSON.stringify(ready)},${JSON.stringify(done)}],{detached:true,windowsHide:true,stdio:["ignore","inherit","inherit"]}).unref();test("COMPLETE_BUT_INHERITED_PIPE",()=>{});\n`);
   const invocation = path.join(root, "invoke.mjs");
-  await writeFile(invocation, `import { runOwnedTests } from ${JSON.stringify(new URL("../scripts/run-tests.mjs", import.meta.url).href)}; process.exitCode = await runOwnedTests({ deadlineMs: 500 });\n`);
+  await writeFile(invocation, `import { runOwnedTests } from ${JSON.stringify(new URL("../scripts/run-tests.mjs", import.meta.url).href)}; process.exitCode = await runOwnedTests({ deadlineMs: 3000 });\n`);
   const env = { ...process.env }; delete env.NODE_TEST_CONTEXT;
   const result = spawnSync(process.execPath, [invocation],
-    { cwd: root, env, encoding: "utf8", timeout: 5000, windowsHide: true });
+    { cwd: root, env, encoding: "utf8", timeout: 10000, windowsHide: true });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.equal(await readFile(ready, "utf8"), "ready");
   assert.equal(await readFile(done, "utf8").catch(() => null), null,
     "The parent runner must exit while the owned finite descendant still holds pipes.");
-  assert.match(result.stderr, /DEADLINE test[\\/]pipes.test.mjs after 500ms/u);
+  assert.match(result.stderr, /DEADLINE test[\\/]pipes.test.mjs after 3000ms/u);
   assert.match(result.stdout, /✔ COMPLETE_BUT_INHERITED_PIPE/u);
   assert.match(result.stdout, /COMPLETE test[\\/]pipes.test.mjs passed=false/u);
 });

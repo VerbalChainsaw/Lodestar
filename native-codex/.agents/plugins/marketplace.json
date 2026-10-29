@@ -1,0 +1,7 @@
+{
+  "name": "lodestar-native",
+  "interface": { "displayName": "Lodestar native Codex adapter" },
+  "plugins": [
+    { "name": "lodestar", "source": { "source": "local", "path": "./" } }
+  ]
+}

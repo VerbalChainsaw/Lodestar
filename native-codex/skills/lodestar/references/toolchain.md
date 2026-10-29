@@ -1,0 +1,138 @@
+# The toolchain
+
+Lodestar documents this small toolchain rather than treating it as one giant rules file. Each part closes a specific failure mode without granting Lodestar ownership over another tool's files.
+
+Lodestar ships canonical reference content in its package. Its explicit setup
+operation deploys owned skill payloads with backups; ordinary startup and verification
+are read-only. Native environments retain ownership of their settings and instructions.
+
+---
+
+## Lodestar, layer 4, memory
+
+`lodestar-agent-context` · [github.com/VerbalChainsaw/Lodestar](https://github.com/VerbalChainsaw/Lodestar) · MIT · Node 24.15+
+
+For current local evaluation, verify the candidate tarball against its own SHA-256
+inventory and use the isolated package procedure in the candidate's included
+`docs/installation.md`. Invoke that exact package with the selected Node runtime.
+The registry commands below select the retained 3.0.0 release. Do not substitute
+a local candidate version until its matching package has been published:
+
+```bash
+npm install --global lodestar-agent-context@3.0.0
+lodestar setup --target all
+lodestar setup --target all --apply
+lodestar skills verify --target all
+```
+
+The npm registry supplies the released package. `setup` plans
+owned payload changes before `--apply` performs them.
+Use `lodestar init` only to create an explicitly new store. Existing schema-5
+stores need no migration; for schema-4 stores, follow the maintained
+[installation and migration guide](https://github.com/VerbalChainsaw/Lodestar/blob/main/docs/installation.md).
+
+Review the setup plan before applying it. Existing locally changed or unowned
+content requires explicit `--replace-local`, which retains backups. Setup and
+verification share the same payload manifest and host resolver. Host settings,
+project-specific instructions, plugins, and actual native loading require their
+own checks; matching files alone do not prove complete startup readiness.
+
+A local context registry. Project knowledge, decisions, work outcomes, and continuity live in one universal-record SQLite database and come back through stable IDs, exact aliases, deterministic search, and explicit links. Fresh orientation is read-only and is never persisted as a startup snapshot. No background service or runtime network dependency.
+
+**What it covers.** Agents can start project work by recursively searching the repo
+and rebuilding context the project already knows, and that burns a good chunk of a
+window before any work starts. Lodestar gives them a smaller first move.
+
+The mechanism is exact retrieval with optional caller-selected paging:
+
+| Command | Returns |
+|---|---|
+| `get <id-or-alias>` | One record, resolved by stable ID or exact alias. Not a search, not a ranked list. |
+| `find <query>` | Deterministically ordered matching records. Add `--limit` only when a page is useful. |
+| `links <id-or-alias>` | **One hop** of incoming and outgoing links. Never a transitive dump of the graph. |
+| `export` | A deterministic JSON representation, when you actually want everything. |
+
+Every success is one contract-5 JSON envelope on stdout, including `v`, `ok`,
+`operation`, database/revision/scope fields, `data`, `more`, and `next`. Every failure
+is one envelope on stderr carrying the same context plus a code, message, identifiers,
+and action. `--human` formats it for people. Help and version never open or create a
+database.
+
+The part I care most about is what it refuses to claim. Record availability and semantic attribution stay explicit, and source observations identify the evidence actually inspected. Missing provenance is preserved as uncertainty rather than rewritten as user direction or a fresh observation. New writes provide complete semantics; the core rejects unsafe numeric input before JavaScript can round it.
+
+A missing record means only that Lodestar lacks that knowledge. It is not evidence the thing does not exist. Its published agent contract is five lines: use Lodestar before recursively searching, retrieve through stable IDs or aliases, follow explicit links for related context, treat a missing record as missing knowledge rather than proof of absence, and inspect the repository normally when Lodestar is insufficient. It reports read completeness and structural readiness for human review from supplied acceptance mappings and referenced evidence; these checks do not certify semantic completion or that records fully describe the project.
+
+Durability is ordinary SQLite done carefully: admitted `BEGIN IMMEDIATE` transactions, foreign keys, `synchronous=FULL`, read-only query-only connections for reads, explicit target revisions, one database revision per logical mutation, and idempotent request receipts. Writer fences reject retained old clients even when they still hold an open connection.
+
+A note on the 1.0 rewrite, since it is relevant to the rules in this repo. The original version had generation trees, commit pointers, heartbeat locks, snapshots, and custom rollback. 1.0 replaced all of that with ordinary SQLite transactions. It does less and is easier to operate. I wrote a freeze rule telling agents to stop gold-plating, then had to apply it to my own tool, which was humbling.
+
+## center-geo, layer 7, survey
+
+Distributed independently by the canonical `center-geo` skill bundle. Lodestar
+does not install, verify, or receipt this external skill.
+
+A deterministic structural risk scanner. It reads a codebase as a graph and traverses it under six geometries (radial, cycle, boundary, anomaly, convergent, path), then fuses the signals into ranked hypotheses with anchors.
+
+**What it covers.** Guessing where the risk is. Or worse, treating a scanner's output as a defect list.
+
+For calibration, a real run against an 80,000 line agent codebase indexed 187 files into 2,837 nodes and 26,726 edges, producing 438 raw signals that fused into 20 hypotheses. Of those edges, 17,838 were low confidence. So the graph rank was only ever used to pick which code to read by hand.
+
+It emits hypotheses. It does not prove defects. I think a scanner that reports findings as conclusions is worse than no scanner, because it turns noise into confident work items.
+
+## center-audit, layer 8, proof
+
+v2.5.1 · [github.com/VerbalChainsaw/center-audit](https://github.com/VerbalChainsaw/center-audit) · MIT. Ships in the canonical managed skill bundle.
+
+A read-only, evidence-gated, center-out root cause audit of a single suspected defect. It returns a calibrated finding, blast radius, a repair contract, and a verification plan.
+
+**What it covers.** Two things I kept running into.
+
+The first is volume. Ask an agent to investigate a bug and you get 17 plausible issues, ranked, and now you have a triage problem instead of an answer.
+
+The second is worse. The agent investigates and fixes in one motion, so a wrong diagnosis becomes a wrong edit before anyone can check the reasoning.
+
+center-audit does not edit code. It produces a contract the next agent can independently re-validate before touching a file. That separation between diagnosing, handing off, and implementing is the whole point, and it is why this sits between survey and verification instead of replacing either.
+
+### Why survey and proof are two tools
+
+They answer different questions, and when I tried to combine them I got something that did neither well.
+
+center-geo runs when you have no center: where should I even look? center-audit runs when you have one: is this specific thing real, and what exactly is broken?
+
+Run center-geo to pick a hypothesis. Run center-audit to prove or kill it. Then use `ladder-audit` to design the proof that the repair actually worked.
+
+---
+
+## Active context and state
+
+Lodestar is the active authority for its own context database. Ordinary reads
+never modify installed skill directories or agent-instruction files; only an
+explicit `setup --apply` updates Lodestar-owned payloads, with backups.
+
+```bash
+lodestar skills verify --target all
+lodestar agents status --cwd .
+lodestar start --cwd .
+lodestar work start --file <request.json>
+lodestar work done --file <request.json>
+```
+
+Identity comes from actual host context, never from an adapter default. The native MCP
+tools pass through authenticated actor fields only when the host provides them. A
+plain shell must provide its identity explicitly for operations that require a claimant.
+```text
+lodestar handoff status --cwd .
+```
+
+
+## Verified local candidates and client rollout
+
+Use the exact reviewed package, commit and complete file manifest; a version label alone does not identify the installed bytes. A global npm installation and a separately cached native plugin are different artifacts. Preserve customized installed code in a rollback copy and reconcile its owner before switching a shared launcher. A side-by-side verified installation permits preparation without silently overwriting those changes.
+
+Before changing skills, run the read-only setup plan with the actual native home (for portable Hermes, supply its real `--hermes-home`). Do not apply `--replace-local` across unrelated skills to remove warnings. Preserve host-specific instructions; merge the relevant Lodestar guidance and record any intentionally customized copies as such.
+
+Validate each existing client through its real tool/launcher route using version plus a bounded read. Configuration, matching skill files, a shell proxy, or another agent's success is not proof that a client loaded the update. Native Codex work/handoff tools require host attestation even for status. `Missing host attestation` must be resolved through the supported host integration; never fabricate a session identity, bypass the check, or replace the native adapter with a less capable plugin merely to get a green result.
+
+Full doctor can report cold history as `complete: false`, `healthy: null`; this is not a reason to restore history, clear warnings or call quick checks full certification. Keep restore/cleanup explicit and separately authorized. Cache generation checks detect ordinary changes, not same-user tampering with restored metadata; use explicit budgeted checksum revalidation after suspected alteration before consequential recovery.
+
+For rollout/rollback and per-client evidence, consult the installed package's `docs/installation.md` and the maintained repository `docs/client-deployment.md`. A successful CLI read does not prove automatic skill invocation or natural compaction-hook delivery.

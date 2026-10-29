@@ -102,7 +102,7 @@ function validStringChunk(value, pendingHigh, resource) {
   };
 }
 
-function normalizedJson(value, maximumDepth) {
+function normalizedJson(value, maximumDepth, materialize = true) {
   const holder = Object.create(null);
   const ancestors = new Set();
   const tasks = [{ kind: "value", value, target: holder, key: "value", pointer: "", depth: 0 }];
@@ -144,7 +144,7 @@ function normalizedJson(value, maximumDepth) {
     }
     const current = task.value;
     if (current === null || typeof current === "string" || typeof current === "boolean") {
-      task.target[task.key] = current;
+      if (materialize) task.target[task.key] = current;
       continue;
     }
     if (typeof current === "number") {
@@ -161,7 +161,7 @@ function normalizedJson(value, maximumDepth) {
           },
         );
       }
-      task.target[task.key] = Object.is(current, -0) ? 0 : current;
+      if (materialize) task.target[task.key] = Object.is(current, -0) ? 0 : current;
       continue;
     }
     if (typeof current !== "object") {
@@ -181,8 +181,8 @@ function normalizedJson(value, maximumDepth) {
         "JSON objects must use an ordinary object prototype.",
       );
     }
-    const result = isArray ? [] : Object.create(null);
-    task.target[task.key] = result;
+    const result = materialize ? (isArray ? [] : Object.create(null)) : null;
+    if (materialize) task.target[task.key] = result;
     ancestors.add(current);
     tasks.push({ kind: "leave", value: current });
     tasks.push(isArray
@@ -194,11 +194,21 @@ function normalizedJson(value, maximumDepth) {
   return holder.value;
 }
 
-export function canonicalStringify(value, { maximumDepth = JSON_MAXIMUM_DEPTH } = {}) {
+function validateMaximumDepth(maximumDepth) {
   if (!Number.isSafeInteger(maximumDepth) || maximumDepth < 1 || maximumDepth > JSON_MAXIMUM_DEPTH) {
     throw new TypeError(`Canonical JSON depth must be a positive integer no larger than ${JSON_MAXIMUM_DEPTH}.`);
   }
+}
+
+export function canonicalStringify(value, { maximumDepth = JSON_MAXIMUM_DEPTH } = {}) {
+  validateMaximumDepth(maximumDepth);
   return JSON.stringify(normalizedJson(value, maximumDepth));
+}
+
+export function validateJsonValue(value, { maximumDepth = JSON_MAXIMUM_DEPTH } = {}) {
+  validateMaximumDepth(maximumDepth);
+  // Keep the same traversal and errors without allocating an unused JSON copy.
+  normalizedJson(value, maximumDepth, false);
 }
 
 export function decodeUtf8(

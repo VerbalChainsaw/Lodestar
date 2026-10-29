@@ -6,8 +6,44 @@ import {
   canonicalStringify,
   parseJsonText,
   readStreamComplete,
+  validateJsonValue,
 } from "../src/json.mjs";
 import { resolveInputPath } from "../src/paths.mjs";
+
+test("validation-only JSON preserves canonical validation and error ordering", () => {
+  const sparse = Array(2);
+  const circular = {};
+  circular.self = circular;
+  const errorShape = (operation) => {
+    try { operation(); }
+    catch (error) {
+      return { name: error.name, code: error.code, message: error.message,
+        identifiers: error.identifiers, action: error.action };
+    }
+    assert.fail("Expected invalid JSON to be rejected");
+  };
+  for (const value of [undefined, 1n, Symbol("invalid"), () => {}, NaN, Infinity,
+    Number.MAX_SAFE_INTEGER + 1, sparse, circular, new Date(),
+    { value: undefined }, { z: undefined, a: Infinity },
+    { "slash/~": Number.MAX_SAFE_INTEGER + 1 }]) {
+    assert.deepEqual(errorShape(() => validateJsonValue(value)),
+      errorShape(() => canonicalStringify(value)));
+  }
+  const deep = { a: { b: { c: true } } };
+  assert.deepEqual(errorShape(() => validateJsonValue(deep, { maximumDepth: 2 })),
+    errorShape(() => canonicalStringify(deep, { maximumDepth: 2 })));
+  for (const maximumDepth of [0, 1025, 1.5, "2"]) {
+    assert.deepEqual(errorShape(() => validateJsonValue(null, { maximumDepth })),
+      errorShape(() => canonicalStringify(null, { maximumDepth })));
+  }
+  const valid = JSON.parse('{"__proto__":{"safe":true},"value":[null,true,"text",-0,1.5]}');
+  const before = canonicalStringify(valid);
+  assert.equal(validateJsonValue(valid), undefined);
+  assert.equal(canonicalStringify(valid), before);
+  assert.equal(Object.is(valid.value[3], -0), true);
+  assert.equal(validateJsonValue(Object.assign(Object.create(null), { value: true })), undefined);
+  assert.equal({}.safe, undefined);
+});
 
 test("canonical JSON preserves prototype-shaped keys without pollution", () => {
   const value = JSON.parse(

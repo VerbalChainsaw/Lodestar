@@ -9,12 +9,13 @@ import {
   initializeDatabase,
   openDiagnosticDatabase,
 } from "../src/database.mjs";
+import { SCHEMA_VERSION } from "../src/schema.mjs";
 import { diagnoseDatabase } from "../src/doctor.mjs";
 import { fixture as contractFixture } from "./helpers/contract.mjs";
 
 // This test-only connection deliberately injects corruption for diagnostic probes.
 class DatabaseSync extends SQLiteDatabase {
-  constructor(...args) { super(...args); this.function('lodestar_write_contract', () => 5); }
+  constructor(...args) { super(...args); this.function('lodestar_write_contract', () => SCHEMA_VERSION); }
 }
 
 async function fixture(t) {
@@ -42,6 +43,53 @@ test("doctor reports a healthy schema without writing", async (t) => {
     decisions: { events: 0, invalid: [], legacy_unverified: [], healthy: true },
     handoff: { records: 0, invalid: [], historical: [], healthy: true },
   });
+});
+
+test("quick doctor checks schema and metadata without scanning stored data or claiming health", async (t) => {
+  const file = await fixture(t);
+  const db = await openDiagnosticDatabase(file);
+  try {
+    const prepare = db.prepare.bind(db);
+    db.prepare = (sql) => {
+      assert.doesNotMatch(sql, /integrity_check|foreign_key_check|FROM records|count\(\*\)/iu);
+      return prepare(sql);
+    };
+    const report = diagnoseDatabase(db, { database: file, quick: true });
+    assert.equal(report.quick_check_passed, true);
+    assert.equal(report.healthy, null);
+    assert.equal(report.complete, false);
+    assert.equal(report.checks.integrity, "not_run");
+    assert.ok(report.not_run.includes("stored_semantics"));
+    assert.deepEqual(report.issues, []);
+  } finally { db.close(); }
+});
+
+test("quick doctor reports detected metadata failure rather than an unknown passing check", async (t) => {
+  const file = await fixture(t);
+  const raw = new DatabaseSync(file);
+  raw.prepare("UPDATE metadata SET value = ? WHERE key = 'created_at'").run("invalid");
+  raw.close();
+  const db = await openDiagnosticDatabase(file);
+  try {
+    const report = diagnoseDatabase(db, { quick: true });
+    assert.equal(report.quick_check_passed, false);
+    assert.equal(report.healthy, false);
+    assert.equal(report.complete, false);
+    assert.ok(report.issues.some(issue => issue.code === "metadata_timestamp_invalid"));
+  } finally { db.close(); }
+});
+
+test("CLI quick doctor is explicit and cannot weaken preflight validation", async (t) => {
+  const f = await contractFixture(t);
+  const result = await f.cli(["doctor", "--quick"]);
+  assert.equal(result.code, 0);
+  assert.equal(result.value.data.mode, "quick");
+  assert.equal(result.value.data.healthy, null);
+  for (const mode of ["--migration-preflight", "--recovery-preflight"]) {
+    const rejected = await f.cli(["doctor", "--quick", mode]);
+    assert.equal(rejected.value.ok, false);
+    assert.equal(rejected.value.error.code, "invalid_input");
+  }
 });
 
 test("doctor reports complete required records without startup-budget policy",
@@ -87,6 +135,10 @@ for (const mode of ["missing-semantics", "legacy-without-core-metadata"]) {
       ? "record_requires_source_correction" : "database_integrity");
     const diagnostic = await f.cli(["doctor"]);
     assert.equal(diagnostic.value.data.healthy, false);
+    const quick = await f.cli(["doctor", "--quick"]);
+    assert.equal(quick.value.data.healthy, null);
+    assert.equal(quick.value.data.complete, false);
+    assert.ok(quick.value.data.not_run.includes("stored_semantics"));
     const issue = diagnostic.value.data.issues.find((item) => item.code === "record_requires_source_correction"
       && item.identifiers.id === id);
     assert.ok(issue);

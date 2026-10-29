@@ -49,10 +49,38 @@ allocates one database revision, preserves raw before-images, applies the domain
 mutation, and commits its receipt in one admitted immediate transaction. Nested domain
 helpers reuse that revision. Lock contention fails immediately as retryable busy.
 
+A newly accepted request receives a receipt even if its input leaves the target
+record unchanged. The envelope's `revision` identifies that accepted transaction;
+the unchanged record's `data.revision` remains its last content revision. Retrying
+the exact same request ID and body replays the original receipt without advancing
+either revision. Use a new request ID for a new logical operation, not to recover
+a lost response. A new accepted receipt can invalidate a revision-pinned read even
+when the target content did not change.
+
 Ordinary update/replacement checks both the existing and proposed applicability;
 retirement checks the existing target too. A null/global basis is valid for global
 applicability, and historical project-member scopes resolve through guarded current
 bindings. Read the target again and retain its complete basis after a mismatch.
+
+To rebind an ordinary record from checkout A to checkout B in the same project,
+read the existing record with `get`, then `start --cwd <B>`. Use B's returned
+`write_basis` and merge in the target revisions from the record read, deduplicating
+identical targets. If their revisions disagree, read again before writing. Submit
+an ordinary `put` update with `set.semantics.applicability.checkout` set to B,
+retaining the rest of `semantics`; include `remove: []`. Replacement mode follows
+the same guard. The existing revision pins A, while the destination must resolve
+to an accessible checkout in the same canonical project with its full mapping
+basis. A missing or mismatched destination basis, stale revision or changed source
+is refused without committing. The ID, creation time, unrelated fields and
+receipt-backed before-image remain intact. This is not a cross-project transfer.
+
+Content-owner sources are still inspected using the proposed record and B's
+checkout context. Reinspect checkout-relative sources at B and retain their
+current fingerprints; do not assume matching relative paths imply matching bytes.
+Absolute sources keep their original path, `project_root` keeps the canonical
+project's first root, and `source_root` keeps its configured root and configuration
+revision guard. Changing checkout applicability does not relocate those sources.
+Replay a lost receipt with the exact original request ID and body.
 
 Project descriptors establish identity through observed target revisions, roots,
 peers and canonical links. Registration can use the pre-registration checkout

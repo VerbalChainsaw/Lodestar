@@ -115,6 +115,11 @@
   including empty pages. A stopped read is explicitly partial and includes a
   revision-pinned continuation argument array. Damaged-row coverage is preserved.
   This bounds a misbehaving configured CLI; it does not silently claim completion.
+- Bounded work status/history and pending-list reads return literal `next` argument
+  arrays with offset and database revision. Follow those arguments unchanged;
+  a concurrent accepted transaction requires a fresh read. Record diagnostics
+  remain separate from whether another page exists. An initial unpinned read
+  observes its current snapshot; continuation pages pin that observed revision.
 - Both response channels must contain valid UTF-8. A malformed stdout or stderr
   identifies its channel and retains an unknown outcome after write dispatch.
   A valid envelope on the other channel cannot prove that the malformed channel

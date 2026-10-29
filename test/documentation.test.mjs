@@ -9,23 +9,30 @@ import { validatePutInput } from "../src/validate.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
-test("current release has one dated changelog entry and versioned installation guidance", async () => {
+test("current local candidate has one dated changelog entry and exact artifact installation guidance", async () => {
   const { version } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const changelog = await readFile(path.join(root, "CHANGELOG.md"), "utf8");
-  const entries = [...changelog.matchAll(/^## (3\.0\.0[^\r\n]*)/gmu)];
-  assert.equal(entries.length, 1, "3.0.0 changes must share one release entry");
-  assert.equal(entries[0][1], `${version} - 2026-10-02`);
+  const entries = [...changelog.matchAll(/^## ([^\r\n]*)/gmu)]
+    .filter((match) => match[1].startsWith(`${version} - `));
+  assert.equal(entries.length, 1, "Current changes must share one release entry");
+  assert.equal(entries[0][1], `${version} - 2026-10-29`);
   const notes = await readFile(path.join(root, `docs/releases/v${version}.md`), "utf8");
-  assert.match(notes, /^Release date: 2026-10-02\.?$/mu);
+  assert.match(notes, /^Candidate date: 2026-10-29\.?$/mu);
   for (const file of ["README.md", "docs/installation.md", `docs/releases/v${version}.md`]) {
     const text = await readFile(path.join(root, file), "utf8");
-    assert.ok(text.includes(`npm install --global lodestar-agent-context@${version}`), file);
-    assert.ok(text.includes(`https://github.com/VerbalChainsaw/Lodestar/releases/tag/v${version}`), file);
+    assert.ok(text.includes(`npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-${version}.tgz"`), file);
+    assert.ok(text.includes("https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0"), file);
     assert.match(text, /Node\.js 24\.15\.0/u);
     assert.match(text, /\.NET 10\s+Desktop\s+Runtime \(x64\)/u);
     assert.match(text, /PowerShell 7/u);
-    assert.doesNotMatch(text, /local candidate|release candidate status|pending publication|after (?:the verified 3\.0\.0 release is|release) publi/iu, file);
+    assert.match(text, /local candidate/iu, file);
+    assert.match(text, /has not been published to\s+npm or GitHub/iu, file);
+    assert.ok(!text.includes(`npm install --global lodestar-agent-context@${version}`), file);
+    assert.ok(!text.includes(`https://github.com/VerbalChainsaw/Lodestar/releases/tag/v${version}`), file);
   }
+  const previous = await readFile(path.join(root, "docs/releases/v3.0.0.md"), "utf8");
+  assert.match(previous, /^Release date: 2026-10-02\.?$/mu);
+  assert.ok(previous.includes("npm install --global lodestar-agent-context@3.0.0"));
 });
 
 async function filesUnder(directory) {
@@ -125,7 +132,8 @@ test("current package guidance includes the canonical FAQ, troubleshooting and m
   }
   const toolchain = await readFile(path.join(root, "managed-assets/skills/lodestar/references/toolchain.md"), "utf8");
   const installation = toolchain.slice(0, toolchain.indexOf("```bash"));
-  assert.match(installation, /after.{0,80}publi/isu, 'npm example needs its publication condition before the command');
+  assert.match(installation, /Do not substitute\s+a local candidate version until its matching package has been published/iu,
+    'npm example must distinguish the retained release from an unpublished candidate');
   assert.match(installation, /candidate.*tarball/isu, 'current local evaluation needs an exact candidate path');
 });
 

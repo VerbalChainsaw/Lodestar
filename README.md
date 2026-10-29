@@ -4,9 +4,15 @@
 
 ![A mountain trail at dawn beneath a guiding star — explore Lodestar 3](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-**[Explore the splash page](https://verbalchainsaw.github.io/Lodestar/) · [Download 3.0.0](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0) · [Installation guide](docs/installation.md)**
+**[Explore the splash page](https://verbalchainsaw.github.io/Lodestar/) · [Published 3.0.0 downloads](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0) · [Installation guide](docs/installation.md)**
 
-[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [Release notes](docs/releases/v3.0.0.md) · [FAQ](Q&A.md)
+[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [3.0.2 candidate notes](docs/releases/v3.0.2.md) · [FAQ](Q&A.md)
+
+This checkout is the **3.0.2 local candidate**. It adds lean receipt storage,
+bounded diagnostics with truthful incomplete-history status, and verified
+archive-cache recovery while preserving contract-5 operations. See the
+[patch notes](docs/releases/v3.0.2.md). Version 3.0.2 has not been published to
+npm or GitHub; the public download link above retains the 3.0.0 release.
 
 Lodestar keeps project context, decisions, evidence, and unfinished work in one
 local registry. Open **Loader** to see what needs attention, capture a useful
@@ -86,18 +92,21 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 ## Install
 
 The Windows package requires **Node.js 24.15.0 or newer**, **.NET 10
-Desktop Runtime (x64)** and **PowerShell 7**. Download `Lodestar-3.0.0-win-x64.zip`
-from the [3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0),
-verify its SHA-256 checksum, and extract the complete archive. Run `Install.cmd`,
+Desktop Runtime (x64)** and **PowerShell 7**. For the local candidate, use the
+locally built `Lodestar-3.0.2-win-x64.zip` and its matching SHA-256 inventory;
+see [local candidate installation](docs/installation.md#local-302-candidate).
+The [published 3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
+remains available separately. Verify and extract the complete archive. Run `Install.cmd`,
 then open Loader or Manager from the Start Menu.
 `Install.ps1 -Mode Plan` shows the selection before installation.
 `Setup.cmd` configures portable use. See [installation](docs/installation.md) for
 runtime selection, upgrades and recovery.
 
-The CLI alone requires **Node.js 24.15.0 or newer**. For a new installation:
+The CLI alone requires **Node.js 24.15.0 or newer**. Install the exact local
+candidate tarball, replacing the placeholder with its verified absolute path:
 
 ```text
-npm install --global lodestar-agent-context@3.0.0
+npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.2.tgz"
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -188,7 +197,7 @@ to stderr using the same contract-5 envelope.
 
 ## Native integration
 
-The optional [Codex plugin bundle](.codex-plugin/plugin.json) provides the automatic
+The optional generic [Codex plugin bundle](.codex-plugin/plugin.json) provides the automatic
 Lodestar skill and three MCP tools:
 
 - `lodestar_describe` returns the maintained operating guide and installed command
@@ -202,11 +211,20 @@ the adapter and shared core remain together. Do not install `codex-plugin/` alon
 that was the broken layout in 2.1.3 and earlier. Follow the
 [optional plugin installation](docs/installation.md#optional-codex-plugin) steps.
 
-The adapter does not maintain hooks, a session cache, a receipt store, or its own
+The generic adapter does not maintain hooks, a session cache, a receipt store, or its own
 authority rules. It passes actor identity only when an actual host invocation can
 supply it; ordinary MCP transport cannot manufacture an authenticated user or
 session. Windows and WSL callers still cross the Windows-owned one-shot shim and
 never open SQLite from WSL.
+
+The separately versioned [native Codex adapter](native-codex/README.md) adds
+automatic startup context, prompt-bound work and handoff tools, pending-note
+capture, and opt-in compaction continuity. It preserves host authorization and
+exact-request recovery evidence in the plugin data directory while calling the
+same installed core. Its source and compatibility checks now live in this
+repository, and its skill is generated from the same maintained instructions.
+Choose the integration matching the required capabilities; keep one Lodestar
+plugin enabled. See [native installation](docs/installation.md#native-codex-adapter).
 
 ## Skills and package integrity
 

@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
@@ -20,7 +21,7 @@ test('rejected dependency loads once per projection while each requiring edge st
   ]) await f.create(id, 'fact', { text: id }, 'project:test', { context_role: 'on_demand', ...semantics });
   const raw = new DatabaseSync(f.database);
   try {
-    raw.function('lodestar_write_contract', () => 5);
+    raw.function('lodestar_write_contract', () => SCHEMA_VERSION);
     const content = JSON.parse(raw.prepare("SELECT content_json FROM records WHERE id='fact:elsewhere'").get().content_json);
     content._lodestar.semantics.applicability.checkout = path.join(f.root, 'other');
     raw.prepare("UPDATE records SET content_json=? WHERE id='fact:elsewhere'").run(JSON.stringify(content));

@@ -1,18 +1,20 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { encodeReceiptStorage, decodeReceiptStorage, decodeReceiptRow, isRetiredReceipt } from "./receipt-storage.mjs";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { inspectLocalSourceSync } from "./bootstrap.mjs";
-import { resolveSourceLocator } from "./paths.mjs";
+import { resolveInputPath, resolveSourceLocator } from "./paths.mjs";
 
 import { lodestarError } from "./errors.mjs";
 import {
   admittedTransaction,
   assertSupportedSchema,
+  consumeAsyncResult,
   readMetadata,
   transactionRevision,
 } from "./database.mjs";
 import { assertJsonNumericDomain, canonicalStringify } from "./json.mjs";
-import { prepareProjectRoots, resolveProjectScope, sameMachinePath, validateProjectBindings } from "./project.mjs";
+import { prepareProjectRoots, resolveProject, resolveProjectScope, sameMachinePath, validateProjectBindings } from "./project.mjs";
 import { allocateRevision, currentRevision } from "./revisions.mjs";
 import { CONTRACT_VERSION } from "./schema.mjs";
 import { requireStoredRecordSemantics, storedSourceCorrection, validateStoredReceipt } from "./stored-semantics.mjs";
@@ -236,7 +238,7 @@ function storedJson(text, validate, identifiers) {
   }
 }
 export function parseStoredContent(text, identifiers = {}) {
-  return storedJson(text, validateContent, {
+  return storedJson(decodeReceiptStorage(text, identifiers), validateContent, {
     field: "content_json",
     ...identifiers,
   });
@@ -249,6 +251,7 @@ export function parseStoredMetadata(text, identifiers = {}) {
   });
 }
 function parsedRecord(row) {
+  row = decodeReceiptRow(row);
   const stored = parseStoredContent(row.content_json, { id: row.id });
   const metadata = stored._lodestar ?? {};
   requireStoredRecordSemantics(stored, { id: row.id });
@@ -519,7 +522,8 @@ function replaceRecord(
     input.type,
     input.name,
     input.scope,
-    input.content_json,
+    input.type === "mutation-receipt" && readMetadata(db).schema_version === "6"
+      ? encodeReceiptStorage(input.content_json, input.id) : input.content_json,
     current?.created_at ?? createdAt,
     updatedAt,
   );
@@ -642,6 +646,14 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
     const basis = value.write_basis;
     if (!plain(basis)) invalidMutation("write_basis must be an object.");
     exactKeys(basis, Object.keys(WRITE_BASIS_SCHEMA.properties), "write_basis");
+    if (!Array.isArray(basis.targets)) {
+      invalidMutation("write_basis.targets must be an array.", { field: "write_basis.targets" });
+    }
+    for (const field of ["project_scope", "checkout"]) {
+      if (!Object.hasOwn(basis, field) || (basis[field] !== null && typeof basis[field] !== "string")) {
+        invalidMutation(`write_basis.${field} must be null or a string.`, { field: `write_basis.${field}` });
+      }
+    }
     request = {
       v: CONTRACT_VERSION,
       request_id: value.request_id,
@@ -650,7 +662,7 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
       project_scope: basis.project_scope ?? null,
       checkout: basis.checkout ?? null,
       actor,
-      preconditions: (basis.targets ?? []).map((entry, index) => {
+      preconditions: basis.targets.map((entry, index) => {
         if (!plain(entry) || !Object.hasOwn(entry, "expected_revision")) {
           invalidMutation("Each write-basis target needs expected_revision.", { index });
         }
@@ -728,6 +740,12 @@ function beforeImage(db, id) {
 
 function targetRevision(db, target, decisionHeads) {
   if (target.kind === "record") {
+    if (target.id.startsWith("mutation-receipt:")) {
+      const receipt = rawRecordById(db, target.id);
+      if (!receipt) return null;
+      if (isRetiredReceipt(receipt.content_json, { id: target.id })) return Number(JSON.parse(receipt.content_json)._lodestar.revision);
+      return Number(parseStoredContent(receipt.content_json, { id: target.id })._lodestar.revision);
+    }
     const row = db.prepare("SELECT id, json_extract(content_json, '$._lodestar.revision') "
       + "AS revision FROM records WHERE id=?").get(target.id);
     if (!row) return null;
@@ -911,7 +929,7 @@ export function mutate(db, operation, value, callback, {
     } finally {
       activeMutations.delete(db);
     }
-    if (callbackResult && typeof callbackResult.then === "function") {
+    if (consumeAsyncResult(callbackResult)) {
       invalidMutation("Mutation callbacks must be synchronous.");
     }
     const data = plain(callbackResult) && Object.hasOwn(callbackResult, "data")
@@ -1003,7 +1021,7 @@ function internalRecord(value) {
     name: value.name,
     scope: value.scope,
     priority: value.priority === undefined ? 0 : value.priority,
-    content: { state: value.availability ?? "unknown", value: value.data ?? {} },
+    content: { state: value.availability ?? "unknown", value: value.data },
     aliases: value.aliases ?? [],
     links: value.links ?? [],
     sources: value.sources ?? [],
@@ -1233,6 +1251,38 @@ function assertRecordApplicability(db, record, request) {
   }
 }
 
+function assertCheckoutRebind(db, record, request) {
+  // A scope lookup alone echoes the requested checkout. Resolve the actual
+  // destination, including worktree identity and every canonical/member binding.
+  assertRecordApplicability(db, record, request);
+  const checkoutPath = resolveInputPath(request.checkout);
+  let directory = false;
+  try { directory = statSync(checkoutPath).isDirectory(); } catch { /* reported below */ }
+  if (!directory) throw lodestarError("invalid_input", "A checkout rebind requires an accessible destination directory.", {
+    identifiers: { id: record.id, checkout: request.checkout },
+    action: "Read the destination checkout context and retain its complete write_basis before rebinding.",
+  });
+  const destination = resolveProject(db, checkoutPath);
+  if (destination.scope !== request.project_scope
+    || !sameMachinePath(destination.checkout_root, request.checkout)) {
+    throw lodestarError("project_binding_conflict", "A checkout rebind must stay within the observed project and destination checkout.", {
+      identifiers: { id: record.id, requested: request.project_scope, current: destination.scope,
+        requested_checkout: request.checkout, current_checkout: destination.checkout_root },
+      action: "Read the destination checkout context and combine its complete write_basis with the target record's observed revisions.",
+    });
+  }
+  const supplied = new Map(request.preconditions.map((entry) => [targetKey(entry.target), entry]));
+  const missing = destination.binding_preconditions.filter(({ target, expected_revision }) =>
+    supplied.get(targetKey(target))?.expected_revision !== expected_revision);
+  if (missing.length) throw lodestarError("missing_precondition", "A checkout rebind needs the destination's complete observed mapping basis.", {
+    identifiers: { id: record.id, required_basis: writeBasis(db, {
+      projectScope: destination.scope, checkout: destination.checkout_root,
+      targets: missing.map(({ target }) => target),
+    }) },
+    action: "Read the destination checkout context and retain every binding target alongside the existing record revision.",
+  });
+}
+
 export function applyPutInput(db, input, {
   revision,
   timestamp,
@@ -1297,7 +1347,17 @@ export function applyPutInput(db, input, {
       // An explicit source correction still requires the stored origin scope.
       prior = { id, kind: existing.type, scope: existing.scope };
     }
-    assertRecordApplicability(db, prior, request);
+    const priorCheckout = prior.semantics?.applicability?.checkout;
+    const nextCheckout = record.semantics?.applicability?.checkout;
+    if (typeof priorCheckout === "string" && typeof nextCheckout === "string"
+      && !sameMachinePath(priorCheckout, nextCheckout)) {
+      // The admitted record revision pins the old binding. The request basis
+      // describes the destination; neither side may change canonical project.
+      assertRecordApplicability(db, prior, { ...request, checkout: priorCheckout });
+      assertCheckoutRebind(db, record, request);
+    } else {
+      assertRecordApplicability(db, prior, request);
+    }
   }
   // Registration establishes a project's identity; ordinary facts already have
   // an applicability. Project roots and canonical links are validated below.
@@ -1405,7 +1465,8 @@ function rawReadWriteBasis(db, row) {
 
 export function getRawRecord(db, identifier) {
   const id = resolveRecordId(db, identifier);
-  const rawRecord = rawRecordById(db, id);
+  const stored = rawRecordById(db, id);
+  const rawRecord = stored ? decodeReceiptRow(stored) : stored;
   return {
     raw_record: rawRecord,
     raw_associations: rawAssociations(db, id),
@@ -1416,12 +1477,14 @@ export function getRawRecord(db, identifier) {
 export function getRecordHistory(db, identifier) {
   const id = resolveRecordId(db, identifier);
   const versions = [];
+  const removed_receipts = [];
   const receipts = db.prepare("SELECT id,type,content_json FROM records "
     + "WHERE type IN ('mutation-receipt','migration-source') "
     + "ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
     .all();
   const databaseInstanceId = readMetadata(db).database_instance_id;
   for (const receipt of receipts) {
+    if(receipt.type === "mutation-receipt" && isRetiredReceipt(receipt.content_json,{id:receipt.id})) { removed_receipts.push(receipt.id); continue; }
     const content = parseStoredContent(receipt.content_json, { id: receipt.id });
     const data = receipt.type === "mutation-receipt"
       ? validateStoredReceipt(content, { id: receipt.id, databaseInstanceId }) : contentData(content);
@@ -1435,9 +1498,11 @@ export function getRecordHistory(db, identifier) {
       });
     }
   }
+  versions.sort((a,b)=>a.revision-b.revision||a.receipt_id.localeCompare(b.receipt_id)||a.sequence-b.sequence);
   return {
     id,
     versions,
+    ...(removed_receipts.length ? {removed_receipts,complete:false} : {}),
     current: beforeImage(db, id),
     write_basis: rawReadWriteBasis(db, rawRecordById(db, id)),
   };

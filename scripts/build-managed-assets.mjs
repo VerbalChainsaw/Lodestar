@@ -17,7 +17,8 @@ const ASSETS = path.join(ROOT, "managed-assets");
 const SKILLS = path.join(ASSETS, "skills");
 const MANIFEST = path.join(ASSETS, "manifest.json");
 const DOCUMENTED_BOOTSTRAP = path.join(ROOT, "docs", "agent-bootstrap.json");
-const PLUGIN_LODESTAR = path.join(ROOT, "codex-plugin", "skills", "lodestar");
+const PLUGIN_LODESTAR_MIRRORS = ["codex-plugin", "native-codex"]
+  .map((directory) => path.join(ROOT, directory, "skills", "lodestar"));
 const BOOTSTRAP_STUB = path.join(SKILLS, "lodestar", "assets", "templates", "_stub-pattern.AGENTS.md");
 const CONTRACT = 5;
 const DISTRIBUTION_OWNER = "npm:lodestar-agent-context";
@@ -149,11 +150,15 @@ else if (await readFile(BOOTSTRAP_STUB, "utf8") !== bootstrap.text) {
 const manifestText = `${JSON.stringify(await inventory(), null, 2)}\n`;
 const bootstrapText = `${JSON.stringify(bootstrap, null, 2)}\n`;
 if (mode === "--write") {
-  await mirrorTree(path.join(SKILLS, "lodestar"), PLUGIN_LODESTAR, true);
+  for (const destination of PLUGIN_LODESTAR_MIRRORS) {
+    await mirrorTree(path.join(SKILLS, "lodestar"), destination, true);
+  }
   await writeFile(MANIFEST, manifestText, "utf8");
   await writeFile(DOCUMENTED_BOOTSTRAP, bootstrapText, "utf8");
 } else {
-  await mirrorTree(path.join(SKILLS, "lodestar"), PLUGIN_LODESTAR, false);
+  for (const destination of PLUGIN_LODESTAR_MIRRORS) {
+    await mirrorTree(path.join(SKILLS, "lodestar"), destination, false);
+  }
   if (await readFile(MANIFEST, "utf8") !== manifestText) {
     throw new Error("Managed asset byte manifest is stale; run npm run assets:build");
   }

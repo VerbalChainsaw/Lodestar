@@ -18,13 +18,21 @@ function Invoke-Lodestar([string[]]$CommandArgs, [bool]$ExpectSuccess = $true) {
     return $result
 }
 Invoke-Lodestar @('init') | Out-Null
+function Get-FixtureWriteBasis($ObservedBasis, [string]$Project) {
+    if (!$Project) { return $ObservedBasis }
+    $context = Invoke-Lodestar @('get', $Project)
+    $basis = $context.data.write_basis
+    $basis.targets = @($basis.targets) + @($ObservedBasis.targets | Where-Object { $_.id -ne $Project })
+    return $basis
+}
 function Add-Record([hashtable]$Record) {
     $missing = Invoke-Lodestar @('get', $Record.id) $false
     if ($missing.error.code -ne 'record_not_found') { throw "Expected a missing fixture record: $($Record.id)" }
+    $project = if ($Record.kind -eq 'project') { $null } else { $Record.semantics.applicability.project }
     $request = @{
         v = 5
         request_id = 'fixture-' + [guid]::NewGuid().ToString('D')
-        write_basis = $missing.error.identifiers.write_basis
+        write_basis = Get-FixtureWriteBasis $missing.error.identifiers.write_basis $project
         input = @{ mode = 'create'; record = $Record }
     }
     $file = Join-Path $directory (($Record.id -replace ':', '-') + '-create.json')
@@ -41,7 +49,7 @@ $prior = Invoke-Lodestar @('get', 'fact:loader-editable')
 $historyRequest = @{
     v = 5
     request_id = 'fixture-' + [guid]::NewGuid().ToString('D')
-    write_basis = $prior.data.write_basis
+    write_basis = Get-FixtureWriteBasis $prior.data.write_basis $projectId
     input = @{ mode = 'update'; id = 'fact:loader-editable'; set = @{ data = @{ notes = 'Updated in disposable fixture' } }; remove = @() }
 }
 $historyFile = Join-Path $directory 'fixture-history-update.json'

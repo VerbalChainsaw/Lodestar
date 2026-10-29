@@ -81,7 +81,7 @@ next safe action. An unconfirmed write remains uncertain until receipt reconcili
 
 VERIFY A DOWNLOAD
 Compare the ZIP's SHA-256 with SHA256SUMS.txt from the same verified release:
-  Get-FileHash .\Lodestar-3.0.0-win-x64.zip -Algorithm SHA256
+  Get-FileHash .\Lodestar-3.0.1-win-x64.zip -Algorithm SHA256
 Byte inventories detect changed bytes; this unsigned package has no Authenticode
 publisher signature. Windows may mark downloads as coming from the Internet.
 RemoteSigned policy can reject an unsigned marked script before Lodestar runs.

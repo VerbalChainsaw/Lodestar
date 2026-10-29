@@ -72,29 +72,34 @@ try {
             Check ($message -match 'cannot verify bundle in use' -and $message -match 'Next action') 'An uninspectable Node process was silently accepted.'
             Check ($message -match 'PID unavailable' -and $message -match 'CommandLine unavailable') "Missing snapshot identity/cause was hidden: $message"
         }
-        Case 'process guard actual exited null command line snapshot is idle' {
-            $snapshot=$null
+        Case 'process guard actual exited PID with modeled null command line snapshot is idle' {
             $start=[Diagnostics.ProcessStartInfo]::new($NodePath)
             $start.UseShellExecute=$false; $start.CreateNoWindow=$true
-            $start.ArgumentList.Add('-e'); $start.ArgumentList.Add('')
-            for ($attempt=0;$attempt -lt 4 -and $null -eq $snapshot;$attempt++) {
-                $owned=@(1..8 | ForEach-Object { [Diagnostics.Process]::Start($start) })
-                try {
-                    $snapshots=@(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction Stop)
-                    $snapshot=$snapshots | Where-Object { $owned.Id -contains $_.ProcessId -and -not $_.CommandLine } | Select-Object -First 1
-                    foreach ($child in $owned) { $child.WaitForExit() }
-                } finally {
-                    foreach ($child in $owned) { $child.WaitForExit(); $child.Dispose() }
+            $start.ArgumentList.Add('-e'); $start.ArgumentList.Add('setInterval(()=>{},15000);')
+            $owned=[Diagnostics.Process]::Start($start)
+            try {
+                Check (-not $owned.HasExited) 'Owned Node fixture exited before identity capture.'
+                $snapshot=Get-CimInstance Win32_Process -Filter "ProcessId = $($owned.Id)" -ErrorAction Stop
+                Check ($null -ne $snapshot -and $snapshot.ProcessId -eq $owned.Id -and $snapshot.CommandLine) 'Actual owned Node CIM identity was unavailable.'
+                $owned.Kill($true)
+                Check ($owned.WaitForExit(5000)) 'Owned Node fixture did not exit within the bounded wait.'
+                Check $owned.HasExited 'Owned Node fixture must be exited before guard inspection.'
+                & $distribution {
+                    param($Snapshot)
+                    # Model unavailable CIM arguments for the actual observed, confirmed-exited PID.
+                    # Keep the real Test-ProcessSnapshotExited implementation to inspect that PID.
+                    $script:EdgeSnapshot=@(@{ProcessId=$Snapshot.ProcessId; CommandLine=$null})
+                    function script:Get-CimInstance { [CmdletBinding()]param($ClassName,$Filter) $script:EdgeSnapshot }
+                } $snapshot
+                Assert-BundleProcessesIdle @($guardRoot)
+            } finally {
+                & $distribution { Remove-Item -LiteralPath Function:script:Get-CimInstance -ErrorAction SilentlyContinue }
+                if (-not $owned.HasExited) {
+                    $owned.Kill($true)
+                    Check ($owned.WaitForExit(5000)) 'Owned Node fixture cleanup exceeded the bounded wait.'
                 }
+                $owned.Dispose()
             }
-            Check ($null -ne $snapshot) 'Could not observe an actual exited Node CIM snapshot with unavailable arguments.'
-            & $distribution {
-                param($Snapshot)
-                $script:EdgeSnapshot=@($Snapshot)
-                function script:Get-CimInstance { [CmdletBinding()]param($ClassName,$Filter) $script:EdgeSnapshot }
-            } $snapshot
-            try { Assert-BundleProcessesIdle @($guardRoot) }
-            finally { & $distribution { Remove-Item -LiteralPath Function:script:Get-CimInstance } }
         }
         Case 'process guard live null command line refuses with PID and cause' {
             $start=[Diagnostics.ProcessStartInfo]::new($NodePath)

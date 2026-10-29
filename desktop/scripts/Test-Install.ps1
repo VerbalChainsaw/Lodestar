@@ -311,7 +311,7 @@ if($HistoricalBundle){Case 'actual retained prior bundle adoption preserves orig
  $r=Run $f @('-PreviousInstallation',$prior);Check ($r.Code -eq 0) $r.Text
  Check ((Get-FileHash (Join-Path $f.App interfaces.json)).Hash -eq $configHash) 'Adoption changed selected config bytes'
  Check ((Get-FileHash $f.Db).Hash -eq $dbHash) 'Adoption changed schema5 historical store'
- Check ((Get-Content -LiteralPath (Join-Path $f.App core/package.json) -Raw|ConvertFrom-Json).version -eq '3.0.0') 'Adoption did not select new core'
+ Check ((Get-Content -LiteralPath (Join-Path $f.App core/package.json) -Raw|ConvertFrom-Json).version -eq (Get-Content -LiteralPath (Join-Path $source core/package.json) -Raw|ConvertFrom-Json).version) 'Adoption did not select new core'
  $read=Run-Cmd $f.App 'Lodestar.cmd get note:prior-retained';Check ($read.Code -eq 0) ($read.Out+$read.Err)
  $record=$read.Out|ConvertFrom-Json;Check ($record.data.data.text -eq 'saved by actual2.2.0 core') 'Configured new core lost prior knowledge'
  foreach($file in $original.Keys){Check ((Get-FileHash -LiteralPath $file).Hash -eq $original[$file]) 'Historical baseline was modified'}

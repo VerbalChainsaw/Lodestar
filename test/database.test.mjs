@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from "../src/schema.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -127,7 +128,7 @@ test("initializes the universal-record schema and is read-only when repeated", a
       .map(({ key, value }) => [key, value]),
   );
   assert.equal(metadata.created_at, "2026-07-30T10:00:00.000Z");
-  assert.equal(metadata.schema_version, "5");
+  assert.equal(metadata.schema_version, String(SCHEMA_VERSION));
   assert.match(metadata.database_epoch, /^[0-9a-f]{64}$/u);
   assert.equal(metadata.database_revision, "0");
   assert.match(metadata.database_instance_id, /^[0-9a-f]{64}$/u);
@@ -255,7 +256,7 @@ test("commit ambiguity is explicit and preserves a possibly committed init", asy
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "5",
+    String(SCHEMA_VERSION),
   );
   db.close();
 });
@@ -289,7 +290,7 @@ test("definite init commit failure preserves a resumable reservation", async (t)
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "5",
+    String(SCHEMA_VERSION),
   );
   db.close();
 });
@@ -352,7 +353,7 @@ test("initialization resumes an interrupted zero-byte reservation", async (t) =>
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "5",
+    String(SCHEMA_VERSION),
   );
   db.close();
 });
@@ -424,7 +425,7 @@ test("concurrent initialization never overwrites another creator", async (t) => 
   assert.equal(
     db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get().value,
-    "5",
+    String(SCHEMA_VERSION),
   );
   db.close();
   if (process.platform !== "win32") {
