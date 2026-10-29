@@ -468,3 +468,5 @@ scope. A changed binding invalidates a prior basis; reread before correcting it.
 ## Local 3.0.1 candidate
 
 This retained heading preserves links from the [3.0.1 candidate notes](releases/v3.0.1.md). For the current package, use the [3.0.2 local candidate procedure](#local-302-candidate) above; do not install a different package under an old checksum.
+
+For coordinated deployment to existing clients, see [client deployment and rollback](client-deployment.md). Keep package identity, cached plugin identity, custom skills and actual client execution proof separate.
