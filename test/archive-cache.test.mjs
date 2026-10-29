@@ -49,3 +49,23 @@ test('Python explicit revalidation produces a Windows/Node-compatible cache iden
  assert.equal(result.status,0,result.stderr);
  assert.equal(decodeReceiptRow(row).name,'original');
 });
+
+test('same-user metadata forgery is outside generation checks; explicit full verification rejects it',t=>{
+ const {cache,row,manifest}=fixture(t),before=statSync(cache,{bigint:true});
+ const originalHash=createHash('sha256').update(readFileSync(cache)).digest('hex');
+ const db=new DatabaseSync(cache);db.prepare('UPDATE records SET name=?').run('mutated!');db.close();
+ const reset=spawnSync('python',['-c',
+   'import os,sys; os.utime(sys.argv[1], ns=(int(sys.argv[2]),int(sys.argv[3])))',
+   cache,before.atimeNs.toString(),before.mtimeNs.toString()],{encoding:'utf8',windowsHide:true,timeout:10000});
+ assert.equal(reset.status,0,reset.stderr);
+ const after=statSync(cache,{bigint:true});
+ for(const field of ['size','mtimeNs','ino']) assert.equal(after[field],before[field]);
+ assert.notEqual(createHash('sha256').update(readFileSync(cache)).digest('hex'),originalHash);
+ // Demonstrate the documented trust limit, not a claimed anti-tamper guarantee.
+ assert.equal(decodeReceiptRow(row).name,'mutated!');
+ const verify=spawnSync('python',[fileURLToPath(new URL('../tools/restore-archive.py',import.meta.url)),
+   '--manifest',manifest,'--target',cache,'--max-bytes',String(after.size),'--reserve-bytes','0',
+   '--explicit-restore','--verify-existing'],{encoding:'utf8',windowsHide:true,timeout:10000});
+ assert.notEqual(verify.status,0);
+ assert.match(verify.stderr+verify.stdout,/Restored bytes differ from verified snapshot; bytes retained/);
+});
