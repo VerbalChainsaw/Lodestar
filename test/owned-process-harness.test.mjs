@@ -8,6 +8,20 @@ import path from "node:path";
 import test from "node:test";
 import { spawnOwnedProcess, writeOwnedFrame } from "./helpers/owned-process.mjs";
 
+const INLINE_JS_UNSAFE_CHARS = /[<>/\u2028\u2029]/gu;
+function escapeForInlineJavaScriptLiteral(str) {
+  return str.replaceAll(INLINE_JS_UNSAFE_CHARS, (ch) => {
+    switch (ch) {
+      case "<": return "\\u003C";
+      case ">": return "\\u003E";
+      case "/": return "\\u002F";
+      case "\u2028": return "\\u2028";
+      case "\u2029": return "\\u2029";
+      default: return ch;
+    }
+  });
+}
+
 test("owned process preserves spawn failure instead of an unhandled error", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "lodestar-owned-missing-"));
   const result = await spawnOwnedProcess(t, path.join(root, "absent-node.exe"), [],
@@ -133,7 +147,7 @@ test("owned process forced stop marks incomplete inherited pipes after direct ex
     await rm(root, { recursive: true, force: true });
   });
   const descendant = 'require("node:fs").writeFileSync(process.argv[1],"ready");setTimeout(()=>require("node:fs").writeFileSync(process.argv[1],"done"),1500);';
-  const source = `const{spawn}=require("node:child_process");const fs=require("node:fs");spawn(process.execPath,["-e",${JSON.stringify(descendant)},${JSON.stringify(done)}],{detached:true,windowsHide:true,stdio:["ignore","inherit","inherit"]}).unref();const wait=setInterval(()=>{if(!fs.existsSync(${JSON.stringify(done)}))return;clearInterval(wait);process.stdout.write("complete");process.exit(0);},5);setTimeout(()=>process.exit(1),5000);`;
+  const source = `const{spawn}=require("node:child_process");const fs=require("node:fs");spawn(process.execPath,["-e",${escapeForInlineJavaScriptLiteral(JSON.stringify(descendant))},${escapeForInlineJavaScriptLiteral(JSON.stringify(done))}],{detached:true,windowsHide:true,stdio:["ignore","inherit","inherit"]}).unref();const wait=setInterval(()=>{if(!fs.existsSync(${escapeForInlineJavaScriptLiteral(JSON.stringify(done))}))return;clearInterval(wait);process.stdout.write("complete");process.exit(0);},5);setTimeout(()=>process.exit(1),5000);`;
   owned = spawnOwnedProcess(t, process.execPath, ["-e", source], { stdio: ["ignore", "pipe", "pipe"] });
   let settled = false;
   owned.completed.then(() => { settled = true; });
