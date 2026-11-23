@@ -171,3 +171,72 @@ test('oversized recovery names full literal reads; post-checkpoint decision chan
   const check = await read(f, context.read_access.current_work_check_args);
   assert(JSON.stringify(check.data.continuity).includes('Reopened on new fixture evidence'));
 });
+
+async function traceCompaction(t, f, { beforeCheckpoint = async () => {}, beforeFreshness = async () => {} } = {}) {
+  // Forward through the real CLI while exposing the per-hook process boundary.
+  // The wrapper lives only in this disposable fixture and uses its exact DB.
+  const root = path.join(f.root, 'traced-install');
+  const symbol = Symbol.for(randomUUID());
+  const calls = [];
+  const source = (relative) => JSON.stringify(pathToFileURL(path.join(path.dirname(entry), relative)).href);
+  await mkdir(path.join(root, 'codex-plugin', 'scripts'), { recursive: true });
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  await writeFile(path.join(root, 'codex-plugin', 'scripts', 'lodestar-runtime.mjs'),
+    'export { mutationCommand } from ' + source('codex-plugin/scripts/lodestar-runtime.mjs') + ';\n' +
+    'export const runInstalledLodestar = (...args) => globalThis[Symbol.for(' + JSON.stringify(Symbol.keyFor(symbol)) + ')](...args);\n');
+  await writeFile(path.join(root, 'src', 'operator-actions.mjs'),
+    'export { combineReadBases } from ' + source('src/operator-actions.mjs') + ';\n');
+  globalThis[symbol] = async (args, options) => {
+    calls.push(['handoff', 'work'].includes(args[0]) ? args.slice(0, 2).join(' ') : args[0]);
+    if (calls.length === 4 && args[0] === 'get') await beforeFreshness(args);
+    if (args[0] === 'handoff' && args[1] === 'checkpoint') await beforeCheckpoint();
+    return core.runInstalledLodestar(args, { ...options, env: f.env });
+  };
+  t.after(() => { delete globalThis[symbol]; });
+  f.options.env = { ...f.env, LODESTAR_ENTRY: path.join(root, 'lodestar.mjs') };
+  return calls;
+}
+
+test('bound checkpoint uses one startup and an exact revision refresh; other sessions do not view it', async (t) => {
+  const f = await fixture(t);
+  const calls = await traceCompaction(t, f);
+  assert.deepEqual(await pre(f, { session_id: 'another-session' }), { continue: true });
+  assert.deepEqual(calls, []);
+  const saved = await pre(f);
+  assert.equal(saved.continue, true, saved.systemMessage);
+  assert.match(saved.systemMessage, /saved/);
+  assert.deepEqual(calls, ['start', 'work check', 'get', 'get', 'handoff checkpoint']);
+});
+
+test('checkpoint still rejects when a linked work-check decision changes before write', async (t) => {
+  const f = await fixture(t);
+  let decisionWrite;
+  const calls = await traceCompaction(t, f, { beforeCheckpoint: async () => {
+    decisionWrite = await decision(f, 'Concurrent linked decision update in the synthetic store.');
+  } });
+  const output = await pre(f);
+  assert.equal(output.continue, false);
+  assert.equal(output.stopReason, 'lodestar_checkpoint_failed');
+  assert.deepEqual(calls, ['start', 'work check', 'get', 'get', 'handoff checkpoint']);
+  const { saved } = await journal(f);
+  assert.equal(saved.state, 'rejected');
+  assert.equal(saved.failure.error.code, 'revision_conflict');
+  assert.equal((await start(f)).revision, decisionWrite.revision);
+  await assert.rejects(read(f, ['get', '--', saved.request.input.id]),
+    (error) => error.envelope?.error?.code === 'record_not_found');
+});
+
+test('checkpoint refresh rejects an unrelated revision advance before preparing a write', async (t) => {
+  const f = await fixture(t);
+  let otherWrite;
+  const calls = await traceCompaction(t, f, { beforeFreshness: async (args) => {
+    assert.ok(args.includes('--at-revision'));
+    otherWrite = await put(f, 'knowledge:unrelated-late-write', { evidence: 'Synthetic revision advance.' });
+  } });
+  const output = await pre(f);
+  assert.equal(output.continue, false);
+  assert.match(output.systemMessage, /database changed/i);
+  assert.deepEqual(calls, ['start', 'work check', 'get', 'get']);
+  await assert.rejects(journal(f), /No compaction request journal|ENOENT/);
+  assert.equal((await start(f)).revision, otherWrite.revision);
+});

@@ -680,7 +680,7 @@ export async function checkpointForCompaction(input, dataDir, options = {}) {
             semantic_sha256: read.semantic, projection: redact(read.projection).value }],
       } };
     }, { ...options, basisReads: [read.check] },
-    `compact:${read.semantic}:${read.exact.ok ? read.exact.data.revision : "absent"}`);
+    `compact:${read.semantic}:${read.exact.ok ? read.exact.data.revision : "absent"}`, { start: read.start });
     return { bound: true, changed: true, handoff_id: read.id,
       revision: result.data.record.revision, receipt: result.request };
   } finally { await handle.close(); await unlink(lock); }
