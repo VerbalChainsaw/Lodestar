@@ -512,6 +512,18 @@ export async function executeHandoff(toolName, rawInput, dataDir, options = {}) 
 export async function recordTail(input, role, text, options = {}) {
   if (typeof text !== "string" || !text.trim()) return false;
   const host = hookHost(input, `tail:${role}`);
+  try {
+    const probe = await runLodestar(["handoff", "status", "--session-only", ...identityArgs(host)], "", options);
+    if (probe.more !== false || typeof probe.data?.eligible !== "boolean") {
+      throw new Error("Exact handoff eligibility was not established");
+    }
+    if (!probe.data.eligible) return false;
+  } catch (error) {
+    const detail = error.envelope?.error;
+    if (detail?.code !== "unknown_option" || detail.identifiers?.command !== "handoff" ||
+        detail.identifiers?.option !== "--session-only") throw error;
+    // A specifically older core does not know this option: keep the checked legacy path.
+  }
   const start = await readMutationContext(host, options);
   const id = sessionRecordId("handoff", start.data.project, host);
   const read = await exactRecord(id, host, options, start.revision);

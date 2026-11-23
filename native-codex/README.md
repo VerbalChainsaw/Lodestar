@@ -15,6 +15,12 @@ database. For substantive project work, follow the current project instructions
 and use one scoped orientation or an exact work/handoff read as relevant. A
 startup hint alone does not establish verified use or a write basis.
 
+Passive conversation-tail capture checks only the current Codex session and
+checkout with `lodestar handoff status --session-only`. An unarmed or terminal
+handoff needs no context load. An open one still uses the checked read and write
+path. Older cores without this option retain that legacy path; storage or
+ownership problems remain visible nonblocking capture diagnostics.
+
 ## Runtime selection
 
 The adapter carries the discovered Node executable and package entry through to

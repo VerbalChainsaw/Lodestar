@@ -65,14 +65,54 @@ test('passive tail reuses its checked read and stays nonblocking when unavailabl
  const readCalls=async()=> (await readFile(observed,'utf8')).trim().split('\n').map(line=>JSON.parse(line)[0]);
  await writeFile(observed,'');
  assert.equal(await recordTail({...host,session_id:'tail-probe'},'user','Ordinary text',measured),false);
- assert.equal((await readCalls()).length,2);
- const session_id='measured-armed';
+ assert.equal((await readCalls()).length,1);
+ const session_id='measured-armed ';
  await invoke('handoff','arm',{packet},{session_id});
  await writeFile(observed,'');
  const active={...host,session_id,turn_id:'tail-measured-after-restart'};
+ const transport=await import(pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')));
+ const exact=(cwd,session,agent='codex')=>transport.runInstalledLodestar(['handoff','status','--session-only',
+   '--cwd',cwd,'--session',session,'--agent',agent,'--harness','codex'],{env});
+ assert.deepEqual((await exact(root,session_id)).data,{eligible:true});
+ assert.deepEqual((await exact(root,'unarmed-peer')).data,{eligible:false});
+ const other=path.join(root,'other-checkout');
+ await mkdir(other);
+ assert.deepEqual((await exact(other,session_id)).data,{eligible:false});
+ await assert.rejects(exact(root,session_id,'other'),e=>e.envelope.error.code==='identity_required');
  assert.equal(await recordTail(active,'assistant','Authorized capture',measured),true);
+ assert.equal((await readCalls()).length,4);
+ const legacyRoot=path.join(root,'legacy-core');
+ const legacyEntry=path.join(legacyRoot,'lodestar.mjs');
+ const legacyTransport=path.join(legacyRoot,'codex-plugin/scripts');
+ await mkdir(legacyTransport,{recursive:true});
+ await mkdir(path.join(legacyRoot,'src'));
+ await writeFile(legacyEntry,'// explicit discovery fixture');
+ const actualTransport=pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')).href;
+ const actualOperator=pathToFileURL(path.join(path.dirname(entry),'src/operator-actions.mjs')).href;
+ await writeFile(path.join(legacyRoot,'src/operator-actions.mjs'),`export * from ${JSON.stringify(actualOperator)};`);
+ await writeFile(path.join(legacyTransport,'lodestar-runtime.mjs'),`
+ export * from ${JSON.stringify(actualTransport)};
+ import { runInstalledLodestar as live } from ${JSON.stringify(actualTransport)};
+ export async function runInstalledLodestar(args, opts) {
+   if(args.includes('--session-only')) {
+      const code=opts.env.FIXTURE_ELIGIBILITY_ERROR;
+      throw Object.assign(new Error(code), {envelope:{error:{code,
+        identifiers:{command:'handoff',option:'--session-only'}}}});
+   }
+   return live(args,{...opts,env:{...opts.env,LODESTAR_ENTRY:${JSON.stringify(entry)}}});
+ }
+ `);
+ const legacy={...opts,env:{...repoEnv,LODESTAR_ENTRY:legacyEntry,FIXTURE_ELIGIBILITY_ERROR:'unknown_option'}};
+ await writeFile(observed,'');
+ assert.equal(await recordTail({...active,turn_id:'legacy-open'},'assistant','Legacy authorized capture',legacy),true);
  assert.equal((await readCalls()).length,3);
+ await writeFile(observed,'');
+ await assert.rejects(recordTail(active,'assistant','Authority conflict', {
+  ...legacy,env:{...legacy.env,FIXTURE_ELIGIBILITY_ERROR:'handoff_conflict'}
+ }),/handoff_conflict/);
+ assert.equal(await readFile(observed,'utf8'),'');
  await invoke('handoff','disarm',{},{session_id});
+ assert.deepEqual((await exact(root,session_id)).data,{eligible:false});
  const failed=await handleHook({...active,hook_event_name:'Stop',last_assistant_message:'Offline'},data,{env:{...repoEnv,LODESTAR_DB:path.join(root,'absent.db')}});
  assert.equal(failed.continue,true);
  assert.match(failed.systemMessage,/optional capture failed/);

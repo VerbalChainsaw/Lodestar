@@ -83,10 +83,10 @@ export const installationOptions = (options) => Object.fromEntries(Object.entrie
   .filter(([flag]) => options[flag] !== undefined).map(([flag, field]) => [field, options[flag]]));
 export const PATH_OPTIONS = Object.freeze(["--cwd", "--file", "--db", "--source", "--wsl-shim", "--posix-shim",
   "--args-file", "--output", ...Object.keys(HOST_OPTIONS).filter((flag) => !["--target", "--codex-root"].includes(flag))]);
-const domain = (usage, summary, positionals, { limitedReads = true, paging = false } = {}) => ({ usage,
+const domain = (usage, summary, positionals, { limitedReads = true, paging = false, booleans = [] } = {}) => ({ usage,
   summary: `${summary} Reads accept ${limitedReads ? "--limit and " : ""}--at-revision; mutations are guarded by the request write basis.`,
   values: [...identity, "--file", ...(limitedReads ? ["--limit"] : []), ...(paging ? ["--offset"] : []), "--at-revision"],
-  booleans: [], positionals });
+  booleans, positionals });
 export const COMMANDS = Object.freeze({
   setup: { usage: "lodestar setup [--target <codex|claude|hermes|opencode|all>] [--apply] [--replace-local]",
     summary: "Plan or explicitly apply native skill installation with backups and interrupted-install recovery.",
@@ -120,8 +120,8 @@ export const COMMANDS = Object.freeze({
   work: domain("lodestar work <status|history|check <intent-record-id>|prepare-capture --file <draft.json>|attention [<intent-record-id>]|start|report|done|expire> [--cwd <path>]",
     "Read advisory work, check recorded intent evidence, or record consequential outcomes through the shared contract.",
     { min: 0, max: 2 }, { paging: true }),
-  handoff: domain("lodestar handoff <status|history|arm|checkpoint|now|claim|disarm> [--file <request.json>]",
-    "Read continuity or explicitly update/claim a transfer; never creates sessions.", { min: 0, max: 1 }, { paging: true }),
+  handoff: domain("lodestar handoff <status [--session-only]|history|arm|checkpoint|now|claim|disarm> [--file <request.json>]",
+    "Read continuity or explicitly update/claim a transfer; never creates sessions.", { min: 0, max: 1 }, { paging: true, booleans: ["--session-only"] }),
   decision: domain("lodestar decision <show|status|set|drop|inject> [key] [--file <request.json>]",
     "Read exact decision streams with show (the default); status is a guarded write requiring structured input.", { min: 0, max: 2 }, { paging: true }),
   pending: domain("lodestar pending <list|add|promote|drop> [--file <request.json>]",
@@ -181,7 +181,7 @@ const bindings = Object.freeze({
   "work.check": [cwd, positional("intent_record_id", 0), ...domainRevision],
   "work.prepare-capture": [cwd, { ...option("file", "--file"), required: true }, ...domainRevision],
   "work.attention": [cwd, positional("intent_record_id", 0, false), ...domainRevision],
-  "handoff.status": [cwd, ...page], "handoff.history": [cwd, ...page],
+  "handoff.status": [cwd, ...page, flag("session_only", "--session-only")], "handoff.history": [cwd, ...page],
   "decision.show": [cwd, positional("key", 0, false), ...page],
   "pending.list": [cwd, ...domainPage],
   "skills.verify": [option("target", "--target", { type: "string", enum: ["codex", "claude", "hermes", "opencode", "all"] }),

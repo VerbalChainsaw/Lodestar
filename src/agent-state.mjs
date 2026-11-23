@@ -4,7 +4,7 @@ import { initializeDatabase, normalizeDatabaseBusyError, openDiagnosticDatabase,
 import { createMigrationBackup, migrationPreflight, migrateDatabase, promoteRecoveredDatabase, recoveryPreflight } from "./schema-migration.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
 import { decisionMutation, decisionProjection } from "./decision.mjs";
-import { handoffMutation, handoffStatus } from "./continuity.mjs";
+import { handoffMutation, handoffStatus, nativeHandoffEligibility } from "./continuity.mjs";
 import { workMutation, workStatus } from "./work.mjs";
 import { checkWorkEvidence } from "./work-evidence.mjs";
 import { prepareCapture } from "./capture-preparation.mjs";
@@ -417,6 +417,10 @@ export async function dispatch(command, { options, positionals }, database, io) 
         identifiers: { operation: operationName }, action: "Use work check <intent-record-id> [--cwd <path>] [--at-revision <n>].",
       });
     }
+    if (options["--session-only"] && (operationName !== "handoff.status" ||
+      ["--limit", "--offset", "--file"].some((name) => options[name] !== undefined))) {
+      throw lodestarError("invalid_input", "--session-only is an exact handoff status read and does not accept paging or a file.");
+    }
     const caller = callerIdentity(options);
     const captureDraft = operationName === "work.prepare-capture" ? await input(options, io, "capture_draft") : null;
     if (read) return withDatabase(openReadDatabase, database, (db) => {
@@ -431,7 +435,8 @@ export async function dispatch(command, { options, positionals }, database, io) 
             : action === "prepare-capture" ? prepareCapture(db, project, captureDraft)
               : action === "attention" ? projectAttention(db, project, positionals[1] ?? null)
                 : workStatus(db, project, action === "history", limit, offset)
-            : command === "handoff" ? handoffStatus(db, project, caller, { history: action === "history", limit, offset })
+            : command === "handoff" ? options["--session-only"] ? nativeHandoffEligibility(db, project, caller, options["--session"])
+              : handoffStatus(db, project, caller, { history: action === "history", limit, offset })
               : pendingList(db, project, limit, offset);
         return dbResult(db, data, { scope: scope(project, caller), more: data?.more === true,
           ...(operationName === "work.check" ? { next: data.next } : {}),
