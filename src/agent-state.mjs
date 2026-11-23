@@ -16,7 +16,7 @@ import { resolveInputPath } from "./paths.mjs";
 import { catalogProjection, catalogReconciliation, resolveIdentity, resolveProject, resolveProjectScope, sameMachinePath, scope } from "./project.mjs";
 import { boundCompactData, compactRows, exportRegistry, findRecords, linkedRecords, normalizedForRows, orientationRows, serializedBytes } from "./queries.mjs";
 import { deleteRecord, getRecord, getRecordById, getRawRecord, getRecordHistory, normalizeRecord,
-  normalizeMutationRequest, putRecord, writeBasis } from "./records.mjs";
+  normalizeMutationRequest, projectionWriteBasisReader, putRecord, writeBasis } from "./records.mjs";
 import { currentRevision } from "./revisions.mjs";
 import { validateLimit, validateOffset } from "./validate.mjs";
 import { installationOptions, MUTATION_INPUTS, READ_OPERATIONS } from "./cli-commands.mjs";
@@ -76,9 +76,9 @@ function sourceConfiguration(db) {
   if (!db.prepare("SELECT id FROM records WHERE id='config:lodestar:sources'").get()) return null;
   return normalizeRecord(getRecord(db, "config:lodestar:sources"));
 }
-function withBasis(db, record, project = null) {
+function withBasis(db, record, project = null, readBasis = options => writeBasis(db, options)) {
   const applicability = record.semantics?.applicability ?? {};
-  return { ...record, write_basis: writeBasis(db, {
+  return { ...record, write_basis: readBasis({
     projectScope: record.kind === "project" ? record.id : applicability.project === null ? null
       : (project?.scope ?? applicability.project ?? record.scope),
     checkout: project?.checkout_root ?? applicability.checkout ?? null,
@@ -178,7 +178,8 @@ export function startProjection(db, project, identity, { topic = null, compact =
       context.set(peer.id, { ...peer, selection_reason: `dependency:${record.id}` });
     }
   }
-  const applicable = [...context.values()].map((record) => withBasis(db, record, project));
+  const readBasis = compact ? projectionWriteBasisReader(db) : undefined;
+  const applicable = [...context.values()].map((record) => withBasis(db, record, project, readBasis));
   const subjects = new Map();
   for (const record of applicable) if (record.semantics?.subject) {
     const members = subjects.get(record.semantics.subject) ?? [];

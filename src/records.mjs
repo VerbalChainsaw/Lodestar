@@ -777,13 +777,30 @@ function targetRevision(db, target, decisionHeads) {
   return decisionHeads.get(target.scope).get(target.key) ?? null;
 }
 
-export function writeBasis(db, {
+export function writeBasis(db, options) {
+  return writeBasisWithBinding(db, options, resolveProjectScope);
+}
+
+// Use only within one synchronous, admitted read transaction; do not retain
+// the reader beyond it. No target revision or metadata is reused, and outside
+// a transaction no binding is memoized.
+export function projectionWriteBasisReader(db) {
+  const bindings = new Map();
+  return (options) => writeBasisWithBinding(db, options, (connection, projectScope, checkout) => {
+    if (!connection.isTransaction) return resolveProjectScope(connection, projectScope, checkout);
+    const key = JSON.stringify([projectScope, checkout]);
+    if (!bindings.has(key)) bindings.set(key, resolveProjectScope(connection, projectScope, checkout));
+    return bindings.get(key);
+  });
+}
+
+function writeBasisWithBinding(db, {
   projectScope = null,
   checkout = null,
   targets = [],
-} = {}) {
+} = {}, resolveBinding) {
   const metadata = readMetadata(db);
-  const binding = resolveProjectScope(db, projectScope, checkout);
+  const binding = resolveBinding(db, projectScope, checkout);
   const distinct = [...new Map([...targets, ...(binding?.binding_preconditions ?? []).map(({ target }) => target)].map((target, index) => {
     const normalized = normalizedTarget(target, `targets[${index}]`);
     return [targetKey(normalized), normalized];

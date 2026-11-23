@@ -4,7 +4,11 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { dispatch } from '../src/agent-state.mjs';
+import { dispatch, startProjection } from '../src/agent-state.mjs';
+import { admittedTransaction, initializeConnection, openConnection } from '../src/database.mjs';
+import { recordInput } from '../src/project.mjs';
+import { writeRecordSnapshot } from '../src/records.mjs';
+import { allocateRevision } from '../src/revisions.mjs';
 import { fixture } from './helpers/contract.mjs';
 
 const success = result => { assert.equal(result.code, 0, JSON.stringify(result.value)); return result.value; };
@@ -239,4 +243,57 @@ test('compact start skips whole-catalog inventory but retains required sources a
   } finally {
     DatabaseSync.prototype.prepare = original;
   }
+});
+test('compact startup resolves a repeated project binding once for the orientation records', () => {
+  const db = openConnection(':memory:');
+  try {
+    const scope = 'project:compact-binding';
+    const now = '2026-11-23T00:00:00.000Z';
+    const count = 12;
+    initializeConnection(db, { createdAt: now, database: ':memory:' });
+    admittedTransaction(db, () => {
+      const revision = allocateRevision(db);
+      const put = (id, kind, data, context_role) => writeRecordSnapshot(db, {
+        ...recordInput(id, kind, id, scope, 0, data),
+        semantics: { lifecycle: 'current', context_role, basis: 'asserted',
+          applicability: { project: scope, checkout: null } },
+      }, { createdAt: now, updatedAt: now, revision });
+      put(scope, 'project', { roots: [process.cwd()] }, 'on_demand');
+      for (let index = 0; index < count; index++) {
+        put('knowledge:compact-binding-' + index, 'knowledge', { body: 'orientation ' + index }, 'orientation');
+      }
+    }, ':memory:');
+    const project = { id: scope, scope, cwd: process.cwd(), checkout_root: process.cwd(),
+      historical_scopes: [], binding_preconditions: [{ target: { kind: 'record', id: scope }, expected_revision: 1 }] };
+    let projectReads = 0;
+    let reuseBinding = true;
+    const observed = {
+      get isTransaction() { return reuseBinding && db.isTransaction; },
+      prepare(sql) {
+        const statement = db.prepare(sql);
+        return {
+          all: (...args) => statement.all(...args),
+          get: (...args) => {
+            const row = statement.get(...args);
+            if (args.length === 1 && args[0] === scope && typeof row?.content_json === 'string') projectReads++;
+            return row;
+          },
+        };
+      },
+    };
+    const run = reuse => {
+      reuseBinding = reuse;
+      projectReads = 0;
+      db.exec('BEGIN');
+      try {
+        const result = startProjection(observed, project, {}, { compact: true });
+        return { result, reads: projectReads };
+      } finally { db.exec('COMMIT'); }
+    };
+    const uncached = run(false);
+    assert.equal(uncached.result.data.context.length, count);
+    const compact = run(true);
+    assert.deepEqual(compact.result, uncached.result);
+    assert.equal(uncached.reads - compact.reads, count - 1);
+  } finally { db.close(); }
 });
