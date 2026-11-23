@@ -102,8 +102,10 @@ then open Loader or Manager from the Start Menu.
 `Setup.cmd` configures portable use. See [installation](docs/installation.md) for
 runtime selection, upgrades and recovery.
 
-The CLI alone requires **Node.js 24.15.0 or newer**. Install the exact local
-candidate tarball, replacing the placeholder with its verified absolute path:
+The CLI alone requires **Node.js 24.15.0 or newer**. On Linux x86_64, use the
+[native Linux CLI quickstart](docs/installation.md#native-linux-cli-x86_64) for
+a user-local install without Windows or WSL. The general npm route below uses
+the verified absolute path to the exact local candidate tarball:
 
 ```text
 npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.2.tgz"

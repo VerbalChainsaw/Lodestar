@@ -60,7 +60,11 @@ jobs:
           $version = node -p "require('./package.json').version"
           "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
       - run: npm install --ignore-scripts --no-audit --no-fund --prefix .package-smoke "./${{ env.PACKAGE }}"
+      - name: Exercise the packed executable (Linux launcher)
+        if: runner.os == 'Linux'
+        run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs .package-smoke/node_modules/.bin/lodestar
       - name: Exercise the packed executable
+        if: runner.os != 'Linux'
         run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
 
   desktop:
@@ -137,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           npm install --ignore-scripts --no-audit --no-fund --prefix .release-smoke "./${PACKAGE}"
-          node scripts/smoke-packed-package.mjs .release-smoke/node_modules/lodestar-agent-context/lodestar.mjs
+          node scripts/smoke-packed-package.mjs .release-smoke/node_modules/lodestar-agent-context/lodestar.mjs .release-smoke/node_modules/.bin/lodestar
       - name: Build and smoke paired native Codex archive
         shell: bash
         run: |

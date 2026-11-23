@@ -110,6 +110,49 @@ depend on the filesystem, including Windows-to-WSL transport. The installer lock
 serialize cooperating setup processes; content checks are not an OS-level
 compare-and-swap against arbitrary external writers.
 
+## Native Linux CLI (x86_64)
+
+Use Node.js 24.15.0 or newer with npm, and the verified CLI tarball from the
+matching release or candidate. This installs into a new user-local prefix and
+does not change global npm packages, PATH, or host agent settings.
+
+```sh
+(
+  set -eu
+  archive='/absolute/path/to/lodestar-agent-context-3.0.2.tgz'
+  expected_sha256='REPLACE_WITH_SHA256_FROM_ARTIFACT_INVENTORY'
+  printf '%s  %s\n' "$expected_sha256" "$archive" | sha256sum --check --strict
+
+  prefix="$HOME/.local/opt/lodestar-3.0.2"
+  if [ -e "$prefix" ] || [ -L "$prefix" ]; then
+    printf 'Choose an unused prefix: %s\n' "$prefix" >&2
+    exit 1
+  fi
+  npm install --offline --ignore-scripts --no-audit --no-fund --prefix "$prefix" "$archive"
+  "$prefix/node_modules/.bin/lodestar" --version
+)
+```
+
+With that prefix, initialize a **new** Linux-local registry, then check it from
+the project checkout. Use a distinct unused database path if one already exists
+or follow [storage and recovery](../README.md#storage-and-recovery) for upgrades.
+
+```sh
+cli="$HOME/.local/opt/lodestar-3.0.2/node_modules/.bin/lodestar"
+db="$HOME/.local/share/lodestar/lodestar.db"
+"$cli" init --db "$db"
+"$cli" start --cwd "$PWD" --db "$db"
+"$cli" doctor --db "$db"
+```
+
+Without `--db`, the native default is
+`${XDG_DATA_HOME:-$HOME/.local/share}/lodestar/lodestar.db`. Use a Linux-local
+filesystem for the registry. Do not point Linux Node at a Windows-owned or
+network-share SQLite database. For WSL with the existing Windows registry, use
+the [one-shot Windows launcher](#windows-and-wsl) instead. This quickstart
+covers the native CLI only; it does not qualify the terminal Manager or agent
+activation on Linux. The desktop Loader package is Windows-only.
+
 ## Windows Loader and Manager: per-user installation
 
 Use the local `Lodestar-3.0.2-win-x64.zip` described under
