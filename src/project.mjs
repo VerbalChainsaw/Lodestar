@@ -202,7 +202,8 @@ export function validateProjectBindings(db, id, prepared = null) {
       action: "Correct the named project records, then retry the binding mutation." });
   if (prepared) {
     const expectedPeers = prepared.peers.map(({ id: peerId }) => peerId).sort();
-    const currentPeers = db.prepare("SELECT id FROM records WHERE type='project' AND id<>? ORDER BY id")
+    // Compare project keys without walking records with unrelated payloads.
+    const currentPeers = db.prepare("SELECT id FROM records INDEXED BY records_scope_type_id WHERE type='project' AND id<>? ORDER BY id")
       .all(id).map(({ id: peerId }) => peerId);
     if (canonicalStringify(currentPeers) !== canonicalStringify(expectedPeers)) {
       throw lodestarError("project_binding_conflict",
