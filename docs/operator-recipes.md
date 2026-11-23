@@ -5,9 +5,9 @@ is explicit. Work status describes saved records; it does not observe live agent
 Use **Connection** to check the selected Node executable, CLI and database before
 making a correction. Keep those exact selections during uncertain-save recovery.
 
-## Find work reports formerly tracked by Glimpse
+## Find current and historical work reports
 
-The retired Glimpse work ledger is part of Lodestar's existing work records.
+Lodestar keeps current and historical work reports in the same database.
 Open **Lodestar → Loader** from the Windows Start menu, select the project,
 then open **Work & handoff**. **Work status** shows saved current open reports;
 **Work history** retains past reports and outcomes. In the terminal Manager,
