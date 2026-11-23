@@ -366,7 +366,7 @@ async function unresolvedRequests(host, dataDir, family) {
   }
   return pending;
 }
-async function mutateOwned(operation, host, dataDir, buildInput, options = {}, suffix = operation) {
+async function mutateOwned(operation, host, dataDir, buildInput, options = {}, suffix = operation, observed = null) {
   const requestId = `codex-plugin:${key(canonical([host.sessionId, host.turnId, host.toolUseId, suffix]))}`;
   let journal = path.join(dataDir, "requests", `${key(requestId)}.json`);
   let saved;
@@ -393,11 +393,11 @@ async function mutateOwned(operation, host, dataDir, buildInput, options = {}, s
     throw new Error("Recovery journal identity mismatch");
   }
   if (!saved) {
-    const start = await context(host, options);
+    const start = observed?.start ?? await context(host, options);
     const family = operation.split(".")[0];
     const id = family === "pending" ? `codex-plugin:pending:${key(requestId)}`
       : sessionRecordId(family, start.data.project, host);
-    const exact = await exactRecord(id, host, options, start.revision);
+    const exact = observed?.exact ?? await exactRecord(id, host, options, start.revision);
     const record = exact.ok ? exact.data : null;
     if (family !== "pending") verifyOwner(record, family, start, host);
     const { combineReadBases } = await import(pathToFileURL(path.join((await installed(options)).root, "src/operator-actions.mjs")));
@@ -529,7 +529,7 @@ export async function recordTail(input, role, text, options = {}) {
     const checkpoint = structuredClone(record.data.checkpoint);
     checkpoint.references.push({ kind: "conversation-tail", role, turn: host.turnId, text: redact(text).value });
     return { id: target, checkpoint };
-  }, options, `tail:${role}:${digest(text)}`);
+  }, options, `tail:${role}:${digest(text)}`, { start, exact: read });
   return true;
 }
 

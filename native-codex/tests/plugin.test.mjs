@@ -57,6 +57,26 @@ test('handoff lifecycle preserves packet and tails only while session armed',asy
  r=await invoke('handoff','now',{packet:{...packet,nextMove:'Transfer now'}});assert.equal(r.result.record.data.state,'open');assert.equal(r.result.record.data.checkpoint.current_state,'Transfer now');
  r=await invoke('handoff','disarm');assert.equal(r.result.record.data.state,'cancelled');assert.equal(await recordTail({...host,turn_id:'later'},'assistant','No reopen',opts),false);
 });
+test('passive tail reuses its checked read and stays nonblocking when unavailable',async()=>{
+ const observed=path.join(root,'tail-cli.log'), preload=path.join(root,'tail-observer.mjs');
+ await writeFile(preload,`import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(observed)}, JSON.stringify(process.argv.slice(2,4))+'\\n');`);
+ const repoEnv={...env,NODE_OPTIONS:`--import=${pathToFileURL(preload).href}`};
+ const measured={...opts,env:repoEnv};
+ const readCalls=async()=> (await readFile(observed,'utf8')).trim().split('\n').map(line=>JSON.parse(line)[0]);
+ await writeFile(observed,'');
+ assert.equal(await recordTail({...host,session_id:'tail-probe'},'user','Ordinary text',measured),false);
+ assert.equal((await readCalls()).length,2);
+ const session_id='measured-armed';
+ await invoke('handoff','arm',{packet},{session_id});
+ await writeFile(observed,'');
+ const active={...host,session_id,turn_id:'tail-measured-after-restart'};
+ assert.equal(await recordTail(active,'assistant','Authorized capture',measured),true);
+ assert.equal((await readCalls()).length,3);
+ await invoke('handoff','disarm',{},{session_id});
+ const failed=await handleHook({...active,hook_event_name:'Stop',last_assistant_message:'Offline'},data,{env:{...repoEnv,LODESTAR_DB:path.join(root,'absent.db')}});
+ assert.equal(failed.continue,true);
+ assert.match(failed.systemMessage,/optional capture failed/);
+});
 test('pending notes deduplicate/max three, redact, quarantine; startup complete markers',async()=>{
  const text='LODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: two\nLODESTAR NOTE: three\nLODESTAR NOTE: four';
  assert.equal(extractNotes(text).length,3);assert.equal(await captureNotes(host,text,opts),3);assert.equal(await captureNotes(host,text,opts),3);
