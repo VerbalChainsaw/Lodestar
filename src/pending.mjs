@@ -28,7 +28,7 @@ export function pendingMutation(db, project, identity, action, request, options 
     ? input.destination.input?.mode === "update" ? input.destination.input.id : input.destination.input?.record?.id
     : null;
   const putEvidence = input.destination?.operation === "put"
-    ? preparePutEvidence(db, input.destination.input, request) : {};
+    ? preparePutEvidence(db, input.destination.input, request, `pending.${action}`) : {};
   const targets = [{ kind: "record", id: input.id }, ...(project.binding_preconditions ?? []).map(({ target }) => target)];
   if (action === "promote") {
     const destination = input.destination;
@@ -90,5 +90,5 @@ export function pendingMutation(db, project, identity, action, request, options 
       semantics: { ...prior.semantics, lifecycle: action === "promote" ? "superseded" : "historical", context_role: "on_demand" } },
     { createdAt: prior.created_at, updatedAt: timestamp, revision });
     return { data: { settled: true, record: normalizeRecord(getRecordById(db, input.id)), promoted }, changed_ids: changed };
-  }, { ...options, requiredTargets: targets });
+  }, { ...options, receiptPreparation: putEvidence, requiredTargets: targets });
 }
