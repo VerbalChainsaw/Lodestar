@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { handleHook } from '../scripts/lodestar-hook.mjs';
-import { authorizePrompt, attestTool, executeWork, executeHandoff, recordTail, captureNotes, startupContext, extractNotes, parseHandoffCommand, canonical, sessionRecordId } from '../scripts/lodestar-runtime.mjs';
+import { authorizePrompt, attestTool, executeWork, executeHandoff, recordTail, captureNotes, extractNotes, parseHandoffCommand, canonical, sessionRecordId } from '../scripts/lodestar-runtime.mjs';
 const entry=process.env.LODESTAR_ENTRY;
 assert.ok(entry,'Set LODESTAR_ENTRY to the installed package entry for real CLI integration');
 const root=await mkdtemp(path.join(os.tmpdir(),'lodestar-plugin-test-'));
@@ -77,12 +77,18 @@ test('passive tail reuses its checked read and stays nonblocking when unavailabl
  assert.equal(failed.continue,true);
  assert.match(failed.systemMessage,/optional capture failed/);
 });
-test('pending notes deduplicate/max three, redact, quarantine; startup complete markers',async()=>{
+test('pending notes deduplicate/max three, redact, quarantine; route-only startup without a database',async()=>{
  const text='LODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: two\nLODESTAR NOTE: three\nLODESTAR NOTE: four';
  assert.equal(extractNotes(text).length,3);assert.equal(await captureNotes(host,text,opts),3);assert.equal(await captureNotes(host,text,opts),3);
  const transport=await import(pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')));
  const pending=await transport.runInstalledLodestar(['pending','list','--cwd',root],{env});assert.equal(pending.data.records.length,3);assert.ok(pending.data.records.every(r=>r.semantics.lifecycle==='unresolved'&&r.semantics.context_role==='on_demand'));
- const context=await startupContext(host,opts);assert.ok(context.startsWith('Lodestar startup context'));assert.ok(context.endsWith('stop before mutation.'));assert.ok(context.includes('"required_complete":true'));
+ const offline={env:{...env,LODESTAR_DB:path.join(root,'absent-startup.db')}};
+ for(const source of ['startup','compact']){
+  const result=await handleHook({...host,hook_event_name:'SessionStart',source},data,offline);
+  assert.equal(result.continue,true);
+  assert.match(result.hookSpecificOutput.additionalContext,/^Lodestar startup routing \(v2\)/);
+  assert.match(result.hookSpecificOutput.additionalContext,/contains no work records or write basis/);
+ }
 });
 test('journal keeps exact requests and confirmed replay avoids duplicate dispatch',async()=>{
  const h={...host,turn_id:'recovery',tool_use_id:'same-logical-call',tool_name:'lodestar_work_start',tool_input:{report:'Recovery'}}, token=await attestTool(h,data);

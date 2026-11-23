@@ -19,10 +19,6 @@ const READ_ONLY_COMMANDS = new Set(["status"]);
 const AUTH_TTL_MS = 10 * 60_000;
 const OUTPUT_LIMIT = 1024 * 1024;
 const TIMEOUT_MS = 20_000;
-export const STARTUP_CONTEXT_PREFIX =
-  "Lodestar startup context (v1; incomplete without the closing marker):\n";
-export const STARTUP_CONTEXT_SUFFIX =
-  "\nLodestar startup context complete. If this marker is missing, stop before mutation.";
 export const HANDOFF_ENTRY_KEY_PATTERN = "^[a-z0-9][a-z0-9.-]*$";
 export const HANDOFF_PACKET_SCHEMA = Object.freeze({
   type: "object",
@@ -329,7 +325,7 @@ const hookHost = (input, event) => {
 };
 export const sessionRecordId = (family, project, host) => 
   `codex-plugin:${family}:${key(canonical([project.scope, project.checkout_root, host.sessionId])).slice(0, 40)}`;
-async function context(host, options) {
+export async function readMutationContext(host, options) {
   const result = await runLodestar(["start", ...identityArgs(host)], "", options);
   if (result.more !== false || result.data?.complete !== true || result.data.required_complete !== true) {
     throw new Error("Full startup context is incomplete; mutation is blocked");
@@ -393,7 +389,7 @@ async function mutateOwned(operation, host, dataDir, buildInput, options = {}, s
     throw new Error("Recovery journal identity mismatch");
   }
   if (!saved) {
-    const start = observed?.start ?? await context(host, options);
+    const start = observed?.start ?? await readMutationContext(host, options);
     const family = operation.split(".")[0];
     const id = family === "pending" ? `codex-plugin:pending:${key(requestId)}`
       : sessionRecordId(family, start.data.project, host);
@@ -516,7 +512,7 @@ export async function executeHandoff(toolName, rawInput, dataDir, options = {}) 
 export async function recordTail(input, role, text, options = {}) {
   if (typeof text !== "string" || !text.trim()) return false;
   const host = hookHost(input, `tail:${role}`);
-  const start = await context(host, options);
+  const start = await readMutationContext(host, options);
   const id = sessionRecordId("handoff", start.data.project, host);
   const read = await exactRecord(id, host, options, start.revision);
   if (!read.ok) return false;
@@ -564,11 +560,15 @@ export async function captureNotes(input, text, options = {}) {
   }
   return captured;
 }
-export async function startupContext(input, options = {}) {
+export async function startupContext(input) {
   for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
-  const host = { sessionId: input.session_id, cwd: input.cwd };
-  const envelope = await context(host, options);
-  return `${STARTUP_CONTEXT_PREFIX}${canonical(envelope.data)}${STARTUP_CONTEXT_SUFFIX}`;
+  // A startup hint is a route, not a full project read or a mutation basis.
+  // Never fetch or serialize the ledger, catalog, or instruction bodies here.
+  return "Lodestar startup routing (v2): substantive project work uses the current native project instructions and Lodestar. " +
+    "Read only the relevant current work or handoff with lodestar_work_status / lodestar_handoff_status or the installed Lodestar CLI. " +
+    "On a new project, use lodestar start --cwd <current checkout> --compact for orientation if supported; read exact required records/instructions separately. " +
+    "This message contains no work records or write basis. Recover the current owner and stops, and obtain a current checked write basis before any Lodestar mutation. " +
+    "Do not duplicate records or claim a checkpoint without its receipt.";
 }
 
 // Native local-only lifecycle adapter. The exact project/session binding is opt-in;
@@ -603,7 +603,7 @@ const compactionOptions = (binding, options) => binding.database
   : options;
 async function compactionRead(input, binding, options) {
   const host = { sessionId: input.session_id, cwd: input.cwd };
-  const start = await context(host, options);
+  const start = await readMutationContext(host, options);
   const check = await runLodestar(["work", "check", "--cwd", host.cwd,
     "--at-revision", String(start.revision), "--", binding.intent_record_id], "", options);
   if (check.more !== false || check.data?.complete !== true) {

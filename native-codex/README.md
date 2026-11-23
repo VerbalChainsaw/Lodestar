@@ -1,6 +1,6 @@
 # Lodestar native Codex adapter
 
-This optional adapter supplies Codex startup context, host-bound work
+This optional adapter supplies a Codex startup routing hint, host-bound work
 and handoff tools, pending-note capture, and opt-in compaction continuity. It uses
 the separately installed Lodestar core through that core's maintained transport.
 
@@ -9,6 +9,11 @@ core 3.0.1. CI qualifies the native archive against the exact packed core from
 the same source revision on Windows. The core package's optional generic MCP plugin does
 not provide these native hooks; replacing this adapter with it would remove
 native continuity capabilities. Enable one Lodestar plugin for this host.
+
+Normal startup (and compaction with no matching binding) never reads the core
+database. For substantive project work, follow the current project instructions
+and use one scoped orientation or an exact work/handoff read as relevant. A
+startup hint alone does not establish verified use or a write basis.
 
 ## Runtime selection
 

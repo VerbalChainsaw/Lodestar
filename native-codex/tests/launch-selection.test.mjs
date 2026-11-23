@@ -10,7 +10,7 @@ const entry = process.env.LODESTAR_ENTRY;
 assert.ok(entry, 'Set LODESTAR_ENTRY to the installed package entry for real transport integration');
 const adapter = fileURLToPath(new URL('../scripts/lodestar-runtime.mjs', import.meta.url));
 const transport = pathToFileURL(path.join(path.dirname(entry), 'codex-plugin/scripts/lodestar-runtime.mjs')).href;
-const { startupContext, STARTUP_CONTEXT_PREFIX, STARTUP_CONTEXT_SUFFIX } = await import(pathToFileURL(adapter));
+const { readMutationContext } = await import(pathToFileURL(adapter));
 
 test('Windows discovery orders numeric Node versions and preserves custom-name fallback',
   { skip: process.platform !== 'win32' }, async (t) => {
@@ -40,8 +40,7 @@ test('Windows discovery orders numeric Node versions and preserves custom-name f
       const env = { ...process.env, USERPROFILE: root, HOME: root };
       delete env.LODESTAR_NODE;
       delete env.LODESTAR_ENTRY;
-      const text = await startupContext({ session_id: 'version-order', cwd: root }, { env });
-      const observed = JSON.parse(text.slice(STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length));
+      const { data: observed } = await readMutationContext({ sessionId: 'version-order', cwd: root }, { env });
       assert.equal(path.basename(path.dirname(observed.executable)), expected);
       assert.equal(observed.entry, path.join(path.dirname(observed.executable), 'node_modules/lodestar-agent-context/lodestar.mjs'));
     }
@@ -69,8 +68,7 @@ test('Windows discovery skips directory executables and CLI entries',
     const env = { ...process.env, USERPROFILE: root, HOME: root };
     delete env.LODESTAR_NODE;
     delete env.LODESTAR_ENTRY;
-    const output = await startupContext({ session_id: 'invalid-runtime', cwd: root }, { env });
-    const data = JSON.parse(output.slice(STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length));
+    const { data } = await readMutationContext({ sessionId: 'invalid-runtime', cwd: root }, { env });
     assert.equal(path.basename(path.dirname(data.executable)), 'node-v24.15.0-win-x64');
   });
 
@@ -103,16 +101,15 @@ test('Windows discovery carries the selected executable and entry into the actua
     const runner = path.join(root, 'runner.mjs');
     await writeFile(runner, `
       import assert from 'node:assert/strict';
-      import { startupContext, STARTUP_CONTEXT_PREFIX, STARTUP_CONTEXT_SUFFIX } from ${JSON.stringify(pathToFileURL(adapter).href)};
+      import { readMutationContext } from ${JSON.stringify(pathToFileURL(adapter).href)};
       const before = { ...process.env };
-      const host = { session_id: 'launch-fixture', cwd: ${JSON.stringify(root)} };
-      const unpack = (text) => JSON.parse(text.slice(STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length));
-      const discovered = unpack(await startupContext(host));
+      const host = { sessionId: 'launch-fixture', cwd: ${JSON.stringify(root)} };
+      const { data: discovered } = await readMutationContext(host);
       const override = Object.freeze({ ...process.env, LODESTAR_NODE: ${JSON.stringify(overriddenNode)},
         LODESTAR_ENTRY: ${JSON.stringify(overriddenEntry)}, LODESTAR_DB: 'explicit-isolated-db',
         LODESTAR_FIXTURE_MARKER: 'explicit-marker' });
       const overrideBefore = { ...override };
-      const explicit = unpack(await startupContext(host, { env: override }));
+      const { data: explicit } = await readMutationContext(host, { env: override });
       assert.deepEqual({ ...process.env }, before, 'parent process environment must remain unchanged');
       assert.deepEqual(override, overrideBefore, 'caller environment must remain unchanged');
       console.log(JSON.stringify({ parent: process.execPath, discovered, explicit }));
