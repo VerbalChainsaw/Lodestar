@@ -23,6 +23,12 @@ jobs:
         with:
           node-version: 24.15.0
       - run: npm test
+      - name: Exercise cold archive recovery on disposable fixtures
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq "Windows") { python -B test/restore-archive.test.py }
+          else { python3 -B test/restore-archive.test.py }
+          exit $LASTEXITCODE
       - name: Build the static site
         run: node scripts/build-site.mjs .site-smoke
       - run: npm run pack:check

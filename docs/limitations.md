@@ -47,13 +47,15 @@
 
 ## Compatibility and recovery
 
-- Current runtime reads and writes schema 5 only. It has one explicit, preserving
-  schema-4 conversion and no general historical converter suite.
+- New stores use schema 6. This runtime still reads and writes existing schema-5
+  stores; the explicit schema-4 conversion targets schema 5. Ordinary operations
+  do not migrate a store or restore cold history. See [lean storage](lean-storage.md)
+  for schema-6 storage and bounded archive recovery.
 - Converting another actual store requires an exact inspected preservation mapping.
-- After accepted schema-5 writes, restoring a pre-conversion store as active would
-  discard accepted history and is unsupported. Forward recovery must account for all
-  known records, events, receipts, raw history, and associations before promotion.
-- There is no schema-5 downgrade converter.
+- After accepted writes, restoring a pre-conversion store as active would discard
+  accepted history and is unsupported. Forward recovery must account for all known
+  records, events, receipts, raw history, and associations before promotion.
+- There is no downgrade converter. Older schema-5-only binaries refuse schema 6.
 
 ## Distribution
 

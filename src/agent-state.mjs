@@ -14,7 +14,7 @@ import { decorateError, lodestarError } from "./errors.mjs";
 import { canonicalStringify, parseJsonText, readStreamComplete, readTextFileComplete } from "./json.mjs";
 import { resolveInputPath } from "./paths.mjs";
 import { catalogProjection, catalogReconciliation, resolveIdentity, resolveProject, resolveProjectScope, sameMachinePath, scope } from "./project.mjs";
-import { boundCompactData, compactRows, exportRegistry, findRecords, linkedRecords, normalizedForRows, serializedBytes } from "./queries.mjs";
+import { boundCompactData, compactRows, exportRegistry, findRecords, linkedRecords, normalizedForRows, orientationRows, serializedBytes } from "./queries.mjs";
 import { deleteRecord, getRecord, getRecordById, getRawRecord, getRecordHistory, normalizeRecord,
   normalizeMutationRequest, putRecord, writeBasis } from "./records.mjs";
 import { currentRevision } from "./revisions.mjs";
@@ -118,18 +118,7 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
   const appliesToCheckout = (record) => !record.semantics?.applicability?.checkout
     || sameMachinePath(record.semantics.applicability.checkout, project.checkout_root);
-  const placeholders = scopes.map(() => "?").join(",");
-  // Exclude high-volume operational records by the covering index before
-  // SQLite fetches or parses any content JSON for the orientation projection.
-  const selected = normalizedForRows(db, db.prepare("WITH eligible AS MATERIALIZED ("
-    + "SELECT id FROM records INDEXED BY records_scope_type_id WHERE scope IN (" + placeholders + ",'global') "
-    + "AND type NOT IN ('mutation-receipt','migration-source','startup-snapshot','pending','decision-event','work-event','handoff-packet')) "
-    + "SELECT r.* FROM eligible e CROSS JOIN records r ON r.id=e.id WHERE (scope IN ("
-    + placeholders + ") OR (scope='global' AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN ("
-    + placeholders + "))) "
-    + "AND json_extract(content_json,'$._lodestar.semantics.context_role')='orientation' "
-    + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') IN ('current','unresolved') "
-    + "ORDER BY json_extract(content_json,'$._lodestar.priority') DESC,r.id").all(...scopes, ...scopes, ...scopes));
+  const selected = normalizedForRows(db, orientationRows(db, scopes));
   const context = new Map(selected.records.filter(appliesToCheckout)
     .map((record) => [record.id, { ...record, selection_reason: "orientation" }]));
   const recordErrors = [...(project.record_errors ?? []), ...selected.record_errors];
