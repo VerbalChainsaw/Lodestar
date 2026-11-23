@@ -418,8 +418,9 @@ export const normalizedRows = (db, sql, ...values) => normalizedRowsResult(db, s
 
 // Capture database evidence in the read transaction; inspect catalog bytes only
 // after releasing it. Preview requests reuse this exact observed write basis.
-export function catalogProjection(db, project, configuration) {
+export function catalogProjection(db, project, configuration, { details = true } = {}) {
   const projects = projectRecords(db), records = projects.records;
+  if (!details) return { record_errors: projects.record_errors };
   const id = records.find((record) => record.id === project.id || record.id === project.scope)?.id ?? project.scope;
   return { project, id, records, record_errors: projects.record_errors,
     alias_owners: db.prepare("SELECT alias,record_id FROM aliases").all(),

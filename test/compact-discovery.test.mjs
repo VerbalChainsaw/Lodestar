@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { dispatch } from '../src/agent-state.mjs';
 import { fixture } from './helpers/contract.mjs';
 
 const success = result => { assert.equal(result.code, 0, JSON.stringify(result.value)); return result.value; };
@@ -206,4 +207,36 @@ test('compact start retains dependency failures and reports omitted orientation 
   assert.deepEqual(compact.data.record_errors, full.data.record_errors);
   assert.ok(compact.data.context.length <= 20); assert.equal(compact.data.omitted_records, 3);
   assert.ok(Buffer.byteLength(JSON.stringify(compact.data)) <= 24000);
+});
+
+test('compact start skips whole-catalog inventory but retains required sources and full start', async t => {
+  const f = await fixture(t);
+  await f.create('project:test', 'project', { roots: [f.root] }, 'project:test');
+  await f.create('fact:orientation', 'fact', { text: 'orientation' }, 'project:test', { context_role: 'orientation', lifecycle: 'current' });
+  await writeFile(path.join(f.root, 'AGENTS.md'), 'Required local instructions');
+  const original = DatabaseSync.prototype.prepare;
+  const inventory = [];
+  DatabaseSync.prototype.prepare = function(sql) {
+    if (sql === 'SELECT id FROM records' || sql === 'SELECT alias,record_id FROM aliases') inventory.push(sql);
+    return original.call(this, sql);
+  };
+  try {
+    const options = { '--cwd': f.root, '--harness': 'codex' };
+    const full = await dispatch('start', { options, positionals: [] }, f.database, {});
+    const fullInventory = inventory.splice(0);
+    const compact = await dispatch('start', { options: { ...options, '--compact': true }, positionals: [] }, f.database, {});
+    assert.deepEqual(inventory, []);
+    assert.equal(fullInventory.length, 2);
+    assert.ok(full.data.catalog);
+    assert.ok(full.data.installation);
+    assert.equal(compact.data.complete, full.data.complete);
+    assert.deepEqual(compact.data.record_errors, full.data.record_errors);
+    assert.deepEqual(compact.data.context.map(row => row.id), full.data.context.map(row => row.id));
+    assert.equal(compact.data.required[0].sha256, full.data.required[0].sha256);
+    assert.ok(full.data.required[0].text.includes('Required local instructions'));
+    assert.equal(compact.data.required[0].text, undefined);
+    assert.equal(compact.data.requires_full_start, true);
+  } finally {
+    DatabaseSync.prototype.prepare = original;
+  }
 });

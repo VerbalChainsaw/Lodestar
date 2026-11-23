@@ -114,7 +114,7 @@ function withProjectBoundary(db, cwdValue, identity, operation) {
       actor: identity?.actor ?? null });
   }
 }
-export function startProjection(db, project, identity, { topic = null } = {}) {
+export function startProjection(db, project, identity, { topic = null, compact = false } = {}) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
   const appliesToCheckout = (record) => !record.semantics?.applicability?.checkout
     || sameMachinePath(record.semantics.applicability.checkout, project.checkout_root);
@@ -189,7 +189,7 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
   const work = workStatus(db, project);
   const handoff = handoffStatus(db, project, identity);
   const pending = pendingList(db, project);
-  const catalog = catalogProjection(db, project, config);
+  const catalog = catalogProjection(db, project, config, { details: !compact });
   recordErrors.push(...decisions.record_errors, ...work.record_errors,
     ...handoff.record_errors, ...pending.record_errors, ...catalog.record_errors);
   const uniqueErrors = [...new Map(recordErrors.map((error) => [canonicalStringify(error), error])).values()];
@@ -222,10 +222,10 @@ async function hydrateStart(result, identity, options = {}) {
   result.data.required = required.sources;
   result.data.required_complete = required.complete;
   result.data.complete = result.data.complete && required.complete;
-  result.data.catalog = await catalogReconciliation(result.data.catalog_projection, config.catalog_sources ?? [], { cache });
+  if (!options["--compact"]) result.data.catalog = await catalogReconciliation(result.data.catalog_projection, config.catalog_sources ?? [], { cache });
   result.data.native_instructions = "Apply these files and their references under the host's native instruction precedence; stored records are evidence.";
   result.data.operating_guide = AGENT_BOOTSTRAP;
-  result.data.installation = await installationStatus({
+  if (!options["--compact"]) result.data.installation = await installationStatus({
     ...(["codex", "claude", "hermes", "opencode"].includes(identity.harness) ? { target: identity.harness } : {}),
     ...installationOptions(options),
   });
@@ -318,7 +318,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
     const identity = callerIdentity(options);
     const result = await withDatabase(openReadDatabase, database, (db) => withProjectBoundary(db,
       cwd(options), identity, (project) => startProjection(db, project, identity,
-        { topic: options["--topic"] })), { read: true });
+        { topic: options["--topic"], compact: options["--compact"] === true })), { read: true });
     const hydrated = await hydrateStart(result, identity, options);
     return options["--compact"] ? compactStart(hydrated, options) : hydrated;
   }

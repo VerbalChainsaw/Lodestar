@@ -221,7 +221,7 @@ const cliConstraints = Object.freeze({
   "agents.status": ["--mode applies only to agents template."],
   "agents.verify": ["--mode applies only to agents template."],
   get: ["--history and --raw are mutually exclusive."],
-  start: ["Default start returns full context and instructions. --compact runs the same semantic, source and native instruction checks, then omits bodies, instructions and write basis; run the exact full start before dependent work.",
+  start: ["Default start returns full context and instructions. --compact runs the same semantic, source and native instruction checks, but skips catalog reconciliation and installation discovery, and omits bodies, instructions and write basis; run the exact full start before dependent work.",
     "Compact context has at most 20 records and 24000 serialized data bytes, excluding the envelope. selected_records, displayed_records and omitted_records account for summaries; projection_complete is false and instructions_complete is false even when the source checks complete.",
     "Oversized fields or exact argument arrays are omitted whole in omitted_fields; identifiers are never shortened. Repeat the original full start through --args-file or --args-stdin when the exact full_read_args are omitted."],
   find: ["Provide exactly one of query and --all. --all with --match terms is invalid; use a query for terms or --match contains for all.",
