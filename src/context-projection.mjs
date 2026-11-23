@@ -106,15 +106,17 @@ export function continuityProjection(db, project, { contract, plan, actual, delt
   const decisionSelections = new Map();
   const accepted = new Map();
   let index = 0;
+  const seedMetadata = new Map();
   // Complete each explicit relevance band's dependency closure before admitting
   // the next band. Orientation can no longer exhaust the active node frontier.
   for (const phase of phases) {
     // Shortlist roots using persisted kind/priority before node admission. This
     // reads ranking columns only; full record inspections remain node-bounded.
-    const seedMetadata = new Map();
-    const ids = [...new Set(phase.map(([id]) => id))];
+    const ids = [...new Set(phase.map(([id]) => id))].filter(id => !seedMetadata.has(id));
     for (let offset = 0; offset < ids.length; offset += CONTINUITY_LIMITS.nodes) {
       const part = ids.slice(offset, offset + CONTINUITY_LIMITS.nodes);
+      // Cache absent IDs as well; associations may repeat them across bands.
+      for (const id of part) seedMetadata.set(id, null);
       for (const row of db.prepare("SELECT id,type,CASE WHEN json_valid(content_json) THEN json_extract(content_json,'$._lodestar.priority') ELSE 0 END AS priority FROM records WHERE id IN ("
         + part.map(() => "?").join(",") + ")").all(...part)) seedMetadata.set(row.id, row);
     }

@@ -532,3 +532,39 @@ test('continuity bounds orientation by covered IDs, preserving visibility and re
     db.close();
   }
 });
+
+test('continuity queries seed ranking metadata once per distinct ID and operation', async t => {
+  const f = await setup(t);
+  const id = 'research:shared';
+  const absent = 'research:absent';
+  await f.create(id, 'research', { finding: 'One source, multiple roles' }, scope,
+    { ...current, context_role: 'orientation' });
+  const db = await openReadDatabase(f.database);
+  try {
+    const prepare = db.prepare.bind(db);
+    const reads = [];
+    db.prepare = sql => {
+      const statement = prepare(sql);
+      if (!sql.includes('AS priority FROM records WHERE id IN')) return statement;
+      return { all(...ids) { reads.push(...ids); return statement.all(...ids); } };
+    };
+    const project = resolveProjectScope(db, scope, f.root);
+    const args = {
+      contract: { id: 'knowledge:intent', links: [] },
+      plan: { requirements: [{ id: 'R1', parent_id: null }] },
+      actual: { requirements: [] }, delta: { requirements: [] },
+      continuation: { active_requirement_ids: ['R1'], context: {
+        mission_record_ids: [id, absent], requirements: [{ id: 'R1', record_ids: [id, absent] }],
+      } },
+    };
+    const { projection: p } = continuityProjection(db, project, args);
+    assert.deepEqual(reads.sort(), [absent, id]);
+    assert.deepEqual(p.records.find(row => row.id === id).selection.reasons, ['mission', 'orientation', 'requirement']);
+    assert.ok(p.read_required.some(row => row.target_id === absent));
+    reads.length = 0;
+    assert.deepEqual(continuityProjection(db, project, args).projection, p);
+    assert.deepEqual(reads.sort(), [absent, id]);
+  } finally {
+    db.close();
+  }
+});
