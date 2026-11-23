@@ -37,12 +37,20 @@ async function plain(candidate) {
 const journalLimit = file => path.basename(file)==="response.json" ? 64*1024*1024 : JSON_INPUT_MAXIMUM_BYTES;
 async function json(file) { await plain(file); return parseJsonText(await readTextFileComplete(file,{resource:"recovery journal",maximum:journalLimit(file)})); }
 async function optionalJson(file) { try{return await json(file);}catch(error){if(error.code==="ENOENT"||error.cause?.code==="ENOENT")return null;throw error;} }
-async function publish(file, value) {
+async function publish(file, value, { waitForPeerReaders = false } = {}) {
   await plain(file); const temporary=`${file}.${randomUUID()}.tmp`;
   const text=JSON.stringify(value)+"\n";
   assertTextBytes(text,journalLimit(file),"recovery state",{path:file});
   await writeFile(temporary,text,{flag:"wx",flush:true,mode:0o600});
-  await rename(temporary,file);
+  for(let attempt=0;;attempt++){
+    try{await rename(temporary,file);break;}
+    catch(error){
+      // Windows refuses replacing a published context while a peer reads it.
+      // Retry only this owned rename, retaining the same exact saved bytes.
+      if(!waitForPeerReaders||process.platform!=="win32"||error.code!=="EPERM"||attempt===50)throw error;
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+  }
 }
 async function proofs(selection) {
   const node=await stat(selection.node,{bigint:true});
@@ -337,7 +345,7 @@ async function prepareJournal(selection, operation, parsed, arguments_, io) {
   await publish(path.join(preparing,"context.json"),context);
   await rename(preparing,folder);
   const laterPeer=await checkCliPeers(selection,request,bytes,operation,logicalArgs,binding,folder);
-  if(laterPeer&&!context.prior_outcome_unknown){context.prior_outcome_unknown=true;await publish(path.join(folder,"context.json"),context);}
+  if(laterPeer&&!context.prior_outcome_unknown){context.prior_outcome_unknown=true;await publish(path.join(folder,"context.json"),context,{waitForPeerReaders:true});}
   parsed.options["--file"]=path.join(folder,"request.json");
   const journal = {folder,context,request,operation};
   ownedCliJournals.set(journal,{folder,request:structuredClone(request),operation,bytes,
