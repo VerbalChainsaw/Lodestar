@@ -7,12 +7,13 @@ import path from "node:path";
 import { smokePluginPackage } from "./smoke-plugin-package.mjs";
 
 const entry = path.resolve(process.argv[2] ?? ".package-smoke/node_modules/lodestar-agent-context/lodestar.mjs");
+const launcher = process.argv[3] ? path.resolve(process.argv[3]) : null;
 const temporaryRoot = await realpath(os.tmpdir());
 const directory = await mkdtemp(path.join(temporaryRoot, "lodestar-packed-smoke-"));
 const database = path.join(directory, "registry.db");
 let checks = 0;
 function run(args, expectedStatus = 0, expectedOk = expectedStatus === 0) {
-  const result = spawnSync(process.execPath, [entry, ...args, "--db", database], {
+  const result = spawnSync(launcher ?? process.execPath, [...(launcher ? [] : [entry]), ...args, "--db", database], {
     cwd: directory, encoding: "utf8", windowsHide: true, timeout: 60_000,
   });
   if (result.error) throw result.error;
@@ -80,7 +81,7 @@ try {
   assert.equal(run(["get", "smoke"]).data.semantics.lifecycle, "historical");
   assert.equal(run(["find", "packed"]).data.records.length, 0);
   const plugin = await smokePluginPackage(path.dirname(entry));
-  console.log(JSON.stringify({ ok: true, contract: 5, checks, entry,
+  console.log(JSON.stringify({ ok: true, contract: 5, checks, entry, launcher,
     explicit_initialization: true, observed_bases: true, exact_replay: true,
     unicode_and_line_endings: true, retirement: true,
     packaged_codex_policy: true, native_settings_preserved: true, local_policy_edits_preserved: true,

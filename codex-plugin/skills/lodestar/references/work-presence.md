@@ -16,3 +16,14 @@ Record what actually happened: attempted, interrupted, failed, completed, verifi
 unknown. A historical passing test remains historical after code changes. Keep external
 action success distinct from ledger persistence failure, and retry only the unchanged
 logical ledger request after a lost response.
+
+## Native Codex hook adapter
+
+Only when this separate adapter is installed and its tools are available, call
+`lodestar_work_start` with report text, `lodestar_work_done` with optional report
+and outcome, or `lodestar_work_status`. A verified outcome requires evidence;
+completed is the default. These record execution outcomes, not Director acceptance
+or project closure. The host supplies exact identity. The adapter derives a
+separate work ID from the canonical project, checkout and host session and checks
+record ownership before writing. Public tool inputs cannot override actor or
+session. The generic MCP plugin does not provide these host-bound tools.

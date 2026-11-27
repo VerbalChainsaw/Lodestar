@@ -15,8 +15,8 @@ are read-only. Native environments retain ownership of their settings and instru
 For current local evaluation, verify the candidate tarball against its own SHA-256
 inventory and use the isolated package procedure in the candidate's included
 `docs/installation.md`. Invoke that exact package with the selected Node runtime.
-Public npm/tag availability remains pending. After the verified 3.0.0 release is
-published, use these registry commands:
+The registry commands below select the retained 3.0.0 release. Do not substitute
+a local candidate version until its matching package has been published:
 
 ```bash
 npm install --global lodestar-agent-context@3.0.0
@@ -25,7 +25,7 @@ lodestar setup --target all --apply
 lodestar skills verify --target all
 ```
 
-After publication, the npm registry supplies the released package. `setup` plans
+The npm registry supplies the released package. `setup` plans
 owned payload changes before `--apply` performs them.
 Use `lodestar init` only to create an explicitly new store. Existing schema-5
 stores need no migration; for schema-4 stores, follow the maintained
@@ -123,3 +123,16 @@ plain shell must provide its identity explicitly for operations that require a c
 ```text
 lodestar handoff status --cwd .
 ```
+
+
+## Verified local candidates and client rollout
+
+Use the exact reviewed package, commit and complete file manifest; a version label alone does not identify the installed bytes. A global npm installation and a separately cached native plugin are different artifacts. Preserve customized installed code in a rollback copy and reconcile its owner before switching a shared launcher. A side-by-side verified installation permits preparation without silently overwriting those changes.
+
+Before changing skills, run the read-only setup plan with the actual native home (for portable Hermes, supply its real `--hermes-home`). Do not apply `--replace-local` across unrelated skills to remove warnings. Preserve host-specific instructions; merge the relevant Lodestar guidance and record any intentionally customized copies as such.
+
+Validate each existing client through its real tool/launcher route using version plus a bounded read. Configuration, matching skill files, a shell proxy, or another agent's success is not proof that a client loaded the update. Native Codex work/handoff tools require host attestation even for status. `Missing host attestation` must be resolved through the supported host integration; never fabricate a session identity, bypass the check, or replace the native adapter with a less capable plugin merely to get a green result.
+
+Full doctor can report cold history as `complete: false`, `healthy: null`; this is not a reason to restore history, clear warnings or call quick checks full certification. Keep restore/cleanup explicit and separately authorized. Cache generation checks detect ordinary changes, not same-user tampering with restored metadata; use explicit budgeted checksum revalidation after suspected alteration before consequential recovery.
+
+For rollout/rollback and per-client evidence, consult the installed package's `docs/installation.md` and the maintained repository `docs/client-deployment.md`. A successful CLI read does not prove automatic skill invocation or natural compaction-hook delivery.

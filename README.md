@@ -1,10 +1,18 @@
-# Lodestar
+# Lodestar 3
 
-**Give your next session a head start.**
+**Useful memory. A clear next step.**
 
-![A mountain trail at dawn beneath a guiding star](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
+![A mountain trail at dawn beneath a guiding star — explore Lodestar 3](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/docs/assets/lodestar-ridgeline.png)
 
-[Website](https://verbalchainsaw.github.io/Lodestar/) · [Install](docs/installation.md) · [Operator recipes](docs/operator-recipes.md) · [Release notes](docs/releases/v3.0.0.md) · [FAQ](Q&A.md)
+**[Explore the splash page](https://verbalchainsaw.github.io/Lodestar/) · [Published 3.0.0 downloads](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0) · [Installation guide](docs/installation.md)**
+
+[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [3.0.5 release notes](docs/releases/v3.0.5.md) · [FAQ](Q&A.md)
+
+This checkout targets **Lodestar 3.0.5**, paired with native Codex adapter
+**1.4.10**. It reduces routine hook activity, adds a bounded readback for
+compaction checkpoints and keeps all checked Lodestar tools on one native server.
+See the [release notes](docs/releases/v3.0.5.md). Check GitHub Releases for
+published assets and the matching checksum inventory. If this version has not been published to npm or GitHub, use only the verified local candidate artifacts.
 
 Lodestar keeps project context, decisions, evidence, and unfinished work in one
 local registry. Open **Loader** to see what needs attention, capture a useful
@@ -16,6 +24,20 @@ Use it when new sessions keep rediscovering project facts, revisiting settled
 decisions, or losing the thread of unfinished work. It provides a current starting
 point and a checked correction path. You and your native project instructions
 keep authority over the work.
+
+## Meet Loader and Manager
+
+![Lodestar Loader: project navigation, sortable records and a readable inspector in the graphite Windows console](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/site/assets/lodestar3-loader.png)
+
+*Actual Loader application window with demonstration data. [View full size](https://raw.githubusercontent.com/VerbalChainsaw/Lodestar/main/site/assets/lodestar3-loader.png).*
+
+| Loader · Windows desktop | Manager · Terminal menu | CLI · Coding agents |
+| --- | --- | --- |
+| Browse projects, sort and group records, inspect history, and review changes before saving. | Find records and use guided actions from a text menu. | Retrieve relevant context and make guarded updates through typed commands. |
+
+**One local store.** Decisions, evidence and unfinished work stay available across
+all three interfaces. [See the product](https://verbalchainsaw.github.io/Lodestar/#product)
+or follow an [operator recipe](docs/operator-recipes.md).
 
 ## New in 3.0
 
@@ -70,18 +92,23 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 ## Install
 
 The Windows package requires **Node.js 24.15.0 or newer**, **.NET 10
-Desktop Runtime (x64)** and **PowerShell 7**. Download `Lodestar-3.0.0-win-x64.zip`
-from the [3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0),
-verify its SHA-256 checksum, and extract the complete archive. Run `Install.cmd`,
+Desktop Runtime (x64)** and **PowerShell 7**. For the local candidate, use the
+locally built `Lodestar-3.0.5-win-x64.zip` and its matching SHA-256 inventory;
+see [local candidate installation](docs/installation.md#local-305-candidate).
+The [published 3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
+remains available separately. Verify and extract the complete archive. Run `Install.cmd`,
 then open Loader or Manager from the Start Menu.
 `Install.ps1 -Mode Plan` shows the selection before installation.
 `Setup.cmd` configures portable use. See [installation](docs/installation.md) for
 runtime selection, upgrades and recovery.
 
-The CLI alone requires **Node.js 24.15.0 or newer**. For a new installation:
+The CLI alone requires **Node.js 24.15.0 or newer**. On Linux x86_64, use the
+[native Linux CLI quickstart](docs/installation.md#native-linux-cli-x86_64) for
+a user-local install without Windows or WSL. The general npm route below uses
+the verified absolute path to the exact local candidate tarball:
 
 ```text
-npm install --global lodestar-agent-context@3.0.0
+npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.5.tgz"
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -172,7 +199,7 @@ to stderr using the same contract-5 envelope.
 
 ## Native integration
 
-The optional [Codex plugin bundle](.codex-plugin/plugin.json) provides the automatic
+The optional generic [Codex plugin bundle](.codex-plugin/plugin.json) provides the automatic
 Lodestar skill and three MCP tools:
 
 - `lodestar_describe` returns the maintained operating guide and installed command
@@ -186,11 +213,20 @@ the adapter and shared core remain together. Do not install `codex-plugin/` alon
 that was the broken layout in 2.1.3 and earlier. Follow the
 [optional plugin installation](docs/installation.md#optional-codex-plugin) steps.
 
-The adapter does not maintain hooks, a session cache, a receipt store, or its own
+The generic adapter does not maintain hooks, a session cache, a receipt store, or its own
 authority rules. It passes actor identity only when an actual host invocation can
 supply it; ordinary MCP transport cannot manufacture an authenticated user or
 session. Windows and WSL callers still cross the Windows-owned one-shot shim and
 never open SQLite from WSL.
+
+The separately versioned [native Codex adapter](native-codex/README.md) adds
+automatic startup context, prompt-bound work and handoff tools, pending-note
+capture, and opt-in compaction continuity. It preserves host authorization and
+exact-request recovery evidence in the plugin data directory while calling the
+same installed core. Its source and compatibility checks now live in this
+repository, and its skill is generated from the same maintained instructions.
+Choose the integration matching the required capabilities; keep one Lodestar
+plugin enabled. See [native installation](docs/installation.md#native-codex-adapter).
 
 ## Skills and package integrity
 

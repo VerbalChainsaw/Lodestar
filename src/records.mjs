@@ -1,18 +1,20 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { encodeReceiptStorage, decodeReceiptStorage, decodeReceiptRow, isExternalReceiptStorage, isRetiredReceipt } from "./receipt-storage.mjs";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { inspectLocalSourceSync } from "./bootstrap.mjs";
-import { resolveSourceLocator } from "./paths.mjs";
+import { resolveInputPath, resolveSourceLocator } from "./paths.mjs";
 
 import { lodestarError } from "./errors.mjs";
 import {
   admittedTransaction,
   assertSupportedSchema,
+  consumeAsyncResult,
   readMetadata,
   transactionRevision,
 } from "./database.mjs";
 import { assertJsonNumericDomain, canonicalStringify } from "./json.mjs";
-import { prepareProjectRoots, resolveProjectScope, sameMachinePath, validateProjectBindings } from "./project.mjs";
+import { prepareProjectRoots, resolveProject, resolveProjectScope, sameMachinePath, validateProjectBindings } from "./project.mjs";
 import { allocateRevision, currentRevision } from "./revisions.mjs";
 import { CONTRACT_VERSION } from "./schema.mjs";
 import { requireStoredRecordSemantics, storedSourceCorrection, validateStoredReceipt } from "./stored-semantics.mjs";
@@ -236,7 +238,7 @@ function storedJson(text, validate, identifiers) {
   }
 }
 export function parseStoredContent(text, identifiers = {}) {
-  return storedJson(text, validateContent, {
+  return storedJson(decodeReceiptStorage(text, identifiers), validateContent, {
     field: "content_json",
     ...identifiers,
   });
@@ -249,6 +251,7 @@ export function parseStoredMetadata(text, identifiers = {}) {
   });
 }
 function parsedRecord(row) {
+  row = decodeReceiptRow(row);
   const stored = parseStoredContent(row.content_json, { id: row.id });
   const metadata = stored._lodestar ?? {};
   requireStoredRecordSemantics(stored, { id: row.id });
@@ -519,7 +522,8 @@ function replaceRecord(
     input.type,
     input.name,
     input.scope,
-    input.content_json,
+    input.type === "mutation-receipt" && readMetadata(db).schema_version === "6"
+      ? encodeReceiptStorage(input.content_json, input.id) : input.content_json,
     current?.created_at ?? createdAt,
     updatedAt,
   );
@@ -642,6 +646,14 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
     const basis = value.write_basis;
     if (!plain(basis)) invalidMutation("write_basis must be an object.");
     exactKeys(basis, Object.keys(WRITE_BASIS_SCHEMA.properties), "write_basis");
+    if (!Array.isArray(basis.targets)) {
+      invalidMutation("write_basis.targets must be an array.", { field: "write_basis.targets" });
+    }
+    for (const field of ["project_scope", "checkout"]) {
+      if (!Object.hasOwn(basis, field) || (basis[field] !== null && typeof basis[field] !== "string")) {
+        invalidMutation(`write_basis.${field} must be null or a string.`, { field: `write_basis.${field}` });
+      }
+    }
     request = {
       v: CONTRACT_VERSION,
       request_id: value.request_id,
@@ -650,7 +662,7 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
       project_scope: basis.project_scope ?? null,
       checkout: basis.checkout ?? null,
       actor,
-      preconditions: (basis.targets ?? []).map((entry, index) => {
+      preconditions: basis.targets.map((entry, index) => {
         if (!plain(entry) || !Object.hasOwn(entry, "expected_revision")) {
           invalidMutation("Each write-basis target needs expected_revision.", { index });
         }
@@ -728,6 +740,12 @@ function beforeImage(db, id) {
 
 function targetRevision(db, target, decisionHeads) {
   if (target.kind === "record") {
+    if (target.id.startsWith("mutation-receipt:")) {
+      const receipt = rawRecordById(db, target.id);
+      if (!receipt) return null;
+      if (isRetiredReceipt(receipt.content_json, { id: target.id })) return Number(JSON.parse(receipt.content_json)._lodestar.revision);
+      return Number(parseStoredContent(receipt.content_json, { id: target.id })._lodestar.revision);
+    }
     const row = db.prepare("SELECT id, json_extract(content_json, '$._lodestar.revision') "
       + "AS revision FROM records WHERE id=?").get(target.id);
     if (!row) return null;
@@ -759,13 +777,30 @@ function targetRevision(db, target, decisionHeads) {
   return decisionHeads.get(target.scope).get(target.key) ?? null;
 }
 
-export function writeBasis(db, {
+export function writeBasis(db, options) {
+  return writeBasisWithBinding(db, options, resolveProjectScope);
+}
+
+// Use only within one synchronous, admitted read transaction; do not retain
+// the reader beyond it. No target revision or metadata is reused, and outside
+// a transaction no binding is memoized.
+export function projectionWriteBasisReader(db) {
+  const bindings = new Map();
+  return (options) => writeBasisWithBinding(db, options, (connection, projectScope, checkout) => {
+    if (!connection.isTransaction) return resolveProjectScope(connection, projectScope, checkout);
+    const key = JSON.stringify([projectScope, checkout]);
+    if (!bindings.has(key)) bindings.set(key, resolveProjectScope(connection, projectScope, checkout));
+    return bindings.get(key);
+  });
+}
+
+function writeBasisWithBinding(db, {
   projectScope = null,
   checkout = null,
   targets = [],
-} = {}) {
+} = {}, resolveBinding) {
   const metadata = readMetadata(db);
-  const binding = resolveProjectScope(db, projectScope, checkout);
+  const binding = resolveBinding(db, projectScope, checkout);
   const distinct = [...new Map([...targets, ...(binding?.binding_preconditions ?? []).map(({ target }) => target)].map((target, index) => {
     const normalized = normalizedTarget(target, `targets[${index}]`);
     return [targetKey(normalized), normalized];
@@ -792,17 +827,39 @@ function receiptId(request) {
     ])).digest("hex")}`;
 }
 
-function storedReceipt(db, id, expected = null) {
-  const row = rawRecordById(db, id);
-  if (!row) return null;
-  const record = parseStoredContent(row.content_json, { id });
+function receiptContent(row) {
+  const content = parseStoredContent(row.content_json, { id: row.id });
   if (row.type !== "mutation-receipt") {
     throw lodestarError("database_integrity", "A mutation receipt ID is owned by another record type.", {
-      identifiers: { id, type: row.type },
+      identifiers: { id: row.id, type: row.type },
     });
   }
-  return validateStoredReceipt(record, { id,
-    databaseInstanceId: readMetadata(db).database_instance_id, expected });
+  return content;
+}
+
+function receiptValue(row, content, databaseInstanceId, expected = null) {
+  return validateStoredReceipt(content, { id: row.id, databaseInstanceId, expected });
+}
+
+const sameReceiptRow = (left, right) => right !== null &&
+  ["id", "type", "name", "scope", "content_json", "created_at", "updated_at"]
+    .every(field => left[field] === right[field]);
+const receiptPreparations = new WeakMap();
+
+function nestedArchiveReplay(id) {
+  throw lodestarError("invalid_transaction", "An archived request cannot be replayed inside an existing transaction.", {
+    identifiers: { receipt_id: id },
+    action: "Finish the outer transaction and reconcile the exact request without holding a writer reservation.",
+  });
+}
+
+function changedReceipt(id) {
+  // This invocation wrote nothing; the observed historical request is unresolved.
+  // Keep the journal rather than treating its outcome as a known rejection.
+  throw lodestarError("revision_conflict", "The observed request receipt changed before replay admission.", {
+    identifiers: { receipt_id: id, committed: "unknown" },
+    action: "Inspect the exact saved request and current receipt. Do not submit this request as new work.",
+  });
 }
 
 export function mutate(db, operation, value, callback, {
@@ -812,16 +869,30 @@ export function mutate(db, operation, value, callback, {
   actor = null,
   project = null,
   resolveBinding = false,
+  receiptPreparation = null,
 } = {}) {
   validateIdentifier(operation, "operation");
   if (typeof callback !== "function" || callback.constructor?.name === "AsyncFunction") {
     invalidMutation("Mutation callbacks must be synchronous.");
   }
   const request = normalizeMutationRequest(value, { actor });
-  const payloadHash = createHash("sha256")
-    .update(canonicalStringify([operation, request])).digest("hex");
+  const requestKey = canonicalStringify([operation, request]);
+  const payloadHash = createHash("sha256").update(requestKey).digest("hex");
   const id = receiptId(request);
-  return admittedTransaction(db, () => {
+  const expected = { request_id: request.request_id,
+    database_epoch: request.database_epoch, operation, payload_sha256: payloadHash };
+  const nested = db.isTransaction;
+  let prepared = receiptPreparations.get(receiptPreparation) ?? null;
+  receiptPreparations.delete(receiptPreparation);
+  if (prepared && (prepared.db !== db || prepared.row.id !== id)) prepared = null;
+  // Options (for example a fallback actor) may change the normalized payload
+  // without changing its receipt ID. The observed row still fences execution,
+  // but the prepared decode is usable only for its exact normalized request.
+  if (prepared && prepared.requestKey !== requestKey) {
+    prepared = { row: prepared.row, instance: prepared.instance, external: prepared.external };
+  }
+  let deferred = null;
+  const admit = () => admittedTransaction(db, () => {
     assertSupportedSchema(db, database);
     const metadata = readMetadata(db, database);
     const revisionBefore = currentRevision(db);
@@ -839,8 +910,21 @@ export function mutate(db, operation, value, callback, {
         action: "Refresh the record after recovery and submit a new logical request.",
       });
     }
-    const receipt = storedReceipt(db, id, { request_id: request.request_id,
-      database_epoch: request.database_epoch, operation, payload_sha256: payloadHash });
+    const row = rawRecordById(db, id);
+    if (prepared && (!sameReceiptRow(prepared.row, row)
+      || prepared.instance !== metadata.database_instance_id)) changedReceipt(id);
+    let receipt = null;
+    if (row && (prepared ? prepared.external : isExternalReceiptStorage(row.content_json))) {
+      if (nested) nestedArchiveReplay(id);
+      if (!prepared || (!prepared.content && !prepared.value && !prepared.error)) {
+        deferred = { row, instance: metadata.database_instance_id, external: true };
+        return;
+      }
+      if (prepared.error) throw prepared.error;
+      receipt = prepared.value ?? receiptValue(row, prepared.content, prepared.instance, expected);
+    } else if (row) {
+      receipt = receiptValue(row, receiptContent(row), metadata.database_instance_id, expected);
+    }
     if (receipt) {
       if (receipt.payload_sha256 !== payloadHash) {
         throw lodestarError("request_conflict", "The request ID was already accepted with different input.", {
@@ -911,7 +995,7 @@ export function mutate(db, operation, value, callback, {
     } finally {
       activeMutations.delete(db);
     }
-    if (callbackResult && typeof callbackResult.then === "function") {
+    if (consumeAsyncResult(callbackResult)) {
       invalidMutation("Mutation callbacks must be synchronous.");
     }
     const data = plain(callbackResult) && Object.hasOwn(callbackResult, "data")
@@ -951,6 +1035,17 @@ export function mutate(db, operation, value, callback, {
       revision,
     };
   }, database);
+  const result = admit();
+  if (!deferred) return result;
+  // The first admission completed normally and made no changes. Capture the
+  // decoder result outside it; publish even a failure only after the fence.
+  prepared = deferred;
+  try {
+    prepared.value = receiptValue(prepared.row, receiptContent(prepared.row), prepared.instance, expected);
+  } catch (error) {
+    prepared.error = error;
+  }
+  return admit();
 }
 
 export function writeRecordSnapshot(db, value, {
@@ -1003,7 +1098,7 @@ function internalRecord(value) {
     name: value.name,
     scope: value.scope,
     priority: value.priority === undefined ? 0 : value.priority,
-    content: { state: value.availability ?? "unknown", value: value.data ?? {} },
+    content: { state: value.availability ?? "unknown", value: value.data },
     aliases: value.aliases ?? [],
     links: value.links ?? [],
     sources: value.sources ?? [],
@@ -1083,11 +1178,23 @@ function updateRecordValue(current, input) {
   });
 }
 
-export function preparePutEvidence(db, input, value) {
+export function preparePutEvidence(db, input, value, operation = null) {
   const request = normalizeMutationRequest(value);
   // Replay is settled under admission before applying any input. Its original
   // result remains available even if the source has since moved or disappeared.
-  if (storedReceipt(db, receiptId(request))) return {};
+  const row = rawRecordById(db, receiptId(request));
+  if (row) {
+    const external = isExternalReceiptStorage(row.content_json);
+    if (external && db.isTransaction) nestedArchiveReplay(row.id);
+    const content = receiptContent(row);
+    const instance = readMetadata(db).database_instance_id;
+    receiptValue(row, content, instance);
+    const prepared = {};
+    if (operation !== null) receiptPreparations.set(prepared, { db,
+      requestKey: canonicalStringify([operation, request]), row, instance, external,
+      ...(external ? { content } : {}) });
+    return prepared;
+  }
   const projectRoots = prepareProjectRoots(db, input);
   const current = input.mode === "update" ? normalizeRecord(getRecordById(db, input.id)) : null;
   const record = current ? updateRecordValue(current, input) : internalRecord(input.record);
@@ -1139,7 +1246,7 @@ export function putRecord(db, value, options = {}) {
   }
   const id = mode === "update" ? input.id : input?.record?.id;
   validateIdentifier(id, "input.id");
-  const prepared = preparePutEvidence(db, input, value);
+  const prepared = preparePutEvidence(db, input, value, "put");
   return mutate(db, "put", value, ({ request, revision, timestamp }) => {
     const data = applyPutInput(db, input, { revision, timestamp, ...prepared });
     // Non-blocking rediscovery interception for direct put create/update only
@@ -1149,7 +1256,7 @@ export function putRecord(db, value, options = {}) {
       ? [] : rejectionAdvisories(db, data, request.project_scope ?? null, request.checkout ?? null);
     return { data, changed_ids: data.revision === revision ? [id] : [],
       ...(next.length ? { next } : {}) };
-  }, { ...options, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
+  }, { ...options, receiptPreparation: prepared, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
 }
 
 function rejectionAdvisories(db, record, projectScope, requestCheckout) {
@@ -1233,6 +1340,38 @@ function assertRecordApplicability(db, record, request) {
   }
 }
 
+function assertCheckoutRebind(db, record, request) {
+  // A scope lookup alone echoes the requested checkout. Resolve the actual
+  // destination, including worktree identity and every canonical/member binding.
+  assertRecordApplicability(db, record, request);
+  const checkoutPath = resolveInputPath(request.checkout);
+  let directory = false;
+  try { directory = statSync(checkoutPath).isDirectory(); } catch { /* reported below */ }
+  if (!directory) throw lodestarError("invalid_input", "A checkout rebind requires an accessible destination directory.", {
+    identifiers: { id: record.id, checkout: request.checkout },
+    action: "Read the destination checkout context and retain its complete write_basis before rebinding.",
+  });
+  const destination = resolveProject(db, checkoutPath);
+  if (destination.scope !== request.project_scope
+    || !sameMachinePath(destination.checkout_root, request.checkout)) {
+    throw lodestarError("project_binding_conflict", "A checkout rebind must stay within the observed project and destination checkout.", {
+      identifiers: { id: record.id, requested: request.project_scope, current: destination.scope,
+        requested_checkout: request.checkout, current_checkout: destination.checkout_root },
+      action: "Read the destination checkout context and combine its complete write_basis with the target record's observed revisions.",
+    });
+  }
+  const supplied = new Map(request.preconditions.map((entry) => [targetKey(entry.target), entry]));
+  const missing = destination.binding_preconditions.filter(({ target, expected_revision }) =>
+    supplied.get(targetKey(target))?.expected_revision !== expected_revision);
+  if (missing.length) throw lodestarError("missing_precondition", "A checkout rebind needs the destination's complete observed mapping basis.", {
+    identifiers: { id: record.id, required_basis: writeBasis(db, {
+      projectScope: destination.scope, checkout: destination.checkout_root,
+      targets: missing.map(({ target }) => target),
+    }) },
+    action: "Read the destination checkout context and retain every binding target alongside the existing record revision.",
+  });
+}
+
 export function applyPutInput(db, input, {
   revision,
   timestamp,
@@ -1297,7 +1436,17 @@ export function applyPutInput(db, input, {
       // An explicit source correction still requires the stored origin scope.
       prior = { id, kind: existing.type, scope: existing.scope };
     }
-    assertRecordApplicability(db, prior, request);
+    const priorCheckout = prior.semantics?.applicability?.checkout;
+    const nextCheckout = record.semantics?.applicability?.checkout;
+    if (typeof priorCheckout === "string" && typeof nextCheckout === "string"
+      && !sameMachinePath(priorCheckout, nextCheckout)) {
+      // The admitted record revision pins the old binding. The request basis
+      // describes the destination; neither side may change canonical project.
+      assertRecordApplicability(db, prior, { ...request, checkout: priorCheckout });
+      assertCheckoutRebind(db, record, request);
+    } else {
+      assertRecordApplicability(db, prior, request);
+    }
   }
   // Registration establishes a project's identity; ordinary facts already have
   // an applicability. Project roots and canonical links are validated below.
@@ -1405,7 +1554,8 @@ function rawReadWriteBasis(db, row) {
 
 export function getRawRecord(db, identifier) {
   const id = resolveRecordId(db, identifier);
-  const rawRecord = rawRecordById(db, id);
+  const stored = rawRecordById(db, id);
+  const rawRecord = stored ? decodeReceiptRow(stored) : stored;
   return {
     raw_record: rawRecord,
     raw_associations: rawAssociations(db, id),
@@ -1416,12 +1566,14 @@ export function getRawRecord(db, identifier) {
 export function getRecordHistory(db, identifier) {
   const id = resolveRecordId(db, identifier);
   const versions = [];
+  const removed_receipts = [];
   const receipts = db.prepare("SELECT id,type,content_json FROM records "
     + "WHERE type IN ('mutation-receipt','migration-source') "
     + "ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
     .all();
   const databaseInstanceId = readMetadata(db).database_instance_id;
   for (const receipt of receipts) {
+    if(receipt.type === "mutation-receipt" && isRetiredReceipt(receipt.content_json,{id:receipt.id})) { removed_receipts.push(receipt.id); continue; }
     const content = parseStoredContent(receipt.content_json, { id: receipt.id });
     const data = receipt.type === "mutation-receipt"
       ? validateStoredReceipt(content, { id: receipt.id, databaseInstanceId }) : contentData(content);
@@ -1435,9 +1587,11 @@ export function getRecordHistory(db, identifier) {
       });
     }
   }
+  versions.sort((a,b)=>a.revision-b.revision||a.receipt_id.localeCompare(b.receipt_id)||a.sequence-b.sequence);
   return {
     id,
     versions,
+    ...(removed_receipts.length ? {removed_receipts,complete:false} : {}),
     current: beforeImage(db, id),
     write_basis: rawReadWriteBasis(db, rawRecordById(db, id)),
   };

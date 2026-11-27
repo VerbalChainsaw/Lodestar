@@ -10,3 +10,5 @@
 # Git checkout must not rewrite their manifest hashes under core.autocrlf.
 managed-assets/skills/** -text
 codex-plugin/skills/** -text
+# The independent native distribution is copied and qualified byte-for-byte.
+native-codex/** -text

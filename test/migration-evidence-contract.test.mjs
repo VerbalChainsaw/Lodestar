@@ -85,7 +85,7 @@ test("ordinary doctor gives the same selected schema4 conversion guidance", asyn
   assert.deepEqual(await readFile(file), before);
 });
 
-for (const version of ["3", "6", "future"]) {
+for (const version of ["3", "7", "future"]) {
   test(`schema ${version} refusal preserves the store and names matching-release recovery`, async (t) => {
     const { file } = await sourceFixture(t, { version });
     const before = await readFile(file);

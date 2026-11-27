@@ -1,3 +1,5 @@
+import { SCHEMA_VERSION } from '../src/schema.mjs';
+import { decodeReceiptStorage } from '../src/receipt-storage.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -102,7 +104,7 @@ test('OI C3 prepared basis rejects evidence drift; exact committed request repla
   assert.equal(replay.value.request.replayed,true);assert.equal(first.value.revision,replay.value.revision);
   const db=new DatabaseSync(f.database,{readOnly:true});try {
     const rows=db.prepare("SELECT content_json FROM records WHERE type='mutation-receipt'").all();
-    assert.equal(rows.filter(r=>JSON.parse(r.content_json).value.request_id==='exact-replay').length,1);
+    assert.equal(rows.filter(r=>JSON.parse(decodeReceiptStorage(r.content_json)).value.request_id==='exact-replay').length,1);
   } finally {db.close();}
 });
 
@@ -139,7 +141,7 @@ test('OI P1 active dependency precedes noisy orientation at node frontier; whole
 
 test('OI I1 help/version publish existing constants; selected identity labels source bytes and digests differ for same release',async t=>{
   const f=await fixture(t);
-  for(const args of [['help'],['version']]){const d=ok(await f.cli(args));assert.equal(d.version,'3.0.0');assert.equal(d.contract_version,5);assert.equal(d.schema_version,5);}
+  for(const args of [['help'],['version']]){const d=ok(await f.cli(args));assert.equal(d.version,JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8')).version);assert.equal(d.contract_version,5);assert.equal(d.schema_version,SCHEMA_VERSION);}
   const h=ok(await f.cli(['help'])),cap=h.operations.find(o=>o.id==='work.prepare-capture');
   assert.equal(cap.effect,'read');assert.equal(cap.input_schema,null);assert.equal(cap.mutation_request,null);assert.ok(cap.draft_schema.oneOf);
   const selected=await directInterfaceSelection(f.database);assert.match(selected.coreSourceDigest,/^[a-f0-9]{64}$/);assert.equal(selected.coreSourceBasis,'source_inventory');

@@ -120,7 +120,7 @@ public static class OperatorImprovementChecks
             var attention = await (Task<CliResult>)attentionMethod.Invoke(service, [project, "knowledge:operator-intent", CancellationToken.None])!;
             Require(attention.Success && attention.Envelope!.Value.GetProperty("data").GetProperty("sections").GetProperty("context").GetProperty("state").GetString() == "observed", "Coherent attention failed: " + attention.Message);
             Require(service.Runtime.GetType().GetProperty("CoreSourceDigest")?.GetValue(service.Runtime) is string digest && digest.Length == 64, "Exact observed core digest absent.");
-            Require(service.Capabilities?.ContractVersion == 5 && service.Capabilities.SchemaVersion == 5 && service.Runtime.CoreSourceBasis == "source_inventory", "Identity conflated release and contract/schema/source support.");
+            Require(service.Capabilities?.ContractVersion == 5 && service.Capabilities.SchemaVersion == 6 && service.Runtime.CoreSourceBasis == "source_inventory", "Identity conflated release and contract/schema/source support.");
             await using (var unsupported = new LodestarService(service.Runtime, async (invocation, cancellation) => {
                 var actual = await service.ExecuteAsync(invocation,cancellation);
                 if (invocation.OperationId == "help" && actual.Success) {

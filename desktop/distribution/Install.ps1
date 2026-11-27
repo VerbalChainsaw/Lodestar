@@ -85,6 +85,12 @@ try {
     # Freeze selection again under the actual operation lock.
     $freshReceipt=Read-InstallReceipt $target
     if(($null -eq $freshReceipt) -ne ($null -eq $receipt) -or ($freshReceipt -and $freshReceipt.id -cne $s.id)){throw 'install_selection_changed: ownership changed while acquiring the lock.'}
+    $allowOfflineHistory=[bool]($freshReceipt -and $freshReceipt.database -ieq $s.database -and
+        $freshReceipt.node -ieq $s.node -and -not $MigrateDatabase -and -not [IO.File]::Exists($s.request) -and
+        [IO.File]::Exists($s.database) -and
+        (($freshReceipt.phase -eq 'registered' -and $s.config) -or
+         ($Mode -eq 'Recover' -and $freshReceipt.phase -in @('preparing','promoted') -and
+          $freshReceipt.Contains('history_validation') -and $freshReceipt.history_validation.state -eq 'offline')))
     $paths=Get-BundlePaths $target
     if($Mode -eq 'Uninstall'){
         $stage='uninstall_validation'
@@ -172,7 +178,7 @@ try {
             if($recovered.state -eq 'pre_swap_stage_retained'){
                 if(-not $receipt.Contains('candidate_manifest_sha256') -or (Get-FileHash (Join-Path $paths.Stage 'distribution-manifest.json')).Hash -ine $receipt.candidate_manifest_sha256){throw 'install_stage_conflict: retained stage differs from the recorded candidate. Next action: preserve transaction artifacts and use the original verified candidate.'}
                 Test-DistributionPayload $paths.Stage -Configured|Out-Null
-                Invoke-InstallDatabase $paths.Stage $s.node $s.database $false $false '' ''|Out-Null
+                Invoke-InstallDatabase $paths.Stage $s.node $s.database $false $false '' '' -AllowOfflineHistory $allowOfflineHistory|Out-Null
                 Seal-BundleStage $paths|Out-Null
                 Invoke-BundleSwap $paths|Out-Null
             }
@@ -180,7 +186,7 @@ try {
         if(-not [IO.Directory]::Exists($target)){throw 'install_recovery_pending: no promoted app yet. Next action: inspect retained bundle transaction and rerun Install from the verified candidate after resolving its stage.'}
         $stage='database_reconciliation'
         Test-DistributionPayload $target -Configured|Out-Null
-        Invoke-InstallDatabase $target $s.node $s.database $false ($MigrateDatabase -or [IO.File]::Exists($s.request)) $s.request $s.backup|Out-Null
+        $dbValidation=Invoke-InstallDatabase $target $s.node $s.database $false ($MigrateDatabase -or [IO.File]::Exists($s.request)) $s.request $s.backup -AllowOfflineHistory $allowOfflineHistory
         Test-Bundle $target|Out-Null
         $manifest=Read-StrictJsonFile (Join-Path $target 'distribution-manifest.json') -AsHashtable -Contract distribution
     } else {
@@ -188,8 +194,13 @@ try {
         $stage='database_preparation'
         Assert-NotRunning $paths
         if($PreviousInstallation){Assert-BundleProcessesIdle @([IO.Path]::GetFullPath($PreviousInstallation))}
+        $newDatabase=-not [IO.File]::Exists($s.database)
+        if(-not $newDatabase -and -not $MigrateDatabase){
+            $dbValidation=Invoke-InstallDatabase $PSScriptRoot $s.node $s.database $false $false $s.request $s.backup -AllowOfflineHistory $allowOfflineHistory
+            if($dbValidation.Contains('history_validation')){$receipt.history_validation=$dbValidation.history_validation}
+        }
         $receipt.phase='preparing';$receipt.candidate_manifest_sha256=(Get-FileHash (Join-Path $PSScriptRoot 'distribution-manifest.json')).Hash.ToLowerInvariant();Write-InstallJson $s.receipt_path $receipt
-        Invoke-InstallDatabase $PSScriptRoot $s.node $s.database (-not [IO.File]::Exists($s.database)) ([bool]$MigrateDatabase) $s.request $s.backup $Fault|Out-Null
+        if($newDatabase -or $MigrateDatabase){$dbValidation=Invoke-InstallDatabase $PSScriptRoot $s.node $s.database $newDatabase ([bool]$MigrateDatabase) $s.request $s.backup $Fault}
         # Repeat at the same manifest generation needs no bundle rewrite.
         $same=[IO.File]::Exists((Join-Path $target 'distribution-manifest.json')) -and
             (Get-FileHash (Join-Path $target 'distribution-manifest.json')).Hash -eq (Get-FileHash (Join-Path $PSScriptRoot 'distribution-manifest.json')).Hash -and
@@ -205,17 +216,25 @@ try {
             }
             $stage='candidate_validation'
             Test-DistributionPayload $paths.Stage -Configured|Out-Null
-            Invoke-InstallDatabase $paths.Stage $s.node $s.database $false $false '' ''|Out-Null
+            $dbValidation=Invoke-InstallDatabase $paths.Stage $s.node $s.database $false $false '' '' -AllowOfflineHistory $allowOfflineHistory
             Seal-BundleStage $paths|Out-Null
             if($Fault -eq 'BeforeSwap'){throw 'install_interrupted: test interruption after sealing the candidate stage.'}
             $stage='application_promotion';Invoke-BundleSwap $paths|Out-Null
         }
+    }
+    if($dbValidation.Contains('history_validation')){
+        $receipt.history_validation=$dbValidation.history_validation
+    } elseif($receipt.Contains('history_validation')) {
+        $receipt.Remove('history_validation')
     }
     $receipt.phase='promoted';$receipt.version=$manifest.version;$receipt.inventory=@($manifest.files);Write-InstallJson $s.receipt_path $receipt
     if($Fault -eq 'AfterSwap'){throw 'install_interrupted: test interruption after application promotion.'}
     $stage='host_registration';Publish-InstallHostEntries $s.host $receipt.version
     if($Fault -eq 'AfterRegistration'){throw 'install_interrupted: test interruption after host entry publication.'}
     $receipt.phase='registered';Write-InstallJson $s.receipt_path $receipt
+    if($receipt.Contains('history_validation')){
+        Write-Warning "Current database checks passed; $($receipt.history_validation.unavailable_receipts) historical receipts remain unverified while the cold archive is unavailable. This installation did not restore or change that history."
+    }
     Write-Host "Installed Lodestar $($receipt.version) for this user. Application: $target. Database: $($s.database). Node: $($s.node). Loader and Manager shortcuts are verified."
 } catch {
     $message="Install mode '$Mode' stage '$stage' failed: $($_.Exception.Message)"

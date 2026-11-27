@@ -32,11 +32,50 @@ jobs:
         shell: pwsh
         run: |
           $version = node -p "require('./package.json').version"
-          Expand-Archive -LiteralPath "$env:RUNNER_TEMP/release/Lodestar-$version-win-x64.zip" -DestinationPath "$env:RUNNER_TEMP/extracted"
-          ./desktop/scripts/Test-Distribution.ps1 -BundlePath "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+          $archive = "$env:RUNNER_TEMP/release/Lodestar-$version-win-x64.zip"
+          $bundle = "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+          Expand-Archive -LiteralPath $archive -DestinationPath "$env:RUNNER_TEMP/extracted"
+          ./desktop/scripts/Test-Distribution.ps1 -BundlePath $bundle
+      - name: Test installer lifecycle
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          ./desktop/scripts/Test-Install.ps1 -BundlePath "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+      - name: Check desktop smoke fixture contracts
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $bundle = "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+          $node = (Get-Command node).Source
+          node desktop/tests/create-ui-fixture.mjs "$env:RUNNER_TEMP/ui-fixture" "$bundle/core/lodestar.mjs" $node "$bundle/Lodestar.Loader.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./desktop/Lodestar.Loader/Smoke/create-fixture.ps1 -OutputDirectory "$env:RUNNER_TEMP/loader-fixture" -NodePath $node -CliPath "$bundle/core/lodestar.mjs"
+      - name: Test distribution fault handling
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          ./desktop/scripts/Test-DistributionFaults.ps1 -BundleArchive "$env:RUNNER_TEMP/release/Lodestar-$version-win-x64.zip" -DistributionSource "$(Get-Location)/desktop/distribution"
+      - name: Test CMD launcher paths
+        shell: pwsh
+        run: ./desktop/scripts/Test-CmdPaths.ps1 -NodePath (Get-Command node).Source
+      - name: Test portable database boundary
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          ./desktop/scripts/Test-PortableDatabaseBoundary.ps1 -BundlePath "$env:RUNNER_TEMP/extracted/Lodestar-$version-win-x64"
+      - name: Record verified Windows archive checksum
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $archive = "$env:RUNNER_TEMP/release/Lodestar-$version-win-x64.zip"
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $line = "$hash  $([IO.Path]::GetFileName($archive))`n"
+          [IO.File]::WriteAllText("$env:RUNNER_TEMP/release/SHA256SUMS.txt", $line, [Text.UTF8Encoding]::new($false))
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lodestar-windows
-          path: ${{ runner.temp }}/release/Lodestar-*-win-x64.zip
+          path: |
+            ${{ runner.temp }}/release/Lodestar-*-win-x64.zip
+            ${{ runner.temp }}/release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

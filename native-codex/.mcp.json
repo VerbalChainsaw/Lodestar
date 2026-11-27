@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "lodestar": {
+      "cwd": ".",
+      "command": "node",
+      "args": ["./scripts/lodestar-mcp.mjs"],
+      "type": "stdio"
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -25,7 +26,7 @@ const writerSource = `
   stage('startup');
   const db = new DatabaseSync(process.argv[1]);
   stage('opened');
-  db.function('lodestar_write_contract', {}, () => 5);
+  db.function('lodestar_write_contract', {}, () => ${SCHEMA_VERSION});
   db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA cache_size=4; BEGIN IMMEDIATE');
   stage('transaction');
   db.prepare('UPDATE records SET name=?').run('u'.repeat(12000));
@@ -129,7 +130,7 @@ test("interrupted writer leaves a genuine hot journal; ordinary reads preserve i
   // journal header and rollback error below independently prove the spill.
   const fixtureRows = 12;
   const fixtureDb = new DatabaseSync(file);
-  fixtureDb.function("lodestar_write_contract", {}, () => 5);
+  fixtureDb.function("lodestar_write_contract", {}, () => SCHEMA_VERSION);
   fixtureDb.exec("BEGIN IMMEDIATE");
   const insert = fixtureDb.prepare("INSERT INTO records VALUES(?,?,?,?,?,?,?)");
   for (let i = 0; i < fixtureRows; i += 1) insert.run(`fact:${i}`, "fact", "c".repeat(12000), "project:test",

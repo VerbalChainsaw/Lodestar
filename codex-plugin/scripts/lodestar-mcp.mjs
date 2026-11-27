@@ -180,7 +180,7 @@ async function* messageFrames(stream) {
   if (!overflow && length) yield { bytes: Buffer.concat(parts, length) };
 }
 
-export async function callNativeTool(name, input = {}) {
+export async function callNativeTool(name, input = {}, { env = process.env } = {}) {
   validateToolInput(name, input);
   if (name === "lodestar_describe") return {
     contract: CONTRACT_VERSION,
@@ -197,14 +197,14 @@ export async function callNativeTool(name, input = {}) {
   if (name === "lodestar_read") {
     const command = READ_COMMANDS[input.operation];
     if (!command) throw new Error(`Unknown read operation: ${input.operation}`);
-    return await runInstalledLodestar([...command, ...(input.arguments ?? [])], { operation: input.operation, effect: "read" });
+    return await runInstalledLodestar([...command, ...(input.arguments ?? [])], { env, operation: input.operation, effect: "read" });
   }
   if (name === "lodestar_mutate") {
     if (!Object.hasOwn(MUTATION_OPERATIONS, input.operation)) {
       throw new Error(`Unknown mutation operation: ${input.operation}`);
     }
     return await runInstalledLodestar(mutationCommand(input.operation, input.request), {
-      input: `${JSON.stringify(input.request)}\n`,
+      env, input: `${JSON.stringify(input.request)}\n`,
       operation: input.operation, effect: ["put", "delete"].includes(input.operation) ? "record_write" : "domain_write",
       requestId: input.request?.request_id,
     });

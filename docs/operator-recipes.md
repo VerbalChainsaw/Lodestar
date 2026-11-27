@@ -5,6 +5,27 @@ is explicit. Work status describes saved records; it does not observe live agent
 Use **Connection** to check the selected Node executable, CLI and database before
 making a correction. Keep those exact selections during uncertain-save recovery.
 
+## Find current and historical work reports
+
+Lodestar keeps current and historical work reports in the same database.
+Open **Lodestar → Loader** from the Windows Start menu, select the project,
+then open **Work & handoff**. **Work status** shows saved current open reports;
+**Work history** retains past reports and outcomes. In the terminal Manager,
+select the project, choose **Work**, then **Current status** or **Full history**.
+Both interfaces use the database selected in **Connection**; they do not create
+a separate board or datastore.
+
+Status, startup work context and Attention omit records explicitly marked
+historical or superseded. History preserves those records. A current work report
+in a mapped historical project scope remains eligible: the record's lifecycle
+and its project's former scope are separate facts.
+
+An open report describes recorded work, not a running process. Check its last
+observation and reconcile the actual execution owner before reporting activity
+or correcting obsolete work. Use **Attention** and an exact intent's `work check`
+for requested outcomes, evidence and unresolved requirements. Delivery or inbox
+activity does not replace those canonical records or prove execution.
+
 ## Ask for the answer you need
 
 Loader's Commands search and Manager's **f** action finder use the installed
@@ -305,6 +326,14 @@ database before dispatch. After delivering a complete success response, the CLI
 retires only the duplicate journal created by that invocation. Interrupted or
 uncertain responses retain exact request bytes and receipt identity for
 reconciliation. Completed receipts do not count as unresolved saves.
+Manager journals include their selected interface config path so the CLI can
+verify the producer's complete binding before reusing its capture. Older or
+incomplete contexts without that path retain their files and receive a separate
+CLI capture; their presence alone cannot suppress recovery evidence.
+If replay response storage fails, a matching success receipt establishes a
+commit. A rejection from that replay leaves the earlier unresolved attempt
+unknown, even when the latest rejection says it did not commit. Receipt-read
+arguments are included only when an actual receipt ID is available.
 These directories contain private request data; keep them in trusted local
 storage and preserve their permissions. POSIX CLI journal files use mode 0600
 and directories 0700; Windows inherits the selected local directory's access
@@ -362,6 +391,10 @@ not change the current decisions. Bare `decision` means `decision show`;
 
 `export` produces private raw JSON evidence. It is not a SQLite backup image and
 cannot be supplied as a recovered image to doctor/recovery promotion.
+
+Manager catalog reads cap each CLI page at the remaining record budget. Their
+continuation uses the core's offset and revision, so resuming a bounded read
+does not repeat delivered records or silently switch to a newer snapshot.
 
 ## Review research freshness
 
