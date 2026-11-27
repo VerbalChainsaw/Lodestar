@@ -27,6 +27,23 @@ test("packaged setup plans read-only, installs, and repeats without creating con
   assert.equal((await manageSkills("verify", options)).verified, true);
 });
 
+test("setup leaves the externally owned center-multigeometry bundle outside its plan", async (t) => {
+  const home = await homeFor(t);
+  const external = path.join(home, ".agents", "skills", "center-multigeometry");
+  await mkdir(external, { recursive: true });
+  await writeFile(path.join(external, "SKILL.md"), "external center owner");
+  await writeFile(path.join(external, "manifest.json"), "external manifest");
+
+  const options = { home, target: "codex" };
+  const plan = await setup(options);
+  assert.ok(!plan.plans.some(({ target }) => target === external));
+  assert.ok(!plan.plans.some(({ target }) => path.basename(target) === "center-multigeometry"));
+  await setup({ ...options, apply: true });
+  assert.deepEqual((await readdir(external)).sort(), ["SKILL.md", "manifest.json"].sort());
+  assert.equal(await readFile(path.join(external, "SKILL.md"), "utf8"), "external center owner");
+  assert.equal(await readFile(path.join(external, "manifest.json"), "utf8"), "external manifest");
+});
+
 test("setup preserves unknown/local changes and preflights the whole selection before replacement", async (t) => {
   const home = await homeFor(t);
   const file = path.join(home, ".agents", "skills", "lodestar", "SKILL.md");
