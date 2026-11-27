@@ -60,6 +60,27 @@ function inputRecord() {
   };
 }
 
+test("start rejects missing and nondirectory cwd without selecting or changing project state", async (t) => {
+  const f = await fixture(t);
+  await f.create("p:cwd-check", "project", { roots: [f.root] });
+  const before = await readFile(f.database);
+  const notDirectory = path.join(f.root, "regular-file");
+  await writeFile(notDirectory, "not a directory");
+  for (const [cwd, cause] of [[path.join(f.root, "missing"), "ENOENT"], [notDirectory, "ENOTDIR"]]) {
+    const result = await f.cli(["start", "--cwd", cwd]);
+    assert.equal(result.code, 2);
+    assert.equal(result.value.ok, false);
+    assert.equal(result.value.error.code, "invalid_path");
+    assert.equal(result.value.error.identifiers.cause_code, cause);
+    assert.equal(result.value.scope.project, null);
+    assert.equal(result.value.data, undefined);
+    assert.deepEqual(await readFile(f.database), before);
+  }
+  const existing = await f.cli(["start", "--cwd", f.root]);
+  assert.equal(existing.code, 0);
+  assert.equal(existing.value.data.project.id, "p:cwd-check");
+});
+
 test("every public command help path is JSON and side-effect free", async (t) => {
   const directory = await temporaryDirectory(t);
   const file = path.join(directory, "missing", "lodestar.db");
