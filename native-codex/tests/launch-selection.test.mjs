@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -184,8 +184,19 @@ test('one host binding chooses the exact runtime in hook, MCP and direct CLI fix
   const query = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
     params: { name: 'lodestar_describe', arguments: {} } }) + '\n';
   const expectedNode = await realpath(process.execPath), expectedEntry = await realpath(cli);
-  assert.deepEqual(run(mcp, query).result.structuredContent, { node: expectedNode, entry: expectedEntry });
-  assert.deepEqual(run(expectedEntry, '', expectedNode), { selected: 'exact-local-core', node: expectedNode, entry: expectedEntry });
+  // Windows can report the same NTFS file under a short or long path. Verify
+  // identity rather than spelling, without accepting a copy of the runtime.
+  const identity = async (file) => {
+    const { dev, ino } = await stat(file, { bigint: true });
+    assert.notEqual(ino, 0n, 'the fixture requires a usable file identity');
+    return { dev, ino };
+  };
+  const identifyRuntime = async ({ node, entry, ...rest }) => ({
+    ...rest, node: await identity(node), entry: await identity(entry),
+  });
+  const expected = await identifyRuntime({ node: expectedNode, entry: expectedEntry });
+  assert.deepEqual(await identifyRuntime(run(mcp, query).result.structuredContent), expected);
+  assert.deepEqual(await identifyRuntime(run(expectedEntry, '', expectedNode)), { selected: 'exact-local-core', ...expected });
 
   const { boundRuntimeOptions } = await import(pathToFileURL(adapter));
   const old = boundRuntimeOptions(dataDir, env);
