@@ -5,7 +5,7 @@ and handoff tools, pending-note capture, and opt-in compaction continuity. It us
 the separately installed Lodestar core through that core's maintained transport.
 
 The adapter and core have independent versions. Adapter 1.4.9 targets Lodestar
-core 3.0.3. CI qualifies the native archive against the exact packed core from
+core 3.0.4. CI qualifies the native archive against the exact packed core from
 the same source revision on Windows. The core package's optional generic MCP plugin does
 not provide these native hooks; replacing this adapter with it would remove
 native continuity capabilities. Enable one Lodestar plugin for this host. The

@@ -101,7 +101,9 @@ test("deadline exits its runner while a finite fixture descendant still holds re
     while (Date.now() < until && !(await readFile(done, "utf8").catch(() => null)))
       await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(await readFile(done, "utf8"), "done", "The exact finite descendant must finish naturally before fixture removal.");
-    await rm(root, { recursive: true, force: true });
+    // The marker is written immediately before exit; Windows can retain the
+    // descendant's working-directory handle briefly after the write.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   await mkdir(path.join(root, "test"));
   // Allow both Windows process startups before the deadline, while keeping the

@@ -25,6 +25,14 @@ function Read-InstallReceipt([string]$Target) {
         $r['version'] -notmatch '^\d+\.\d+\.\d+$' -or $r['host'] -isnot [Collections.IDictionary]) {
         throw "install_receipt_conflict: '$file' does not prove this installation. Next action: preserve it and select the exact owned installation; do not overwrite the receipt."
     }
+    if($r.Contains('history_validation')){
+        $history=$r['history_validation']
+        if($history -isnot [Collections.IDictionary] -or $history.Count -ne 2 -or $history['state'] -cne 'offline' -or
+            ($history['unavailable_receipts'] -isnot [int] -and $history['unavailable_receipts'] -isnot [long]) -or
+            $history['unavailable_receipts'] -lt 1){
+            throw "install_receipt_conflict: '$file' has malformed historical validation evidence. Next action: preserve the receipt and reconcile with its exact verified installation."
+        }
+    }
     return $r
 }
 function Get-InstallHost([string]$Target,[string]$Id,[bool]$TestMode,[string]$TestHostRoot,[bool]$DesktopShortcut,[string]$TestRegistrySuffix='') {
@@ -141,12 +149,13 @@ function Publish-InstallHostEntries($HostPlan,[string]$Version) {
     $verified=Read-InstallRegistration $HostPlan
     foreach($field in $HostPlan.values.Keys){if($verified[$field] -cne $HostPlan.values[$field]){throw "install_registration_unconfirmed: '$field'. Next action: run Recover to reconcile owned registration."}}
 }
-function Invoke-InstallDatabase([string]$App,[string]$Node,[string]$Database,[bool]$Initialize,[bool]$Migrate,[string]$Request,[string]$Backup,[string]$Fault='') {
+function Invoke-InstallDatabase([string]$App,[string]$Node,[string]$Database,[bool]$Initialize,[bool]$Migrate,[string]$Request,[string]$Backup,[string]$Fault='',[bool]$AllowOfflineHistory=$false) {
     $helper=Join-Path $App 'core\src\install-database.mjs'
     if(-not [IO.File]::Exists($helper)){throw "install_helper_missing: '$helper'. Next action: use the complete current release; preserve the selected database."}
     $arguments=@($helper,'--db',$Database)
     if($Initialize){$arguments+='--initialize'}
     if($Migrate){$arguments+=@('--migrate','--request',$Request,'--backup',$Backup)}
+    if($AllowOfflineHistory){$arguments+='--allow-offline-history'}
     if($Fault -in @('AfterBackup','AfterRequest','AfterMigration')){$arguments+=@('--fault',$Fault)}
     $result=Invoke-CleanNode $Node $arguments -TimeoutMs 120000
     $parsed=Read-CliEnvelope $result 'install.database' @() ($Initialize -or $Migrate)

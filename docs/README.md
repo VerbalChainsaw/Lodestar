@@ -14,7 +14,7 @@ resume, missing context, source review and uncertain saves.
 | Check supported guarantees | [Limitations](limitations.md) |
 | Find common answers | [FAQ](../Q&A.md) |
 | Diagnose an installation or command failure | [Troubleshooting](../HEADACHES.md) |
-| Review the current local patch candidate | [3.0.3 release notes](releases/v3.0.3.md) |
+| Review the current local patch candidate | [3.0.4 release notes](releases/v3.0.4.md) |
 | Review the retained published 3.0 release | [3.0.0 release notes](releases/v3.0.0.md) |
 
 For exact arguments and accepted write fields, use the installed typed reference:
@@ -50,7 +50,7 @@ skill distributions are generated from the maintained Lodestar skill.
 
 The separate Windows Loader console and compatible menu Manager use this same core.
 See [installation](installation.md), [schema](schema.md), [limitations](limitations.md),
-and the [3.0.3 release notes](releases/v3.0.3.md). JSON command help exposes complete
+and the [3.0.4 release notes](releases/v3.0.4.md). JSON command help exposes complete
 mutation inputs. Ordinary local-source reads flag changed evidence without rewriting
 saved observations; explicit canonical project mappings preserve usable correction paths.
 
