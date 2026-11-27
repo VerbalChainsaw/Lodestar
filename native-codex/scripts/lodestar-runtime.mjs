@@ -307,6 +307,17 @@ async function installed(options = {}) {
   const transport = await import(pathToFileURL(path.join(root, "codex-plugin/scripts/lodestar-runtime.mjs")));
   return { ...transport, root, launch };
 }
+export async function coreMcpBinding(env = process.env) {
+  const launch = resolveLaunch(env);
+  if (!launch.args[0]) throw new Error("A discoverable installed Lodestar package entry is required");
+  const module = await import(pathToFileURL(path.join(path.dirname(launch.args[0]), "codex-plugin/scripts/lodestar-mcp.mjs")));
+  if (!Array.isArray(module.NATIVE_TOOLS) || typeof module.callNativeTool !== "function") {
+    throw new Error("The installed core does not expose typed Lodestar MCP operations");
+  }
+  const bound = { ...env, LODESTAR_NODE: launch.command, LODESTAR_ENTRY: launch.args[0] };
+  return { tools: module.NATIVE_TOOLS, call: (name, args) => module.callNativeTool(name, args, { env: bound }) };
+}
+
 async function runLodestar(args, input = "", options = {}) {
   const runtime = await installed(options);
   // Carry the selected installation into the transport without changing the host environment.

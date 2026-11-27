@@ -53,6 +53,40 @@ test('MCP rejects malformed requests and still serves the following ping', async
   assert.deepEqual(messages.at(-1), { jsonrpc: '2.0', id: 'still-alive', result: {} });
 });
 
+test('one native MCP exposes both host-attested and checked core tools on the selected runtime', async (t) => {
+  const data = await mkdtemp(path.join(os.tmpdir(), 'lodestar-combined-mcp-'));
+  t.after(() => rm(data, { recursive: true, force: true }));
+  const entry = process.env.LODESTAR_ENTRY;
+  assert.ok(entry, 'Set LODESTAR_ENTRY to the exact core candidate.');
+  const db = path.join(data, 'fixture.db');
+  const env = { ...process.env, LODESTAR_ENTRY: entry, LODESTAR_NODE: process.execPath,
+    LODESTAR_DB: db, PLUGIN_DATA: path.join(data, 'plugin') };
+  const init = spawnSync(process.execPath, [entry, 'init', '--db', db], { env, encoding: 'utf8', timeout: 15_000 });
+  assert.equal(init.status, 0, init.stderr);
+  const rpc = (id, method, params) => ({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) });
+  const call = (id, name, args = {}) => rpc(id, 'tools/call', { name, arguments: args });
+  const input = [rpc(1, 'tools/list'), call(2, 'lodestar_describe'),
+    call(3, 'lodestar_read', { operation: 'start', arguments: ['--cwd', data, '--compact'] }),
+    call(4, 'lodestar_read', { operation: 'get', arguments: ['--', 'knowledge:absent-fixture'] }),
+    call(5, 'lodestar_work_status'), rpc(6, 'ping')].map((msg) => JSON.stringify(msg)).join('\n') + '\n';
+  const child = spawnSync(process.execPath, [script], { input, env, encoding: 'utf8', timeout: 20_000,
+    windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  assert.equal(child.status, 0, child.stderr || child.error?.message);
+  const [list, describe, read, missing, native, ping] = child.stdout.trim().split('\n').map(JSON.parse);
+  const names = list.result.tools.map(({ name }) => name);
+  assert.equal(names.length, 11);
+  assert.equal(new Set(names).size, names.length);
+  for (const name of ['lodestar_read', 'lodestar_mutate', 'lodestar_describe', 'lodestar_work_status', 'lodestar_handoff_checkpoint']) {
+    assert.ok(names.includes(name), name);
+  }
+  assert.equal(describe.result.structuredContent.contract, 5);
+  assert.equal(read.result.structuredContent.ok, true);
+  assert.equal(missing.result.isError, true);
+  assert.equal(missing.result.structuredContent.error.code, 'record_not_found');
+  assert.match(native.error.message, /attestation/i);
+  assert.deepEqual(ping.result, {});
+});
+
 test('MCP discards an oversized frame, rejects invalid UTF-8 and serves an EOF-tail ping', () => {
   const input = Buffer.concat([
     Buffer.from('{"jsonrpc":"2.0","id":"too-large","method":"ping","padding":"'),

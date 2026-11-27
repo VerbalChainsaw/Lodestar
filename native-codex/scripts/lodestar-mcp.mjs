@@ -6,7 +6,7 @@ import { JSON_MAXIMUM_BYTES, parseNativeJson } from "./lodestar-json.mjs";
 
 import {
   executeHandoff, executeWork, HANDOFF_COMMANDS, HANDOFF_PACKET_SCHEMA,
-  WORK_COMMANDS, workToolCommand,
+  WORK_COMMANDS, workToolCommand, coreMcpBinding,
 } from "./lodestar-runtime.mjs";
 
 // Read from the manifest beside this script rather than a literal. A hardcoded version
@@ -117,6 +117,10 @@ export async function* messageFrames(stream) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const dataDir = resolvePluginData();
+  const coreTools = new Set(["lodestar_describe", "lodestar_read", "lodestar_mutate"]);
+  let core;
+  const bind = async () => core ??= await coreMcpBinding();
+
   let outputFailure = false;
   // A failed write also emits a stream error after rejecting its callback.
   process.stdout.on("error", () => { outputFailure = true; });
@@ -145,7 +149,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
           serverInfo: { name: "lodestar", version: pluginVersion() },
         });
         else if (message.method === "ping") await reply(message.id, {});
-        else if (message.method === "tools/list") await reply(message.id, { tools });
+        else if (message.method === "tools/list") {
+          let available = [];
+          try { available = (await bind()).tools.filter(({ name }) => coreTools.has(name)); }
+          catch { /* Keep native tool discovery available while the core is offline. */ }
+          await reply(message.id, { tools: [...tools, ...available] });
+        } else if (message.method === "tools/call" && coreTools.has(message.params?.name)) {
+          const result = await (await bind()).call(message.params.name, message.params.arguments ?? {});
+          await reply(message.id, { content: [{ type: "text", text: JSON.stringify(result) }],
+            structuredContent: result, isError: false });
+        }
         else if (message.method === "tools/call"
             && tools.some(({ name }) => name === message.params?.name)) {
           const run = workToolCommand(message.params.name) ? executeWork : executeHandoff;
@@ -159,7 +172,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         } else await reply(message.id, null, new Error(`Method not found: ${message.method}`), -32601);
       } catch (error) {
         if (outputFailure || error?.mcpOutput) throw error;
-        await reply(message.id, null, error);
+        if (message.method === "tools/call" && coreTools.has(message.params?.name) && (error?.toolResult || error?.envelope)) {
+          const result = error.toolResult ?? error.envelope;
+          await reply(message.id, { content: [{ type: "text", text: JSON.stringify(result) }],
+            structuredContent: result, isError: true });
+        } else await reply(message.id, null, error);
       }
     }
   } catch (error) {

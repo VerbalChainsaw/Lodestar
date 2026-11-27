@@ -8,7 +8,9 @@ The adapter and core have independent versions. Adapter 1.4.9 targets Lodestar
 core 3.0.2. CI qualifies the native archive against the exact packed core from
 the same source revision on Windows. The core package's optional generic MCP plugin does
 not provide these native hooks; replacing this adapter with it would remove
-native continuity capabilities. Enable one Lodestar plugin for this host.
+native continuity capabilities. Enable one Lodestar plugin for this host. The
+native adapter exposes both host-attested work/handoff tools and the selected
+core's checked describe, read, and mutate tools through the same server.
 
 Normal startup (and compaction with no matching binding) never reads the core
 database. For substantive project work, follow the current project instructions
