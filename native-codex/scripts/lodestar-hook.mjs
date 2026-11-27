@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   authorizePrompt, attestTool, captureNotes, startupContext,
-  checkpointForCompaction, recoverCompactForHook,
+  checkpointForCompaction, recoverCompactForHook, boundRuntimeOptions,
 } from "./lodestar-runtime.mjs";
 import { resolvePluginData } from "./lodestar-mcp.mjs";
 import { assertJsonValue, readHookJson } from "./lodestar-json.mjs";
@@ -74,5 +74,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === script) {
     process.stdout.write(JSON.stringify({ continue: false, stopReason: "lodestar_invalid_input",
       systemMessage: `Lodestar hook input rejected: ${error.message}` }));
   }
-  if (inputReady) process.stdout.write(JSON.stringify(await handleHook(input, resolvePluginData())));
+  if (inputReady) {
+    const dataDir = resolvePluginData();
+    process.stdout.write(JSON.stringify(await handleHook(input, dataDir, boundRuntimeOptions(dataDir))));
+  }
 }

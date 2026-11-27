@@ -6,7 +6,7 @@ import { JSON_MAXIMUM_BYTES, parseNativeJson } from "./lodestar-json.mjs";
 
 import {
   executeHandoff, executeWork, HANDOFF_COMMANDS, HANDOFF_PACKET_SCHEMA,
-  WORK_COMMANDS, workToolCommand, coreMcpBinding,
+  WORK_COMMANDS, workToolCommand, coreMcpBinding, boundRuntimeOptions,
 } from "./lodestar-runtime.mjs";
 
 // Read from the manifest beside this script rather than a literal. A hardcoded version
@@ -117,9 +117,10 @@ export async function* messageFrames(stream) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const dataDir = resolvePluginData();
+  const runtimeOptions = boundRuntimeOptions(dataDir);
   const coreTools = new Set(["lodestar_describe", "lodestar_read", "lodestar_mutate"]);
   let core;
-  const bind = async () => core ??= await coreMcpBinding();
+  const bind = async () => core ??= await coreMcpBinding(runtimeOptions.env, runtimeOptions.resolveRuntime);
 
   let outputFailure = false;
   // A failed write also emits a stream error after rejecting its callback.
@@ -166,6 +167,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
             `lodestar__${message.params.name}`,
             message.params.arguments ?? {},
             dataDir,
+            runtimeOptions,
           );
           await reply(message.id, { content: [{ type: "text", text: JSON.stringify(result) }],
             structuredContent: result, isError: false });

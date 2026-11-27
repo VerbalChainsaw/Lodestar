@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertJsonValue } from "./lodestar-json.mjs";
+import { assertJsonValue, parseNativeJson } from "./lodestar-json.mjs";
 
 export const HANDOFF_COMMANDS = Object.freeze([
   "arm", "status", "checkpoint", "now", "disarm",
@@ -264,6 +264,55 @@ function regularFile(file) {
   catch (error) { if (["ENOENT", "ENOTDIR"].includes(error.code)) return false; throw error; }
 }
 
+// Operator-owned host data only, never a project file or a hook argument.
+function readRuntimeBinding(dataDir, env) {
+  if (!dataDir) return null;
+  const file = path.join(dataDir, "runtime-binding.json");
+  let info;
+  try { info = lstatSync(file); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
+  try {
+    if (!info.isFile() || info.size < 1 || info.size > 4096) throw new Error("Expected a small regular file");
+    const config = parseNativeJson(readFileSync(file, "utf8"));
+    const fields = ["schema", "node", "entry", "version", "entry_sha256"];
+    if (!config || Object.keys(config).length !== fields.length ||
+        !fields.every((field) => Object.hasOwn(config, field)) ||
+        config.schema !== 1 || typeof config.version !== "string" ||
+        !/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/iu.test(config.version) ||
+        typeof config.entry_sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(config.entry_sha256)) {
+      throw new Error("Unsupported binding format");
+    }
+    const absoluteLocal = (value) => typeof value === "string" && value.length > 0 &&
+      (process.platform === "win32" ? /^[a-z]:[\\/]/iu.test(value) : value.startsWith("/") && !value.startsWith("//"));
+    if (!absoluteLocal(config.node) || !absoluteLocal(config.entry)) throw new Error("Absolute local paths required");
+    const command = realpathSync(config.node), entry = realpathSync(config.entry);
+    if (!absoluteLocal(command) || !absoluteLocal(entry) ||
+        !regularFile(command) || !regularFile(entry) || path.basename(entry) !== "lodestar.mjs") {
+      throw new Error("The selected executable or package entry is not a regular file");
+    }
+    const manifest = JSON.parse(readFileSync(path.join(path.dirname(entry), "package.json"), "utf8"));
+    if (manifest.name !== "lodestar-agent-context" || manifest.version !== config.version ||
+        createHash("sha256").update(readFileSync(entry)).digest("hex") !== config.entry_sha256) {
+      throw new Error("Selected package does not match the recorded version and entry digest");
+    }
+    if ((env.LODESTAR_NODE || env.LODESTAR_ENTRY) &&
+        (!env.LODESTAR_NODE || !env.LODESTAR_ENTRY ||
+          realpathSync(env.LODESTAR_NODE) !== command || realpathSync(env.LODESTAR_ENTRY) !== entry)) {
+      throw new Error("Explicit runtime selection conflicts with the installed binding");
+    }
+    return { command, args: [entry] };
+  } catch (error) {
+    throw new Error(`Lodestar runtime binding is invalid: ${error.message}`);
+  }
+}
+
+export function boundRuntimeOptions(dataDir, env = process.env) {
+  let launch;
+  // Pin once per hook or MCP process, but do no work during hint-only startup.
+  const resolveRuntime = () => launch ??= readRuntimeBinding(dataDir, env) ?? resolveLaunch(env);
+  return { env, resolveRuntime };
+}
+
 function resolveLaunch(env = process.env) {
   if (env.LODESTAR_NODE && env.LODESTAR_ENTRY) {
     return { command: env.LODESTAR_NODE, args: [env.LODESTAR_ENTRY] };
@@ -300,15 +349,15 @@ export function parseEnvelope(text) {
 }
 
 async function installed(options = {}) {
-  const launch = resolveLaunch(options.env ?? process.env);
+  const launch = options.resolveRuntime?.() ?? resolveLaunch(options.env ?? process.env);
   const entry = launch.args[0];
   if (!entry) throw new Error("A discoverable installed Lodestar package entry is required");
   const root = path.dirname(entry);
   const transport = await import(pathToFileURL(path.join(root, "codex-plugin/scripts/lodestar-runtime.mjs")));
   return { ...transport, root, launch };
 }
-export async function coreMcpBinding(env = process.env) {
-  const launch = resolveLaunch(env);
+export async function coreMcpBinding(env = process.env, resolveRuntime) {
+  const launch = resolveRuntime?.() ?? resolveLaunch(env);
   if (!launch.args[0]) throw new Error("A discoverable installed Lodestar package entry is required");
   const module = await import(pathToFileURL(path.join(path.dirname(launch.args[0]), "codex-plugin/scripts/lodestar-mcp.mjs")));
   if (!Array.isArray(module.NATIVE_TOOLS) || typeof module.callNativeTool !== "function") {
@@ -731,7 +780,7 @@ export async function compactRecoveryContext(input, dataDir, options = {}) {
   const status = read.exact.ok ? read.exact.data.data.state : "not_saved";
   const saved = read.exact.ok ? read.exact.data.data.checkpoint.references
     .find((reference) => reference.kind === "lodestar-work-check") : null;
-  const launch = resolveLaunch(options.env ?? process.env);
+  const launch = options.resolveRuntime?.() ?? resolveLaunch(options.env ?? process.env);
   const context = { version: 1, source: "current public Lodestar reads; supplied results are not test proof",
     checkpoint_status: status, pending_requests: pending.map(({ file }) => file),
     saved_checkpoint_matches_current: saved?.semantic_sha256 === read.semantic,
