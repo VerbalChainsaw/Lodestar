@@ -39,7 +39,7 @@ packed artifact. A rerun must not replace a package with different bytes.
 
 `native-codex/` is the maintained source for the separate native plugin;
 `native-codex/.codex-plugin/plugin.json` owns its independent version. The current
-candidate pair is native **1.4.7** with core **3.0.1**. Keep the generic package-root
+candidate pair is native **1.4.9** with core **3.0.3**. Keep the generic package-root
 plugin's hooks-free contract. Neither the native archive nor its tests belong in
 the core npm payload.
 
