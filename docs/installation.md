@@ -4,7 +4,7 @@ This checkout targets **Lodestar 3.0.3**. Use the release assets and matching
 SHA-256 inventory when available, or build and verify the candidate locally.
 The versioned files are `lodestar-agent-context-3.0.3.tgz`,
 `Lodestar-3.0.3-win-x64.zip`, and the separate native Codex adapter
-`lodestar-native-codex-1.4.9.tgz`.
+`lodestar-native-codex-1.4.9.tgz`. If this version has not been published to npm or GitHub, use only the verified local candidate artifacts.
 
 For **Loader or Manager on Windows**, install Node.js 24.15.0 or newer, the .NET 10
 Desktop Runtime (x64), and PowerShell 7. Verify and extract the whole Windows ZIP,

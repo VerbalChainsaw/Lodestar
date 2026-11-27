@@ -12,7 +12,7 @@ This checkout targets **Lodestar 3.0.3**, paired with native Codex adapter
 **1.4.9**. It reduces routine hook activity, adds a bounded readback for
 compaction checkpoints and keeps all checked Lodestar tools on one native server.
 See the [release notes](docs/releases/v3.0.3.md). Check GitHub Releases for
-published assets and the matching checksum inventory.
+published assets and the matching checksum inventory. If this version has not been published to npm or GitHub, use only the verified local candidate artifacts.
 
 Lodestar keeps project context, decisions, evidence, and unfinished work in one
 local registry. Open **Loader** to see what needs attention, capture a useful
