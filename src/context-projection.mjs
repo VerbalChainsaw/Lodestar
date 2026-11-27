@@ -1,11 +1,10 @@
 import { Buffer } from "node:buffer";
 import { canonicalStringify } from "./json.mjs";
 import { decisionProjection } from "./decision.mjs";
-import { normalizedForRows } from "./queries.mjs";
+import { normalizedForRows, orientationRows } from "./queries.mjs";
 import { sameMachinePath } from "./project.mjs";
 
 export const CONTINUITY_LIMITS = Object.freeze({ nodes: 256, edges: 1024, bytes: 128 * 1024 });
-const excluded = new Set(["mutation-receipt", "migration-source", "startup-snapshot", "pending", "decision-event", "work-event", "handoff-packet"]);
 const bytes = value => Buffer.byteLength(canonicalStringify(value), "utf8");
 const sorted = values => [...values].sort();
 
@@ -91,15 +90,9 @@ export function continuityProjection(db, project, { contract, plan, actual, delt
     phases[2].push([link.to_id, "intent_dependency", [], 2]);
   }
 
-  const scopeValues = [...scopes], placeholders = scopeValues.map(() => "?").join(",");
   // Look ahead by one row to disclose unknown wider coverage without loading it.
-  const orientation = db.prepare("SELECT * FROM records WHERE (scope IN (" + placeholders + ") OR "
-    + "(scope='global' AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN (" + placeholders + "))) "
-    + "AND json_extract(content_json,'$._lodestar.semantics.context_role')='orientation' "
-    + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') IN ('current','unresolved') "
-    + "AND type NOT IN (" + [...excluded].map(() => "?").join(",") + ") "
-    + "ORDER BY CASE WHEN type='rejection' THEN 0 ELSE 1 END,json_extract(content_json,'$._lodestar.priority') DESC,id LIMIT ?")
-    .all(...scopeValues, ...scopeValues, ...excluded, CONTINUITY_LIMITS.nodes + 1);
+  const orientation = orientationRows(db, [...scopes], { rejectionFirst: true,
+    limit: CONTINUITY_LIMITS.nodes + 1 });
   for (const row of orientation.slice(0, CONTINUITY_LIMITS.nodes)) phases[3].push([row.id, "orientation", [], 3]);
   if (orientation.length > CONTINUITY_LIMITS.nodes) cutoff("continuity_node_limit", contract.id,
     "Orientation exceeds the context node limit; wider coverage is unknown.");
@@ -113,15 +106,17 @@ export function continuityProjection(db, project, { contract, plan, actual, delt
   const decisionSelections = new Map();
   const accepted = new Map();
   let index = 0;
+  const seedMetadata = new Map();
   // Complete each explicit relevance band's dependency closure before admitting
   // the next band. Orientation can no longer exhaust the active node frontier.
   for (const phase of phases) {
     // Shortlist roots using persisted kind/priority before node admission. This
     // reads ranking columns only; full record inspections remain node-bounded.
-    const seedMetadata = new Map();
-    const ids = [...new Set(phase.map(([id]) => id))];
+    const ids = [...new Set(phase.map(([id]) => id))].filter(id => !seedMetadata.has(id));
     for (let offset = 0; offset < ids.length; offset += CONTINUITY_LIMITS.nodes) {
       const part = ids.slice(offset, offset + CONTINUITY_LIMITS.nodes);
+      // Cache absent IDs as well; associations may repeat them across bands.
+      for (const id of part) seedMetadata.set(id, null);
       for (const row of db.prepare("SELECT id,type,CASE WHEN json_valid(content_json) THEN json_extract(content_json,'$._lodestar.priority') ELSE 0 END AS priority FROM records WHERE id IN ("
         + part.map(() => "?").join(",") + ")").all(...part)) seedMetadata.set(row.id, row);
     }

@@ -1,0 +1,66 @@
+{
+  "description": "Load Lodestar state and authorize exact Lodestar continuity commands.",
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "lodestar_(handoff_(arm|status|checkpoint|now|disarm)|work_(start|done|status))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/lodestar-hook.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

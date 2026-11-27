@@ -160,3 +160,27 @@ dependent action. A linked evidence version can be stale even if `get` finds the
 record; compare revisions and rerun `work check`. A recorded `passed` status or
 `ready_to_review` is a supplied mapping for review, never independent proof that a
 test ran.
+
+## Native Codex hook adapter tools
+
+Only when this separate adapter is installed and its tools are available, use
+`lodestar_handoff_arm`, `lodestar_handoff_status`, `lodestar_handoff_checkpoint`,
+`lodestar_handoff_now`, and `lodestar_handoff_disarm`. An exact user command
+authorizes one write; status requires host identity but no spoken command. Hooks
+bind canonical tool name, exact arguments, session, turn, cwd, tool-use ID, expiry
+and a single-use token. Public inputs cannot supply identity or attestation.
+
+The packet is preserved after secret redaction as a typed `codex-plugin-packet`
+checkpoint reference. The core validates the checkpoint; packet entries remain
+source evidence. `now` saves its packet before requesting transfer. SessionStart
+reads context and does not claim transfers. Status lists project transfers;
+writes target only the deterministic project/checkout/session-owned ID. Explicit
+claim uses the maintained core, not these native tools.
+
+User and assistant tails are typed conversation-tail references appended only to
+an open session-owned checkpoint. Hooks never create or reopen a transfer from
+tail capture. Capture failures are reported. Guarded requests are journaled
+before dispatch; an unknown outcome retains the exact operation, request ID,
+body and basis for identical replay. Never replace its basis until rejection is
+confirmed. Preserve the plugin's data directory across upgrades. The generic MCP
+plugin does not provide this native journal or these hooks.

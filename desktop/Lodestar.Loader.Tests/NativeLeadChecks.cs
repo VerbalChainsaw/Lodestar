@@ -1,9 +1,84 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Lodestar.Loader;
 
 public static class NativeLeadChecks
 {
+    private static async Task<string> ReadFixtureMarkerAsync(string marker, int maxSharingDelays = 20,
+        Action<IOException>? sharingObserved = null)
+    {
+        IOException? firstSharingFailure = null;
+        for (var delays = 0; ; delays++)
+        {
+            try { return File.ReadAllText(marker); }
+            catch (IOException error) when (error.HResult == unchecked((int)0x80070020))
+            {
+                firstSharingFailure ??= error;
+                sharingObserved?.Invoke(error);
+                if (delays >= maxSharingDelays)
+                    ExceptionDispatchInfo.Capture(firstSharingFailure).Throw();
+                // Atomic publication prevents partial JSON, but a Windows file
+                // observer can briefly deny sharing after the rename completes.
+                await Task.Delay(5);
+            }
+        }
+    }
+
+    public static async Task MarkerSharingAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ll-marker-sharing-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var marker = Path.Combine(root, "owned-pids.json");
+        const string bytes = "{\"parent\":41,\"descendant\":42}";
+        try
+        {
+            File.WriteAllText(marker, bytes);
+            IOException? observed = null;
+            using (var holder = new FileStream(marker, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var pending = ReadFixtureMarkerAsync(marker, sharingObserved: error =>
+                {
+                    observed = error;
+                    holder.Dispose();
+                });
+                if (observed?.HResult != unchecked((int)0x80070020))
+                    throw new Exception("Marker fixture did not exercise a blocked Windows sharing read.");
+                if (await pending.WaitAsync(TimeSpan.FromSeconds(1)) != bytes)
+                    throw new Exception("Marker sharing recovery changed the exact published bytes.");
+            }
+
+            var failures = new List<IOException>();
+            var elapsed = Stopwatch.StartNew();
+            using (var holder = new FileStream(marker, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                IOException? exhausted = null;
+                try
+                {
+                    await ReadFixtureMarkerAsync(marker, maxSharingDelays: 2, sharingObserved: failures.Add)
+                        .WaitAsync(TimeSpan.FromSeconds(1));
+                }
+                catch (IOException error) { exhausted = error; }
+                if (failures.Count != 3 || exhausted is null || !ReferenceEquals(exhausted, failures[0]) ||
+                    exhausted.HResult != unchecked((int)0x80070020))
+                    throw new Exception("Exhausted marker sharing reads lost their first cause or exceeded their exact delay budget.");
+            }
+
+            File.WriteAllText(marker, "{\"parent\":");
+            var malformedRejected = false;
+            try { using var parsed = JsonDocument.Parse(await ReadFixtureMarkerAsync(marker)); }
+            catch (JsonException) { malformedRejected = true; }
+            if (!malformedRejected) throw new Exception("Malformed ownership marker was accepted.");
+            var missingRetried = false;
+            var missingRejected = false;
+            try { await ReadFixtureMarkerAsync(Path.Combine(root, "missing.json"), sharingObserved: _ => missingRetried = true); }
+            catch (FileNotFoundException) { missingRejected = true; }
+            if (!missingRejected || missingRetried) throw new Exception("A missing marker was swallowed or treated as a sharing failure.");
+            Console.WriteLine($"Fixture marker sharing: blocked read recovered exact bytes; exhausted delays=2, attempts={failures.Count}, first HRESULT=0x{failures[0].HResult:X8}, elapsedMs={elapsed.ElapsedMilliseconds}; malformed/missing markers rejected.");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private static void VerifyDescendantAcknowledgement(int acknowledgedPid, string? acknowledgedNonce,
         int expectedPid, string nonce, bool candidateExited)
     {
@@ -24,6 +99,54 @@ public static class NativeLeadChecks
         Console.WriteLine("Fixture ownership controls: fresh live acknowledgement accepted; wrong PID, stale nonce and exited candidate rejected.");
     }
 
+    private static string PreparePipeFixtureRoot(string root, Func<string> resolveNode)
+    {
+        var node = resolveNode();
+        Directory.CreateDirectory(root);
+        return node;
+    }
+
+    private static void WritePipeFixture(string root, string database, string cli, string source)
+    {
+        try
+        {
+            File.WriteAllText(database, "Synthetic transport file; no database is opened.");
+            File.WriteAllText(cli, source);
+        }
+        catch (Exception primary)
+        {
+            try { Directory.Delete(root, true); }
+            catch (Exception cleanup) { throw new AggregateException("Pipe fixture generation and cleanup both failed.", primary, cleanup); }
+            throw;
+        }
+    }
+
+    public static Task PipeSetupFailureAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ll-pipe-setup-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var missingRejected = false;
+            try { PreparePipeFixtureRoot(root, () => TestNodeRuntime.Resolve(null, "")); }
+            catch (InvalidOperationException error) when (error.Message.Contains("Node was not found")) { missingRejected = true; }
+            if (!missingRejected || Directory.Exists(root))
+                throw new Exception("Missing runtime inputs allocated or retained the exact pipe fixture root.");
+
+            PreparePipeFixtureRoot(root, () => "fixture-node");
+            var database = Path.Combine(root, "unused.db");
+            var blockedCli = Path.Combine(root, "finite-cli.mjs");
+            Directory.CreateDirectory(blockedCli);
+            var writeRejected = false;
+            try { WritePipeFixture(root, database, blockedCli, "fixture source"); }
+            catch (UnauthorizedAccessException) { writeRejected = true; }
+            if (!writeRejected || Directory.Exists(root))
+                throw new Exception("Failed fixture generation lost its original cause or retained partial files.");
+            Console.WriteLine("Fixture setup controls: no runtime inputs allocated no root; blocked CLI write preserved its cause and removed the exact partial fixture.");
+            return Task.CompletedTask;
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     public static async Task PipeDeadlineAsync()
     {
         DescendantOwnershipControls();
@@ -32,8 +155,7 @@ public static class NativeLeadChecks
         {
             var inheritedPipes = outcome != "complete";
             var root = Path.Combine(Path.GetTempPath(), "ll-pipe-deadline-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(root);
-            var node = TestNodeRuntime.Resolve();
+            var node = PreparePipeFixtureRoot(root, TestNodeRuntime.Resolve);
             var marker = Path.Combine(root, "owned-pids.json");
             var spawnError = Path.Combine(root, "spawn-error.json");
             var ready = Path.Combine(root, "ready");
@@ -41,7 +163,6 @@ public static class NativeLeadChecks
             var acknowledgement = Path.Combine(root, "ownership-acknowledgement.json");
             var cli = Path.Combine(root, "finite-cli.mjs");
             var database = Path.Combine(root, "unused.db");
-            File.WriteAllText(database, "Synthetic transport file; no database is opened.");
             var operation = mutation ? "put" : "get";
             var stdio = inheritedPipes ? "['ignore','inherit','inherit']" : "'ignore'";
             var childSource = "const fs=require('node:fs');process.stdout.on('error',()=>{});process.stderr.on('error',()=>{});process.stderr.write(Buffer.from([0xc3]));fs.writeFileSync(process.argv[1],\"ready\");" +
@@ -62,7 +183,7 @@ public static class NativeLeadChecks
                 JsonSerializer.Serialize(marker + ".tmp") + "," + JsonSerializer.Serialize(marker) + ");" +
                 "const wait=setInterval(()=>{if(!existsSync(" + JsonSerializer.Serialize(ready) + "))return;clearInterval(wait);" +
                 "console.log(JSON.stringify({v:5,ok:true,operation:'" + operation + "',revision:null,database_instance_id:null,database_epoch:null,more:false,next:[],data:{fixture:true}}));process.exit(0);},5);";
-            File.WriteAllText(cli, source);
+            WritePipeFixture(root, database, cli, source);
             var runtime = new RuntimeSelection("fixture", "fixture", node, cli, database, "fixture");
             Process? parentHandle = null, descendantHandle = null;
             int parent = 0, descendant = 0;
@@ -85,7 +206,7 @@ public static class NativeLeadChecks
             async Task ReadOwnersAsync()
             {
                 if (!File.Exists(marker)) return;
-                using var pids = JsonDocument.Parse(File.ReadAllText(marker));
+                using var pids = JsonDocument.Parse(await ReadFixtureMarkerAsync(marker));
                 var identity = pids.RootElement;
                 if (parentHandle is null || identity.GetProperty("parent").GetInt32() != parent)
                     throw new Exception("Fixture marker does not belong to the exact observed CLI parent.");
@@ -114,7 +235,7 @@ public static class NativeLeadChecks
                             throw new Exception("Fixture descendant did not publish its ownership acknowledgement within one second.");
                         await Task.Delay(5);
                     }
-                    using var proof = JsonDocument.Parse(File.ReadAllText(acknowledgement));
+                    using var proof = JsonDocument.Parse(await ReadFixtureMarkerAsync(acknowledgement));
                     VerifyDescendantAcknowledgement(proof.RootElement.GetProperty("pid").GetInt32(),
                         proof.RootElement.GetProperty("nonce").GetString(), descendant, nonce, candidate.HasExited);
                     descendantHandle = candidate;

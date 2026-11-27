@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "state": "/absolute/private/lodestar-proposals.json",
+  "maxProposals": 300,
+  "sources": [
+    {"id":"codex-one","project":"project-a","format":"codex","path":"/absolute/private/selected-codex-rollout.jsonl","start":"end"},
+    {"id":"claude-one","project":"project-a","format":"claude","path":"/absolute/private/selected-claude-session.jsonl","start":"end"}
+  ]
+}

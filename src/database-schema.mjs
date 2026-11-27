@@ -184,7 +184,7 @@ export function schemaVersionGuidance(file, actual) {
 
 export function assertSupportedSchema(db, file = null) {
   const metadata = readMetadata(db, file);
-  if (metadata.schema_version !== String(SCHEMA_VERSION)) {
+  if (!["5", String(SCHEMA_VERSION)].includes(metadata.schema_version)) {
     throw lodestarError(
       "unsupported_schema",
       "The database schema version is not supported.",
@@ -246,7 +246,7 @@ export function assertSupportedSchema(db, file = null) {
       },
     );
   }
-  const schema = inspectSchemaDefinitions(db);
+  const schema = inspectSchemaDefinitions(db, { version: Number(metadata.schema_version) });
   if (!schema.matches) {
     throw lodestarError(
       "invalid_database",

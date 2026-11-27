@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fixture } from './helpers/contract.mjs';
@@ -107,7 +108,7 @@ test('an exact confirmed replacement receipt replays before new predecessor admi
   // would be refused for a new request. This disposable corruption does not
   // authenticate a domain record; it only proves replay/admission ordering.
   const db = new DatabaseSync(f.database);
-  db.function('lodestar_write_contract', () => 5);
+  db.function('lodestar_write_contract', () => SCHEMA_VERSION);
   db.prepare("UPDATE records SET type='work' WHERE id=?").run('fact:replay-predecessor');
   db.close();
   const before = await f.cli(['export']);

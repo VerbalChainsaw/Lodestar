@@ -110,3 +110,11 @@ and confirm the current `work check` reflects the accepted work. See
 3. Submit one logical update with the returned basis and complete semantics.
 4. If persistence fails, report it and retry the same request safely.
 5. A later session receives the corrected current record automatically.
+
+When the separate native Codex hook adapter is installed and its tools are
+available, use the host-bound work and handoff inputs described in
+[work-presence.md](references/work-presence.md) and
+[continuity.md](references/continuity.md). The generic MCP plugin does not expose
+those hooks or tools. Native `LODESTAR NOTE:` capture redacts and deduplicates
+notes, limits capture to three per message, and stores unresolved candidates
+outside startup knowledge; it does not turn conversation text into authority.

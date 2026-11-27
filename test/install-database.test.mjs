@@ -8,6 +8,8 @@ import { DatabaseSync } from "node:sqlite";
 import { SCHEMA_V4_SQL } from "../src/schema.mjs";
 import { migrationPreflight } from "../src/schema-migration.mjs";
 import { prepareInstallDatabase } from "../src/install-database.mjs";
+import { openConnection, admittedTransaction } from "../src/database.mjs";
+import { archivedReceiptPointer } from "../src/receipt-storage.mjs";
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "lodestar-install-db-"));
@@ -32,6 +34,45 @@ test("installer initializes only explicitly and current store validation preserv
   const bytes = await readFile(f.database);
   assert.equal((await prepareInstallDatabase(f)).healthy, true);
   assert.deepEqual(await readFile(f.database), bytes);
+});
+test("only a validated existing-store upgrade can leave cold history offline", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(prepareInstallDatabase({ ...f, allowOfflineHistory: true }), { code: "database_not_found" });
+  await assert.rejects(prepareInstallDatabase({ ...f, allowOfflineHistory: true, initialize: true }), { code: "invalid_option" });
+  await assert.rejects(prepareInstallDatabase({ ...f, allowOfflineHistory: true, migrate: true }), { code: "invalid_option" });
+  await prepareInstallDatabase({ ...f, initialize: true });
+  const id = `mutation-receipt:${"a".repeat(64)}`;
+  function insert(id, type, body) {
+    const db = openConnection(f.database);
+    try {
+      admittedTransaction(db, () => db.prepare("INSERT INTO records VALUES(?,?,?,?,?,?,?)").run(
+        id, type, id, "global", body, "2026-10-29T00:00:00.000Z", "2026-10-29T00:00:00.000Z"));
+    } finally { db.close(); }
+  }
+  insert(id, "mutation-receipt", archivedReceiptPointer(id, 1, path.join(f.root, "missing-manifest.json"), "b".repeat(64)));
+  const before = await readFile(f.database);
+  await assert.rejects(prepareInstallDatabase(f), { code: "archive_restore_required" });
+  const result = await prepareInstallDatabase({ ...f, allowOfflineHistory: true });
+  assert.equal(result.healthy, null);
+  assert.equal(result.complete, false);
+  assert.equal(result.created, false);
+  assert.equal(result.migrated, false);
+  assert.deepEqual(result.history_validation, { state: "offline", unavailable_receipts: 1 });
+  assert.deepEqual(await readFile(f.database), before);
+  assert.equal(existsSync(f.migrationRequestPath), false);
+  assert.equal(existsSync(f.backupPath), false);
+  const manifest = path.join(f.root, "missing-manifest.json");
+  for (const invalidManifest of ["{", "null", '{"format":"isolated-lean-candidate-v1"}']) {
+    await writeFile(manifest, invalidManifest);
+    await assert.rejects(prepareInstallDatabase({ ...f, allowOfflineHistory: true }), { code: "record_content_invalid" });
+    assert.deepEqual(await readFile(f.database), before);
+  }
+  await rm(manifest);
+  insert("invalid:current", "note", '{"state":"known","value":{}}');
+  const mixed = await readFile(f.database);
+  await assert.rejects(prepareInstallDatabase({ ...f, allowOfflineHistory: true }),
+    (error) => error.code !== "archive_restore_required" && error.code !== "invalid_option");
+  assert.deepEqual(await readFile(f.database), mixed);
 });
 test("schema4 requires explicit migration and independent restore-tested backup", async (t) => {
   const f = await fixture(t); oldStore(f.database);

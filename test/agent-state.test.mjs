@@ -4,6 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fixture } from './helpers/contract.mjs';
 import { normalizeMachinePath } from '../src/project.mjs';
+import { startProjection } from '../src/agent-state.mjs';
+import { openReadDatabase } from '../src/database.mjs';
 const actor = { id: 'agent:one', agent: 'agent', session: 'one', harness: 'test' };
 
 test('Windows and WSL path dialects normalize to one project path', () => {
@@ -25,6 +27,41 @@ test('automatic context selects orientation, scoped global dependencies, and com
   assert.equal(start.value.data.context[1].data.text.length, 90000);
   const topic = await f.cli(['start', '--cwd', f.root, '--topic', 'needed']);
   assert.equal(topic.value.data.context.filter(({ id }) => id === 'fact:needed').length, 1);
+});
+
+test('orientation filters by covered ID before JSON lookup and retains scoped visibility', async (t) => {
+  const f = await fixture(t);
+  await f.create('project:test', 'project', { roots: [f.root] }, 'project:test');
+  await f.create('project:other', 'project', { roots: [path.join(f.root, 'other')] }, 'project:other');
+  const orientation = { context_role: 'orientation', lifecycle: 'current' };
+  await f.create('fact:local', 'fact', {}, 'project:test', orientation);
+  await f.create('fact:global-match', 'fact', {}, 'global', {
+    ...orientation, applicability: { project: 'project:test', checkout: null },
+  });
+  await f.create('fact:global-other', 'fact', {}, 'global', {
+    ...orientation, applicability: { project: 'project:other', checkout: null },
+  });
+  await f.create('fact:old', 'fact', {}, 'project:test', { ...orientation, lifecycle: 'superseded' });
+  const db = await openReadDatabase(f.database);
+  try {
+    const prepare = db.prepare.bind(db);
+    let plan;
+    db.prepare = (sql) => {
+      const statement = prepare(sql);
+      if (!sql.includes('semantics.context_role')) return statement;
+      return { all(...args) {
+        plan = prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map(({ detail }) => detail);
+        return statement.all(...args);
+      } };
+    };
+    const project = { scope: 'project:test', cwd: f.root, checkout_root: f.root, historical_scopes: [] };
+    const result = startProjection(db, project, actor);
+    assert.deepEqual(result.data.context.map(({ id }) => id), ['fact:global-match', 'fact:local']);
+    assert.ok(plan?.some((step) => /USING COVERING INDEX records_scope_type_id/u.test(step)), plan?.join('\n'));
+    assert.ok(plan.some((step) => /USING PRIMARY KEY \(id=\?\)/u.test(step)), plan.join('\n'));
+  } finally {
+    db.close();
+  }
 });
 
 test('work outcomes are advisory, atomic, evidence-aware, and do not treat age as success', async (t) => {
