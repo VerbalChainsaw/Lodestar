@@ -133,8 +133,15 @@ test("Manager keeps the exact journal and reports receipt inspection after a com
   const journal = (await readdir(path.join(f.root, 'pending')))[0];
   const response = JSON.parse(await readFile(path.join(f.root, 'pending', journal, 'response.json'), 'utf8'));
   assert.equal(response.error.code, 'response_delivery_failed');
+  const pending = path.join(f.root, 'pending');
+  const stageName = 'll-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.preparing';
+  await mkdir(path.join(pending, stageName));
+  await writeFile(path.join(pending, stageName, 'request.json'), '{}');
   const recovery = terminal(['7', '1', 'REPLAY', '9']);
   assert.equal(await runManager({ selection, ...recovery, execute }), 0, recovery.output());
+  assert.match(recovery.output(), /Unpublished journal preparation remains on disk/);
+  assert.doesNotMatch(recovery.output(), /bbbbbbbb/);
+  assert.equal(await readFile(path.join(pending, stageName, 'request.json'), 'utf8'), '{}');
   assert.equal(writeAttempts, 1, 'a confirmed receipt must prevent another write dispatch');
   assert.match(recovery.output(), /receipt confirmed|already committed/i);
 });

@@ -24,6 +24,7 @@ async function plainPath(file) {
 async function inspect(file, allowOfflineHistory = false) {
   const db = await openDiagnosticDatabase(file);
   try {
+    db.exec("BEGIN");
     const schema = readMetadata(db, file).schema_version;
     if (![SCHEMA_V4_VERSION, SCHEMA_V5_VERSION, SCHEMA_VERSION].map(String).includes(schema)) throw lodestarError("unsupported_schema", "The selected store is incompatible with this installation.", {
       identifiers: { database: file, actual: schema, supported: [SCHEMA_V4_VERSION, SCHEMA_V5_VERSION, SCHEMA_VERSION] },
@@ -47,7 +48,10 @@ async function inspect(file, allowOfflineHistory = false) {
       });
     }
     return report;
-  } finally { db.close(); }
+  } finally {
+    try { if (db.isTransaction) db.exec("ROLLBACK"); }
+    finally { db.close(); }
+  }
 }
 
 // Explicit installer operation only. Launchers never call this helper.

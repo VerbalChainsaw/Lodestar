@@ -221,6 +221,12 @@ export async function listRecovery(selection) {
       const folder=path.join(root,entry.name);
       const item={key:keyFor(folder),request_id:entry.name,record_id:"",operation:"unknown",database:selection.database,
         folder,created_at:null,replay_eligible:false,issue:null,action:`Preserve '${folder}' and inspect its request/context with the selected runtime.`};
+      if (/^ll-[0-9a-f-]{36}\.[0-9a-f-]{36}\.preparing$/iu.test(entry.name) && entry.isDirectory()) {
+        item.issue = "Unpublished Manager preparation; no request was dispatched from this directory.";
+        item.action = "Retain the staged bytes for inspection. This preparation is not eligible for replay.";
+        journals.push(item);
+        continue;
+      }
       try{
         if(!entry.isDirectory()||entry.isSymbolicLink())throw fail("Journal entry is not a direct directory.",folder);
         const context=await json(path.join(folder,"context.json"));

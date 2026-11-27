@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.5 - 2026-11-27
+
+- Publish Manager recovery entries only after both journal files are written. Interrupted preparation remains inspectable, not replayable.
+- Distinguish missing cold history from corrupt archive evidence; keep installer store inspection on one SQLite snapshot.
+- Pair with native adapter 1.4.10 for a bounded, read-only recovery of explicitly bound work on Codex resume.
+
+See the [release notes](docs/releases/v3.0.5.md).
+
 ## 3.0.4 - 2026-11-27
 
 - Allow an owned, same-database Windows upgrade when full checks pass apart from explicitly unavailable archived receipts. Keep blocked history visible in the installer and receipt.

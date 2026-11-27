@@ -4,8 +4,8 @@ This optional adapter supplies a Codex startup routing hint, host-bound work
 and handoff tools, pending-note capture, and opt-in compaction continuity. It uses
 the separately installed Lodestar core through that core's maintained transport.
 
-The adapter and core have independent versions. Adapter 1.4.9 targets Lodestar
-core 3.0.4. CI qualifies the native archive against the exact packed core from
+The adapter and core have independent versions. Adapter 1.4.10 targets Lodestar
+core 3.0.5. CI qualifies the native archive against the exact packed core from
 the same source revision on Windows. The core package's optional generic MCP plugin does
 not provide these native hooks; replacing this adapter with it would remove
 native continuity capabilities. Enable one Lodestar plugin for this host. The
@@ -21,7 +21,7 @@ startup hint alone does not establish verified use or a write basis.
 
 | Hook | Use it for | Routine cost |
 | --- | --- | --- |
-| SessionStart | Give one short instruction to read the owning record for substantive work. After compact, recover the exact bound work, not a transcript. | No project database read on ordinary startup. |
+| SessionStart | Give one short routing hint. On resume with an explicit matching checkout/session binding, surface that exact current work record and its stored next action. After compact, recover the exact bound work, not a transcript. | No project database read on ordinary startup or unbound resume. Exact resume is read-only and fails open with a retry pointer. |
 | UserPromptSubmit | Keep exact handoff command authorization; recover a pending compact checkpoint once if the compact-start event did not deliver it. | No routine project database call or raw message capture. |
 | PreToolUse | Bind the existing continuity tool call to its real session, turn, checkout and arguments. | Only matches named Lodestar tools; no project database mutation. |
 | PreCompact | Save one checked checkpoint for a changed semantic work projection, only with an exact opt-in binding. | No database call when unbound; no new receipt when unchanged. |
@@ -90,10 +90,24 @@ does not bundle a core, a database, credentials or plugin data.
 Restart Codex after an upgrade to load the new MCP server process. Hook scripts
 and the selected core are also checked directly during installation validation.
 
-Compaction continuity remains opt-in for an exact project and session through
-`.omx/lodestar-compaction.json`. Installing the adapter does not activate that
-binding. Synthetic hook tests do not establish natural Desktop PreCompact event
-delivery.
+Resume and compaction continuity require an explicit existing
+`.omx/lodestar-compaction.json` in the checkout. Set version `1`, the exact
+absolute `project_root`, the real Codex `session_id`, and an existing checked
+`intent_record_id`. If you use a disposable database, its optional absolute
+`database` must be inside that checkout. Installing the adapter does not create
+or activate a binding. Do not guess the session or choose an unrelated intent.
+
+On a normal resume, the hook performs one read of that exact intent, with a
+five-second core-call budget. It supplies the stored objective and next action,
+not new permissions or proof. If the binding or store is unavailable, the turn
+continues and tells the operator what to check. If the complete card will not
+fit the hook delivery budget, it gives the complete-read pointer instead of
+silently trimming the card. There is no receipt write; ordinary starts and
+wrong-session resumes do not read the core.
+
+Codex may require the owner to review changed hooks in Settings → Hooks
+(or `/hooks` in the CLI). The tests below run the real hook executable and
+disposable core, not natural hook delivery by an already running Desktop app.
 
 ## Verification
 
@@ -109,7 +123,7 @@ payload against an already installed, exact candidate core:
 
 ```text
 node scripts/build-native-codex.mjs <new-output-directory>
-node scripts/smoke-native-codex.mjs <output-directory>/lodestar-native-codex-1.4.9.tgz <packed-core-directory>/lodestar.mjs
+node scripts/smoke-native-codex.mjs <output-directory>/lodestar-native-codex-1.4.10.tgz <packed-core-directory>/lodestar.mjs
 ```
 
 The builder writes the archive and `SHA256SUMS`, refuses existing output artifacts,
