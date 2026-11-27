@@ -4,8 +4,8 @@ This optional adapter supplies a Codex startup routing hint, host-bound work
 and handoff tools, pending-note capture, and opt-in compaction continuity. It uses
 the separately installed Lodestar core through that core's maintained transport.
 
-The adapter and core have independent versions. Adapter 1.4.7 targets Lodestar
-core 3.0.1. CI qualifies the native archive against the exact packed core from
+The adapter and core have independent versions. Adapter 1.4.8 targets Lodestar
+core 3.0.2. CI qualifies the native archive against the exact packed core from
 the same source revision on Windows. The core package's optional generic MCP plugin does
 not provide these native hooks; replacing this adapter with it would remove
 native continuity capabilities. Enable one Lodestar plugin for this host.
@@ -38,7 +38,8 @@ adapter requires explicit paired `LODESTAR_NODE` and `LODESTAR_ENTRY` overrides;
 Linux/macOS host acceptance is not established by the Windows checks. The
 separate generic MCP plugin retains its own supported Windows/WSL routing.
 
-Version 1.4.7 adds bounded JSON/protocol admission, decimal and duplicate-key
+Version 1.4.8 changes startup to a routing hint without loading project records.
+Version 1.4.7 added bounded JSON/protocol admission, decimal and duplicate-key
 validation, hook failure handling, and qualification of the complete independent
 plugin archive. Its skill payload is generated from the core repository's
 canonical managed Lodestar skill; do not edit the generated copy here.
@@ -87,7 +88,7 @@ payload against an already installed, exact candidate core:
 
 ```text
 node scripts/build-native-codex.mjs <new-output-directory>
-node scripts/smoke-native-codex.mjs <output-directory>/lodestar-native-codex-1.4.7.tgz <packed-core-directory>/lodestar.mjs
+node scripts/smoke-native-codex.mjs <output-directory>/lodestar-native-codex-1.4.8.tgz <packed-core-directory>/lodestar.mjs
 ```
 
 The builder writes the archive and `SHA256SUMS`, refuses existing output artifacts,
