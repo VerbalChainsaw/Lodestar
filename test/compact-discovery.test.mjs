@@ -1,8 +1,14 @@
+import { SCHEMA_VERSION } from '../src/schema.mjs';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { dispatch, startProjection } from '../src/agent-state.mjs';
+import { admittedTransaction, initializeConnection, openConnection } from '../src/database.mjs';
+import { recordInput } from '../src/project.mjs';
+import { writeRecordSnapshot } from '../src/records.mjs';
+import { allocateRevision } from '../src/revisions.mjs';
 import { fixture } from './helpers/contract.mjs';
 
 const success = result => { assert.equal(result.code, 0, JSON.stringify(result.value)); return result.value; };
@@ -169,7 +175,7 @@ test('compact retains source checks and source-correction errors and rejects a s
     observed_at: '2026-09-30T00:00:00.000Z' } }] });
   await record(f, '-h');
   const damaged = new DatabaseSync(f.database);
-  damaged.function('lodestar_write_contract', () => 5);
+  damaged.function('lodestar_write_contract', () => SCHEMA_VERSION);
   damaged.prepare("UPDATE records SET content_json=json_remove(content_json, '$._lodestar.semantics') WHERE id=?").run('-h');
   damaged.close();
   const before = await readFile(f.database);
@@ -205,4 +211,89 @@ test('compact start retains dependency failures and reports omitted orientation 
   assert.deepEqual(compact.data.record_errors, full.data.record_errors);
   assert.ok(compact.data.context.length <= 20); assert.equal(compact.data.omitted_records, 3);
   assert.ok(Buffer.byteLength(JSON.stringify(compact.data)) <= 24000);
+});
+
+test('compact start skips whole-catalog inventory but retains required sources and full start', async t => {
+  const f = await fixture(t);
+  await f.create('project:test', 'project', { roots: [f.root] }, 'project:test');
+  await f.create('fact:orientation', 'fact', { text: 'orientation' }, 'project:test', { context_role: 'orientation', lifecycle: 'current' });
+  await writeFile(path.join(f.root, 'AGENTS.md'), 'Required local instructions');
+  const original = DatabaseSync.prototype.prepare;
+  const inventory = [];
+  DatabaseSync.prototype.prepare = function(sql) {
+    if (sql === 'SELECT id FROM records' || sql === 'SELECT alias,record_id FROM aliases') inventory.push(sql);
+    return original.call(this, sql);
+  };
+  try {
+    const options = { '--cwd': f.root, '--harness': 'codex' };
+    const full = await dispatch('start', { options, positionals: [] }, f.database, {});
+    const fullInventory = inventory.splice(0);
+    const compact = await dispatch('start', { options: { ...options, '--compact': true }, positionals: [] }, f.database, {});
+    assert.deepEqual(inventory, []);
+    assert.equal(fullInventory.length, 2);
+    assert.ok(full.data.catalog);
+    assert.ok(full.data.installation);
+    assert.equal(compact.data.complete, full.data.complete);
+    assert.deepEqual(compact.data.record_errors, full.data.record_errors);
+    assert.deepEqual(compact.data.context.map(row => row.id), full.data.context.map(row => row.id));
+    assert.equal(compact.data.required[0].sha256, full.data.required[0].sha256);
+    assert.ok(full.data.required[0].text.includes('Required local instructions'));
+    assert.equal(compact.data.required[0].text, undefined);
+    assert.equal(compact.data.requires_full_start, true);
+  } finally {
+    DatabaseSync.prototype.prepare = original;
+  }
+});
+test('compact startup resolves a repeated project binding once for the orientation records', () => {
+  const db = openConnection(':memory:');
+  try {
+    const scope = 'project:compact-binding';
+    const now = '2026-11-23T00:00:00.000Z';
+    const count = 12;
+    initializeConnection(db, { createdAt: now, database: ':memory:' });
+    admittedTransaction(db, () => {
+      const revision = allocateRevision(db);
+      const put = (id, kind, data, context_role) => writeRecordSnapshot(db, {
+        ...recordInput(id, kind, id, scope, 0, data),
+        semantics: { lifecycle: 'current', context_role, basis: 'asserted',
+          applicability: { project: scope, checkout: null } },
+      }, { createdAt: now, updatedAt: now, revision });
+      put(scope, 'project', { roots: [process.cwd()] }, 'on_demand');
+      for (let index = 0; index < count; index++) {
+        put('knowledge:compact-binding-' + index, 'knowledge', { body: 'orientation ' + index }, 'orientation');
+      }
+    }, ':memory:');
+    const project = { id: scope, scope, cwd: process.cwd(), checkout_root: process.cwd(),
+      historical_scopes: [], binding_preconditions: [{ target: { kind: 'record', id: scope }, expected_revision: 1 }] };
+    let projectReads = 0;
+    let reuseBinding = true;
+    const observed = {
+      get isTransaction() { return reuseBinding && db.isTransaction; },
+      prepare(sql) {
+        const statement = db.prepare(sql);
+        return {
+          all: (...args) => statement.all(...args),
+          get: (...args) => {
+            const row = statement.get(...args);
+            if (args.length === 1 && args[0] === scope && typeof row?.content_json === 'string') projectReads++;
+            return row;
+          },
+        };
+      },
+    };
+    const run = reuse => {
+      reuseBinding = reuse;
+      projectReads = 0;
+      db.exec('BEGIN');
+      try {
+        const result = startProjection(observed, project, {}, { compact: true });
+        return { result, reads: projectReads };
+      } finally { db.exec('COMMIT'); }
+    };
+    const uncached = run(false);
+    assert.equal(uncached.result.data.context.length, count);
+    const compact = run(true);
+    assert.deepEqual(compact.result, uncached.result);
+    assert.equal(uncached.reads - compact.reads, count - 1);
+  } finally { db.close(); }
 });

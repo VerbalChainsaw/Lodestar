@@ -5,6 +5,7 @@ import {
   SCHEMA_TABLES,
   SCHEMA_VERSION,
 } from "./schema.mjs";
+import { boundedDiagnosticValue } from "./diagnostics.mjs";
 import { diagnoseDecisions } from "./decision.mjs";
 import { diagnoseHandoff } from "./continuity.mjs";
 import { storedSemanticIssues } from "./stored-semantics.mjs";
@@ -25,10 +26,94 @@ function same(left, right) {
     && left.every((value, index) => value === right[index]);
 }
 
-export function diagnoseDatabase(db, { database = null } = {}) {
+export function diagnoseDatabase(db, { database = null, quick = false } = {}) {
   const issues = [];
+  let coldSummary = null;
+  // Reporting is bounded independently of validation. Every finding still
+  // contributes to health and exact counts, even after sample storage fills.
+  const maximumBytes = 256 * 1024;
+  const issueCounts = Object.create(null);
+  let issueCount = 0, normalCount = 0, sampleBytes = 2, detailsTruncated = 0;
+  const size = value => Buffer.byteLength(JSON.stringify(value), "utf8");
+  const project = (value, limit) => size(value) <= limit ? value
+    : boundedDiagnosticValue(value, {maximumBytes: limit});
+  const keep = issue => {
+    const selected = project(issue, 8192);
+    if (selected !== issue) detailsTruncated += 1;
+    const bytes = size(selected) + 1;
+    if (sampleBytes + bytes <= 128 * 1024) {
+      issues.push(selected);
+      sampleBytes += bytes;
+    }
+  };
+  const finish = report => {
+    const reporting = {maximum_bytes: maximumBytes, issue_count: issueCount,
+      issue_counts: issueCounts, issues_omitted: normalCount - issues.length,
+      issue_details_truncated: detailsTruncated, fields_truncated: [], lists: {}};
+    // Preserve existing arrays for ordinary reports. Large lists retain exact
+    // totals outside their samples; no consumer may mistake a sample for all IDs.
+    for (const group of ["decisions", "handoff"]) {
+      const check = report.checks[group];
+      if (!check) continue;
+      for (const [key, values] of Object.entries(check)) {
+        if (!Array.isArray(values) || size(values) <= 8192) continue;
+        const samples = [];
+        let used = 2, clipped = 0;
+        for (const value of values) {
+          const sample = project(value, 1024), bytes = size(sample) + 1;
+          if (used + bytes > 8192) break;
+          samples.push(sample); used += bytes;
+          if (sample !== value) clipped += 1;
+        }
+        check[key] = samples;
+        reporting.lists[`checks.${group}.${key}`] = {total: values.length,
+          returned: samples.length, omitted: values.length - samples.length,
+          details_truncated: clipped};
+      }
+    }
+    for (const [key, value] of Object.entries(report)) {
+      if (key === "issues") continue;
+      const selected = project(value, key === "checks" ? 48 * 1024 : 4096);
+      if (selected !== value) reporting.fields_truncated.push(key);
+      report[key] = selected;
+    }
+    if (coldSummary) {
+      const selected = project(coldSummary, 8192);
+      if (selected !== coldSummary) reporting.issue_details_truncated += 1;
+      // Reserve a separately bounded cold summary even if earlier errors filled
+      // the ordinary sample budget. Its count is the full validation count.
+      report.issues = [...issues, selected];
+    }
+    report.reporting = reporting;
+    return report;
+  };
   const add = (code, message, identifiers = {}, action = undefined) => {
-    issues.push({
+    issueCount += 1;
+    issueCounts[code] = (issueCounts[code] ?? 0) + 1;
+    // Cold receipts share a validation prerequisite. Report its full count
+    // without repeating thousands of identical restore messages over MCP.
+    // This remains an issue: complete=false and healthy=null/false below.
+    if (code === "archive_restore_required") {
+      if (!coldSummary) {
+        coldSummary = {code, message: "Historical receipts require explicit cold-archive access; their validation is incomplete.",
+          identifiers: {count: 0, sample_receipt_ids: [], receipt_ids_omitted: 0,
+            manifest_samples: [], manifest_samples_truncated: false, required_restore_bytes_max: 0},
+          ...(action ? {action} : {})};
+
+      }
+      const summary = coldSummary.identifiers;
+      summary.count += 1;
+      if (typeof identifiers.id === "string" && summary.sample_receipt_ids.length < 5) summary.sample_receipt_ids.push(identifiers.id);
+      summary.receipt_ids_omitted = summary.count - summary.sample_receipt_ids.length;
+      if (typeof identifiers.manifest === "string" && !summary.manifest_samples.includes(identifiers.manifest)) {
+        if (summary.manifest_samples.length < 5) summary.manifest_samples.push(identifiers.manifest);
+        else summary.manifest_samples_truncated = true;
+      }
+      if (Number.isSafeInteger(identifiers.required_bytes)) summary.required_restore_bytes_max = Math.max(summary.required_restore_bytes_max, identifiers.required_bytes);
+      return;
+    }
+    normalCount += 1;
+    keep({
       code,
       message,
       identifiers,
@@ -37,7 +122,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
   };
 
   let integrity = [];
-  try {
+  if (!quick) try {
     integrity = db.prepare("PRAGMA integrity_check").all()
       .map((row) => Object.values(row)[0]);
     for (const result of integrity) {
@@ -56,8 +141,8 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     });
   }
   const integrityOk = integrity.length === 1 && integrity[0] === "ok";
-  if (!integrityOk) {
-    return {
+  if (!quick && !integrityOk) {
+    return finish({
       healthy: false,
       database,
       schema_version: null,
@@ -79,7 +164,7 @@ export function diagnoseDatabase(db, { database = null } = {}) {
         expected_definitions: false,
       },
       issues,
-    };
+    });
   }
 
   const tables = orderedNames(db, "table");
@@ -98,7 +183,11 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       { expected: SCHEMA_INDEXES, actual: indexes },
     );
   }
-  const definitions = inspectSchemaDefinitions(db);
+  let actualStorageVersion = SCHEMA_VERSION;
+  try { const value = Number(db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value);
+    if ([4,5,SCHEMA_VERSION].includes(value)) actualStorageVersion=value;
+  } catch { /* The existing metadata checks below report malformed storage. */ }
+  const definitions = inspectSchemaDefinitions(db, {version: actualStorageVersion});
   if (!definitions.matches) {
     add(
       "schema_definitions_invalid",
@@ -143,12 +232,12 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       metadataRows.map(({ key, value }) => [key, value]),
     );
     const schemaValue = metadata.schema_version ?? null;
-    schemaVersion = schemaValue === String(SCHEMA_VERSION) ? SCHEMA_VERSION : schemaValue;
+    schemaVersion = ["5",String(SCHEMA_VERSION)].includes(schemaValue) ? Number(schemaValue) : schemaValue;
     databaseCreatedAt = metadata.created_at ?? null;
     databaseInstanceId = metadata.database_instance_id ?? null;
     databaseEpoch = metadata.database_epoch ?? null;
     databaseRevision = metadata.database_revision ?? null;
-    if (schemaValue !== String(SCHEMA_VERSION)) {
+    if (!["5",String(SCHEMA_VERSION)].includes(schemaValue)) {
       const guidance = schemaVersionGuidance(database, schemaValue);
       add(
         "unsupported_schema",
@@ -183,6 +272,31 @@ export function diagnoseDatabase(db, { database = null } = {}) {
         { database_revision: databaseRevision });
     }
   }
+
+  if (quick) return finish({
+    mode: "quick",
+    complete: false,
+    healthy: issueCount === 0 ? null : false,
+    quick_check_passed: issueCount === 0,
+    database,
+    schema_version: schemaVersion,
+    database_created_at: databaseCreatedAt,
+    database_instance_id: databaseInstanceId,
+    database_epoch: databaseEpoch,
+    database_revision: databaseRevision === null ? null : Number(databaseRevision),
+    counts: { records: null, links: null, aliases: null, sources: null },
+    checks: {
+      integrity: "not_run",
+      foreign_key_violations: null,
+      expected_tables: same(tables, SCHEMA_TABLES),
+      expected_indexes: same(indexes, SCHEMA_INDEXES),
+      expected_definitions: definitions.matches,
+    },
+    not_run: ["integrity", "foreign_keys", "record_counts", "stored_semantics",
+      "decisions", "handoff", "alias_collisions"],
+    action: "Run the same doctor command without --quick for full integrity and stored-data validation; allow time proportional to the database size.",
+    issues,
+  });
 
   let foreignKeyRows = [];
   try {
@@ -253,8 +367,9 @@ export function diagnoseDatabase(db, { database = null } = {}) {
     }
   }
 
-  return {
-    healthy: issues.length === 0,
+  return finish({
+    complete: coldSummary === null,
+    healthy: normalCount > 0 ? false : coldSummary ? null : true,
     database,
     schema_version: schemaVersion,
     database_created_at: databaseCreatedAt,
@@ -274,5 +389,5 @@ export function diagnoseDatabase(db, { database = null } = {}) {
       handoff,
     },
     issues,
-  };
+  });
 }

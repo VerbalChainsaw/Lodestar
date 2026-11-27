@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { canonicalStringify } from "./json.mjs";
 import { lodestarError } from "./errors.mjs";
 import { normalizedRowsResult, recordInput } from "./project.mjs";
@@ -35,6 +36,25 @@ export function handoffStatus(db, project, identity = {}, { history = false, lim
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
       targets: [...result.records.filter(({ kind }) => kind === "handoff").map(({ id }) => target(id)),
         ...(project.binding_preconditions ?? []).map(({ target: dependency }) => dependency)] }) };
+}
+export function nativeHandoffEligibility(db, project, identity, session = identity.session) {
+  if (!identity.session || identity.agent !== "codex" || identity.harness !== "codex") {
+    throw lodestarError("identity_required", "Native handoff eligibility requires a Codex session identity.");
+  }
+  // Byte-for-byte native adapter sessionRecordId, including its terminating LF.
+  const tuple = canonicalStringify([project.scope, project.checkout_root, session]) + "\n";
+  const id = "codex-plugin:handoff:" + createHash("sha256").update(tuple).digest("hex").slice(0, 40);
+  const row = db.prepare(`
+    SELECT type, scope, json_extract(content_json,'$.value.checkout') AS checkout,
+      json_extract(content_json,'$.value.source_actor') AS actor,
+      json_extract(content_json,'$.value.state') AS state
+    FROM records WHERE id = ?`).get(id);
+  if (!row) return { eligible: false };
+  if (row.type !== "handoff" || row.scope !== project.scope || row.checkout !== project.checkout_root ||
+      row.actor !== identity.actor || !["open", "claimed", "closed", "cancelled"].includes(row.state)) {
+    throw lodestarError("handoff_conflict", "The exact native handoff has invalid ownership or state.", { identifiers: { id } });
+  }
+  return { eligible: row.state === "open" };
 }
 export function handoffMutation(db, project, identity, action, request, options = {}) {
   const input = validateDomainInput(`handoff.${action}`, request?.input);

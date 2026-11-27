@@ -144,7 +144,12 @@ function validateTasks(value, requirementIds) {
 // Preparation reuses the exact intent contract without requiring unrelated
 // context or evidence reads to succeed before attaching one readable record.
 export function inspectWorkIntent(db, project, intentId) {
-  const contract = normalizeRecord(getRecordById(db, intentId));
+  return validateWorkIntentRecord(project, normalizeRecord(getRecordById(db, intentId)));
+}
+
+// Validates an already-normalized record from the caller's admitted snapshot.
+export function validateWorkIntentRecord(project, contract) {
+  const intentId = contract.id;
   const admitted = new Set([project.scope, ...(project.historical_scopes ?? [])]);
   if (contract.kind !== "knowledge" || !admitted.has(contract.scope)
     || contract.semantics?.lifecycle !== "current") {

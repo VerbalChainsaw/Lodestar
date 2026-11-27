@@ -1,10 +1,10 @@
 # Installation and startup
 
-Lodestar 3.0.0 provides the CLI package `lodestar-agent-context@3.0.0` and the
-Windows archive `Lodestar-3.0.0-win-x64.zip`. Use the
-[3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
-for versioned archives and the SHA-256 checksum inventory. Verify downloaded
-archives against that inventory before installing.
+This checkout targets **Lodestar 3.0.5**. Use the release assets and matching
+SHA-256 inventory when available, or build and verify the candidate locally.
+The versioned files are `lodestar-agent-context-3.0.5.tgz`,
+`Lodestar-3.0.5-win-x64.zip`, and the separate native Codex adapter
+`lodestar-native-codex-1.4.10.tgz`. If this version has not been published to npm or GitHub, use only the verified local candidate artifacts.
 
 For **Loader or Manager on Windows**, install Node.js 24.15.0 or newer, the .NET 10
 Desktop Runtime (x64), and PowerShell 7. Verify and extract the whole Windows ZIP,
@@ -18,12 +18,32 @@ activation are distinct steps. Automatic continuity through a separately prepare
 host hook requires that host's explicit activation and a natural runtime event;
 the CLI, native skill and MCP plugin do not install or activate that hook.
 
+## Local 3.0.5 candidate
+
+The local package build produces `lodestar-agent-context-3.0.5.tgz`; the Windows
+release builder produces `Lodestar-3.0.5-win-x64.zip`. The candidate delivery
+report identifies their absolute paths and SHA-256 hashes. Replace every path
+placeholder below with the selected artifact from that report, and compare its
+hash before installation:
+
+```powershell
+Get-FileHash -LiteralPath "<candidate-directory>/lodestar-agent-context-3.0.5.tgz" -Algorithm SHA256
+Get-FileHash -LiteralPath "<candidate-directory>/Lodestar-3.0.5-win-x64.zip" -Algorithm SHA256
+```
+
+Use the tarball for CLI/native skills or extract the whole ZIP for Loader and
+Manager. Keep the database outside the application and preserve the selected
+`interfaces.json`. Existing schema-5 stores need no patch migration. Updating
+the app and installing native skills are deliberate operations; restart native
+host sessions after an owned skill update. Local build and installation checks
+are distinct from public release verification in the [publishing guide](publishing.md).
+
 ## CLI and native skills
 
-For a new installation:
+For the local candidate, install the verified tarball from its absolute path:
 
 ```text
-npm install --global lodestar-agent-context@3.0.0
+npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.5.tgz"
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init
@@ -35,15 +55,15 @@ lodestar start --cwd .
 Use `lodestar init` only when creating a new store. An existing schema-5 store
 needs no 3.0 migration. An older schema-4 store requires the explicit
 [migration/recovery procedure](../README.md#storage-and-recovery); setup never
-changes a database. You can also install the versioned tarball from the
-[GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0).
+changes a database. The older published tarball remains available from the
+[3.0.0 GitHub release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0).
 
-To use an isolated CLI package, verify `lodestar-agent-context-3.0.0.tgz`
-against the release's SHA-256 inventory, then install it in a new directory.
+To use an isolated CLI package, verify `lodestar-agent-context-3.0.5.tgz`
+against the local candidate's SHA-256 inventory, then install it in a new directory.
 Replace the placeholders with your selected paths and invoke that exact package:
 
 ```text
-npm install --prefix "<local-package-directory>" --ignore-scripts "<verified-release-tarball>"
+npm install --prefix "<local-package-directory>" --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.5.tgz"
 node "<local-package-directory>/node_modules/lodestar-agent-context/lodestar.mjs" --db "<existing-database>" start --cwd "<project-root>"
 ```
 
@@ -89,11 +109,56 @@ depend on the filesystem, including Windows-to-WSL transport. The installer lock
 serialize cooperating setup processes; content checks are not an OS-level
 compare-and-swap against arbitrary external writers.
 
+## Native Linux CLI (x86_64)
+
+Use Node.js 24.15.0 or newer with npm, and the verified CLI tarball from the
+matching release or candidate. This installs into a new user-local prefix and
+does not change global npm packages, PATH, or host agent settings.
+
+```sh
+(
+  set -eu
+  archive='/absolute/path/to/lodestar-agent-context-3.0.5.tgz'
+  expected_sha256='REPLACE_WITH_SHA256_FROM_ARTIFACT_INVENTORY'
+  printf '%s  %s\n' "$expected_sha256" "$archive" | sha256sum --check --strict
+
+  prefix="$HOME/.local/opt/lodestar-3.0.5"
+  if [ -e "$prefix" ] || [ -L "$prefix" ]; then
+    printf 'Choose an unused prefix: %s\n' "$prefix" >&2
+    exit 1
+  fi
+  npm install --offline --ignore-scripts --no-audit --no-fund --prefix "$prefix" "$archive"
+  "$prefix/node_modules/.bin/lodestar" --version
+)
+```
+
+With that prefix, initialize a **new** Linux-local registry, then check it from
+the project checkout. Use a distinct unused database path if one already exists
+or follow [storage and recovery](../README.md#storage-and-recovery) for upgrades.
+
+```sh
+cli="$HOME/.local/opt/lodestar-3.0.5/node_modules/.bin/lodestar"
+db="$HOME/.local/share/lodestar/lodestar.db"
+"$cli" init --db "$db"
+"$cli" start --cwd "$PWD" --db "$db"
+"$cli" doctor --db "$db"
+```
+
+Without `--db`, the native default is
+`${XDG_DATA_HOME:-$HOME/.local/share}/lodestar/lodestar.db`. Use a Linux-local
+filesystem for the registry. Do not point Linux Node at a Windows-owned or
+network-share SQLite database. For WSL with the existing Windows registry, use
+the [one-shot Windows launcher](#windows-and-wsl) instead. This quickstart
+covers the native CLI only; it does not qualify the terminal Manager or agent
+activation on Linux. The desktop Loader package is Windows-only.
+
 ## Windows Loader and Manager: per-user installation
 
-Download `Lodestar-3.0.0-win-x64.zip` from the
-[3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
-and verify its SHA-256 checksum against the release inventory. Extract the whole
+Use the local `Lodestar-3.0.5-win-x64.zip` described under
+[local candidate installation](#local-305-candidate) and verify its SHA-256
+checksum against the candidate inventory. The older published archive remains
+on the [3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0).
+Extract the whole
 archive to a separate directory. This is a framework-dependent Windows package. Install
 the **.NET 10 Desktop Runtime (x64)**, **PowerShell 7**, and **Node.js 24.15.0 or newer**
 separately before first use. The package does not install these prerequisites.
@@ -115,6 +180,16 @@ Inspect the resolved plan or select different paths:
 pwsh -NoProfile -File .\Install.ps1 -Mode Plan
 pwsh -NoProfile -File .\Install.ps1 -Destination "C:\Apps\Lodestar" -DatabasePath "C:\Data\lodestar.db" -NodePath "C:\Tools\node.exe"
 ```
+
+An owned upgrade that keeps its existing current-schema store may proceed if
+the only incomplete checks are archived receipts that cannot currently be
+accessed. The installer warns and records their count. It does not restore or
+modify them, and full doctor continues to report incomplete historical
+validation. A fresh install, store change, migration, or any other database
+diagnostic error still blocks.
+Full read-only validation of a large existing store can take several minutes.
+Each such check is bounded to 20 minutes; initialization and migration keep
+their separate existing deadline.
 
 Plan reads and validates without initializing or migrating data. The database must
 be external to the app, payload and update folders. Reparse-point paths, conflicting
@@ -241,14 +316,16 @@ automatic selection.
 
 The skill and CLI work without the optional MCP plugin. `lodestar setup` installs
 native skills and launchers; it does not enable a plugin or modify Codex settings.
-Add the three structured tools by installing the complete package through Codex:
+For the local 3.0.5 candidate, add the complete installed package's root as a
+local marketplace, replacing the placeholder with its absolute path:
 
 ```text
-codex plugin marketplace add VerbalChainsaw/Lodestar --ref v3.0.0
+codex plugin marketplace add "<local-package-directory>/node_modules/lodestar-agent-context"
 codex plugin add lodestar@lodestar
 ```
 
-For a local package, add its root directory as a marketplace instead. The included
+For the retained public 3.0.0 package, the marketplace source is
+`VerbalChainsaw/Lodestar --ref v3.0.0`. Use the 3.0.5 tag only after its release is listed. The included
 `.agents/plugins/marketplace.json` points to the package root. This is also the root
 for custom marketplace entries. Node.js 24.15.0 or newer must be available to the
 host. Initialize or select the intended Lodestar store through the CLI first.
@@ -264,13 +341,70 @@ it, so plugin installation could report success while its server failed to start
 Update custom marketplace paths to the complete package root and reinstall the
 plugin. A global npm upgrade cannot refresh a separately cached Codex plugin.
 
-Keep one active Lodestar plugin installation. Inspect existing plugin IDs before
-switching marketplaces and disable or remove an older plugin through Codex. Keep
+Keep one active Lodestar plugin installation. Inspect existing plugin IDs and
+capabilities before switching marketplaces. A separately versioned native host
+adapter may provide opt-in compaction checkpoints, context restoration and
+session-bound tools through the shared installed CLI. The packaged MCP plugin
+does not provide those host hooks and is not a feature-equivalent replacement.
+Keep such an adapter when those capabilities are required, upgrade its shared CLI,
+and verify its compatibility. Do not infer the core version from an adapter's own
+version number or enable both integrations under the same skill/server name.
+
+When deliberately switching equivalent integrations, disable or remove the prior
+plugin through Codex and retain its pending request evidence. Keep
 native skill enablement under your own host settings; installation does not
 override a disabled skill or remove user-owned instructions. Start a fresh task
 and verify `lodestar_describe`, `lodestar_read`, and `lodestar_mutate` are available.
 The release checks exercise the isolated cached runtime; actual model selection
 still depends on the task and host configuration.
+
+## Native Codex adapter
+
+The separate `native-codex/` plugin supplies capabilities beyond the generic MCP
+plugin. Native adapter **1.4.10** is the candidate paired with core **3.0.5**.
+The adapter source, generated skill, tests and packaging live in this repository;
+the core npm tarball remains a separate installation. The
+[adapter guide](../native-codex/README.md) owns its runtime and test details.
+
+Its declared hooks have these effects:
+
+- `SessionStart` supplies current Lodestar context to the host.
+- `UserPromptSubmit` records the current prompt's authorization for the native
+  work and handoff tools. `PreToolUse` checks those tool calls and can deny a call
+  that lacks matching host authorization; it is not a general project audit gate.
+- `Stop` captures the assistant's final message as pending context, subject to the
+  adapter's bounds and redaction. Pending capture is not verified project truth.
+- `PreCompact` checkpoints and subsequent startup restores bounded context only
+  for an explicitly activated project/session compaction binding.
+
+The host owns event delivery. Installing files, listing hooks, or passing synthetic
+tests does not prove that a natural Desktop compaction event has run. Enable only
+the intended Lodestar plugin and retain Codex's own hook trust and skill settings.
+
+For a new installation, first install the verified core, then register the
+verified native archive's extracted plugin root or the repository's `native-codex`
+directory. Replace the path with its absolute location:
+
+```text
+codex plugin marketplace add "<checkout>/native-codex"
+codex plugin add lodestar@lodestar-native
+```
+
+For an existing installation such as `lodestar@personal`, retain that marketplace
+and plugin name. Update its existing marketplace source to the verified native
+plugin root and reinstall that same selector. Do not switch to the example's
+marketplace or remove the installed plugin merely to upgrade it. Codex's plugin
+data directory retains pending requests, attestations and compaction evidence;
+preserve it through upgrades. A global core upgrade alone does not refresh the
+cached native plugin. Restart Codex after reinstalling to load the new server.
+
+Windows discovery selects the newest numerically ordered Node installation under
+`<home>/.local/opt` that contains both `node.exe` and the Lodestar package entry.
+Set **both** `LODESTAR_NODE` and `LODESTAR_ENTRY` to select a different runtime and
+installed core explicitly. Do not infer that the hook's own Node executable, a
+CLI shim, or a Loader configuration selects that pair. Native adapter installation
+qualification is Windows-specific; generic CLI/MCP support on other platforms
+does not establish native host acceptance there.
 
 ## Windows and WSL
 
@@ -382,3 +516,13 @@ recovery envelope, so the caller can inspect and correct the request.
 An explicit project mapping keeps historical member records editable through their
 fresh canonical basis. Work events and handoff packets retain the original record
 scope. A changed binding invalidates a prior basis; reread before correcting it.
+
+## Local 3.0.1 candidate
+
+This retained heading preserves links from the [3.0.1 candidate notes](releases/v3.0.1.md). For the current package, use the [3.0.5 local candidate procedure](#local-305-candidate) above; do not install a different package under an old checksum.
+
+For coordinated deployment to existing clients, see [client deployment and rollback](client-deployment.md). Keep package identity, cached plugin identity, custom skills and actual client execution proof separate.
+
+## Local 3.0.2 candidate
+
+This historical heading preserves links from the [3.0.2 candidate notes](releases/v3.0.2.md). Use the current [3.0.5 artifact procedure](#local-305-candidate) for the new package.

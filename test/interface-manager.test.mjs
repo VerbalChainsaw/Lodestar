@@ -133,8 +133,15 @@ test("Manager keeps the exact journal and reports receipt inspection after a com
   const journal = (await readdir(path.join(f.root, 'pending')))[0];
   const response = JSON.parse(await readFile(path.join(f.root, 'pending', journal, 'response.json'), 'utf8'));
   assert.equal(response.error.code, 'response_delivery_failed');
+  const pending = path.join(f.root, 'pending');
+  const stageName = 'll-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.preparing';
+  await mkdir(path.join(pending, stageName));
+  await writeFile(path.join(pending, stageName, 'request.json'), '{}');
   const recovery = terminal(['7', '1', 'REPLAY', '9']);
   assert.equal(await runManager({ selection, ...recovery, execute }), 0, recovery.output());
+  assert.match(recovery.output(), /Unpublished journal preparation remains on disk/);
+  assert.doesNotMatch(recovery.output(), /bbbbbbbb/);
+  assert.equal(await readFile(path.join(pending, stageName, 'request.json'), 'utf8'), '{}');
   assert.equal(writeAttempts, 1, 'a confirmed receipt must prevent another write dispatch');
   assert.match(recovery.output(), /receipt confirmed|already committed/i);
 });
@@ -275,19 +282,20 @@ test("one-shot child and typed pagination use the fixture database", async (t) =
   assert.deepEqual(all.records.map(({ id }) => id), ["knowledge:a", "knowledge:b", "knowledge:c"]);
 });
 
-test("pagination respects record budgets within terminal and continuation pages", async () => {
+test("pagination rejects oversized pages and duplicate records without exceeding its budget", async () => {
   const page = (ids, more = false) => ({ kind: "EnvelopeSuccess", envelope: {
     revision: 3, database_instance_id: "a", database_epoch: "b",
     data: { records: ids.map((id) => ({ id })), record_errors: [] }, more,
-    next: more ? [{ command: "find", args: ["--all", "--offset", "1", "--at-revision", "3"] }] : [],
+    next: more ? [{ command: "find", args: ["--all", "--limit", "1", "--offset", "1", "--at-revision", "3"] }] : [],
   } });
-  for (const pages of [[page(["a", "b"])], [page(["a"], true), page(["b", "c"]) ]]) {
-    const maxRecords = pages.length;
-    const result = await loadFindPages({}, ["--all"], { maxRecords, execute: async () => pages.shift() });
-    assert.equal(result.records.length, maxRecords);
+  for (const more of [false,true]) {
+    const maxRecords = 1;
+    const result = await loadFindPages({}, ["--all"], { maxRecords, execute: async () => page(["a","b"],more) });
+    assert.equal(result.kind,"TransportError");
+    assert.equal(result.code,"invalid_envelope");
+    assert.ok(result.records.length < maxRecords);
     assert.equal(result.complete, false);
-    assert.match(result.advisories.join(" "), /client limit/);
-    assert.equal(result.revision, 3);
+    assert.match(result.message, /more records than.*budget/);
   }
   const duplicate = await loadFindPages({}, ["--all"], { maxRecords: 1,
     execute: async () => page(["a", "b", "b"]) });
@@ -616,6 +624,10 @@ test("Manager saves a shallow edit through a journal and replays the exact reque
   assert.equal(names.length, 1);
   const folder = path.join(f.root, "pending", names[0]);
   const request = JSON.parse(await readFile(path.join(folder, "request.json"), "utf8"));
+  const context = JSON.parse(await readFile(path.join(folder,"context.json"),"utf8"));
+  assert.equal(context.config_path,selection.configPath);
+  assert.deepEqual(await readdir(path.join(f.root,"cli-pending")),[],
+    "the direct child fully admits the config-bound Manager journal without duplicate capture");
   assert.deepEqual(request.input, { mode: "update", id: "knowledge:edit",
     set: { name: "Renamed edit", data: { value: 2 } }, remove: [] });
   assert.match(term.output(), /Renamed edit \(knowledge:edit\)/,

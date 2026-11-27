@@ -76,7 +76,9 @@ test("release metadata and publication workflow agree on the package version", a
   assert.match(changelog, new RegExp(`^## ${escapedVersion} - \\d{4}-\\d{2}-\\d{2}$`, "mu"));
   assert.doesNotMatch(changelog, new RegExp(`^## ${escapedVersion} - Unreleased$`, "mu"));
   assert.match(releaseNote, new RegExp(`^# Lodestar ${escapedVersion}$`, "mu"));
-  assert.match(releaseNote, new RegExp(`lodestar-agent-context@${escapedVersion}`, "u"));
+  assert.ok(releaseNote.includes(`npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-${version}.tgz"`));
+  assert.match(releaseNote, /has not been published to npm or GitHub/u);
+  assert.ok(!releaseNote.includes(`npm install --global lodestar-agent-context@${version}`));
 
   const stages = [
     "needs:\n      - codeql\n      - verify",

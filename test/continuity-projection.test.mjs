@@ -499,3 +499,72 @@ test('selected historical decisions guard every admitted head, including previou
     }
   }
 });
+test('continuity bounds orientation by covered IDs, preserving visibility and rejection priority', async t => {
+  const f = await setup(t);
+  const orientation = { ...current, context_role: 'orientation' };
+  await f.create('research:a-local', 'research', {}, scope, orientation);
+  await f.create('rejection:z-local', 'rejection', { reason: 'Current rejection' }, scope, orientation);
+  await f.create('research:b-global', 'research', {}, 'global', {
+    ...orientation, applicability: { project: scope, checkout: null },
+  });
+  await f.create('research:foreign', 'research', {}, 'project:other', orientation);
+  await f.create('research:superseded', 'research', {}, scope, { ...orientation, lifecycle: 'superseded' });
+  const db = await openReadDatabase(f.database);
+  try {
+    const prepare = db.prepare.bind(db);
+    let plan;
+    db.prepare = sql => {
+      const statement = prepare(sql);
+      if (!sql.includes('semantics.context_role')) return statement;
+      return { all(...args) {
+        plan = prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map(({ detail }) => detail);
+        return statement.all(...args);
+      } };
+    };
+    const { projection: p } = continuityProjection(db, resolveProjectScope(db, scope, f.root), {
+      contract: { id: 'knowledge:intent', links: [] }, plan: { requirements: [] },
+      actual: { requirements: [] }, delta: { requirements: [] },
+    });
+    assert.deepEqual(p.records.map(({ id }) => id), ['rejection:z-local', 'research:a-local', 'research:b-global']);
+    assert.ok(plan?.some(step => /USING COVERING INDEX records_scope_type_id/u.test(step)), plan?.join('\n'));
+    assert.ok(plan?.some(step => /USING PRIMARY KEY \(id=\?\)/u.test(step)), plan?.join('\n'));
+  } finally {
+    db.close();
+  }
+});
+
+test('continuity queries seed ranking metadata once per distinct ID and operation', async t => {
+  const f = await setup(t);
+  const id = 'research:shared';
+  const absent = 'research:absent';
+  await f.create(id, 'research', { finding: 'One source, multiple roles' }, scope,
+    { ...current, context_role: 'orientation' });
+  const db = await openReadDatabase(f.database);
+  try {
+    const prepare = db.prepare.bind(db);
+    const reads = [];
+    db.prepare = sql => {
+      const statement = prepare(sql);
+      if (!sql.includes('AS priority FROM records WHERE id IN')) return statement;
+      return { all(...ids) { reads.push(...ids); return statement.all(...ids); } };
+    };
+    const project = resolveProjectScope(db, scope, f.root);
+    const args = {
+      contract: { id: 'knowledge:intent', links: [] },
+      plan: { requirements: [{ id: 'R1', parent_id: null }] },
+      actual: { requirements: [] }, delta: { requirements: [] },
+      continuation: { active_requirement_ids: ['R1'], context: {
+        mission_record_ids: [id, absent], requirements: [{ id: 'R1', record_ids: [id, absent] }],
+      } },
+    };
+    const { projection: p } = continuityProjection(db, project, args);
+    assert.deepEqual(reads.sort(), [absent, id]);
+    assert.deepEqual(p.records.find(row => row.id === id).selection.reasons, ['mission', 'orientation', 'requirement']);
+    assert.ok(p.read_required.some(row => row.target_id === absent));
+    reads.length = 0;
+    assert.deepEqual(continuityProjection(db, project, args).projection, p);
+    assert.deepEqual(reads.sort(), [absent, id]);
+  } finally {
+    db.close();
+  }
+});

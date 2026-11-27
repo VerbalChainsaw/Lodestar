@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import {
   access,
   mkdir,
@@ -19,6 +18,7 @@ import {
   openReadDatabase,
 } from "../src/database.mjs";
 import { fixture } from "./helpers/contract.mjs";
+import { spawnOwnedProcess } from "./helpers/owned-process.mjs";
 
 const CLI = fileURLToPath(new URL("../lodestar.mjs", import.meta.url));
 
@@ -71,7 +71,9 @@ function pausedChild({
       if (!paused && sql === "PRAGMA synchronous = FULL") {
         paused = true;
         writeFileSync(${JSON.stringify(marker)}, "ready");
+        const until = Date.now() + 15000;
         while (!existsSync(${JSON.stringify(release)})) {
+          if (Date.now() >= until) throw new Error("Paused fixture release deadline exceeded");
           Atomics.wait(
             new Int32Array(new SharedArrayBuffer(4)),
             0,
@@ -95,7 +97,8 @@ function pausedChild({
       DatabaseSync.prototype.exec = originalExec;
     }
   `;
-  const child = spawn(
+  return spawnOwnedProcess(
+    t,
     process.execPath,
     [
       "--disable-warning=ExperimentalWarning",
@@ -105,33 +108,18 @@ function pausedChild({
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
-  t.after(() => {
-    if (child.exitCode === null) child.kill();
-  });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  const completed = new Promise((resolve) => {
-    child.on("close", (status) => {
-      resolve({ status, stdout, stderr });
-    });
-  });
-  return { completed };
 }
 
 async function childResult(completed) {
   const result = await completed;
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.error, undefined, JSON.stringify(result));
+  assert.equal(result.status, 0, JSON.stringify(result));
   return JSON.parse(result.stdout.trim());
 }
 
-function cliPutChild({ t, database, record }) {
-  const child = spawn(
+async function cliPutChild({ t, database, record }) {
+  const owned = spawnOwnedProcess(
+    t,
     process.execPath,
     [
       "--disable-warning=ExperimentalWarning",
@@ -142,26 +130,12 @@ function cliPutChild({ t, database, record }) {
     ],
     { stdio: ["pipe", "pipe", "pipe"] },
   );
-  t.after(() => {
-    if (child.exitCode === null) child.kill();
-  });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  const completed = new Promise((resolve) => {
-    child.on("close", (status) => {
-      resolve({ status, stdout, stderr });
-    });
-  });
-  child.stdin.end(JSON.stringify(record));
-  return completed;
+  try {
+    owned.child.stdin.end(JSON.stringify(record));
+    const result = await owned.completed;
+    assert.equal(result.error, undefined, JSON.stringify(result));
+    return result;
+  } finally { await owned.stop(); }
 }
 
 function boundedOutcomeDiagnostics(outcomes) {
@@ -196,24 +170,26 @@ test("a losing initializer cannot delete a concurrent winner", async (t) => {
       now: () => new Date("2026-07-30T12:00:00.000Z")
     })`,
   });
-  await waitFor(marker);
+  try {
+    await waitFor(marker);
+    const winner = await initializeDatabase(database, {
+      now: () => new Date("2026-07-30T12:00:01.000Z"),
+    });
+    await writeFile(release, "go");
+    const loser = await childResult(child.completed);
 
-  const winner = await initializeDatabase(database, {
-    now: () => new Date("2026-07-30T12:00:01.000Z"),
-  });
-  await writeFile(release, "go");
-  const loser = await childResult(child.completed);
-
-  assert.equal(winner.created, true);
-  assert.equal(loser.status, "fulfilled");
-  assert.equal(loser.result.created, false);
-  const db = await openReadDatabase(database);
-  assert.equal(
-    db.prepare("SELECT value FROM metadata WHERE key = 'created_at'").get()
-      .value,
-    "2026-07-30T12:00:01.000Z",
-  );
-  db.close();
+    assert.equal(winner.created, true);
+    assert.equal(loser.status, "fulfilled");
+    assert.equal(loser.result.created, false);
+    const db = await openReadDatabase(database);
+    try {
+      assert.equal(
+        db.prepare("SELECT value FROM metadata WHERE key = 'created_at'").get()
+          .value,
+        "2026-07-30T12:00:01.000Z",
+      );
+    } finally { db.close(); }
+  } finally { await child.stop(); }
 });
 
 

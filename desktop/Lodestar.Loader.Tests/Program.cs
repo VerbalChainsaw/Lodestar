@@ -347,7 +347,7 @@ Add("transport close drains admitted work and never dispatches queued writes", a
 Add("disposable core library, edit, history and exact replay", async () =>
 {
     var node = TestNode();
-    var root = Path.Combine(Path.GetTempPath(), "ll core λ 🚀 " + Guid.NewGuid().ToString("N"));
+    var root = Path.Combine(Path.GetTempPath(), "ll core λ 🚀 & ' " + Guid.NewGuid().ToString("N"));
     var generator = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "generate-fixture.mjs"));
     var start = new ProcessStartInfo(node) { UseShellExecute = false, RedirectStandardOutput = true,
@@ -493,10 +493,44 @@ Add("disposable core library, edit, history and exact replay", async () =>
             var prepared = await service.PrepareOperatorActionAsync(action, values, project);
             Check(prepared.Request is not null, action + " preparation failed: " + prepared.Error);
             var outcome = await service.SaveAsync(prepared.Request!);
-            Check(outcome.Saved, action + " save failed: " + outcome.Error);
+            var recordedResponse = Path.Combine(prepared.Request!.JournalDirectory, "response.json");
+            Check(outcome.Saved, action + " save failed: " + outcome.Error + " " +
+                (!outcome.Saved && File.Exists(recordedResponse) ? await File.ReadAllTextAsync(recordedResponse) : ""));
             var read = await service.GetRecordAsync(prepared.Request!.RecordId);
             Check(read.Record?.Kind == action && read.Record.Scope == project.Id,
                 action + " did not create a scoped record.");
+            if (action == "note")
+            {
+                var contextPath = Path.Combine(prepared.Request.JournalDirectory, "context.json");
+                var originalContext = await File.ReadAllTextAsync(contextPath);
+                Check(originalContext.Contains("\\u03BB", StringComparison.Ordinal),
+                    "Native dispatch regression needs the original Unicode-escaped context.");
+                // Preserve parsed values while changing the exact root scalar's encoding.
+                // A nested copy retains the original encoding and must not supply root tokens.
+                var changedContext = originalContext.Replace("\\u03BB", "λ", StringComparison.Ordinal).TrimEnd();
+                changedContext = changedContext[..^1] + ",\"decoy\":" +
+                    JsonSerializer.Serialize(new { project_root = prepared.Request.ProjectRoot }) + "}";
+                var nullHashContext = JsonNode.Parse(originalContext)!.AsObject();
+                nullHashContext["dispatch_sha256"] = null;
+                var missingRootContext = JsonNode.Parse(originalContext)!.AsObject();
+                missingRootContext.Remove("project_root");
+                try
+                {
+                    foreach (var invalidContext in new[] { changedContext, nullHashContext.ToJsonString(), missingRootContext.ToJsonString() })
+                    {
+                        await File.WriteAllTextAsync(contextPath, invalidContext);
+                        var rejected = await service.ExecuteAsync(new CliInvocation("put",
+                            ["put", "--file", Path.Combine(prepared.Request.JournalDirectory, "request.json")],
+                            runtime, TimeSpan.FromSeconds(30), true));
+                        Check(!rejected.Success && rejected.Code == "recovery_journal_invalid" &&
+                            rejected.Message.Contains("Native dispatch binding", StringComparison.Ordinal),
+                            "Malformed or changed context bypassed native dispatch binding: " + rejected.Message);
+                        Check((await service.GetRecordAsync(prepared.Request.RecordId)).Revision == read.Revision,
+                            "Rejected native dispatch changed the record.");
+                    }
+                }
+                finally { await File.WriteAllTextAsync(contextPath, originalContext); }
+            }
             if (action == "research")
                 Check(read.Record!.Json.GetProperty("data").GetProperty("body").GetString() == values["body"] &&
                     read.Record.Json.GetProperty("data").GetProperty("acquisition").GetString() == "operator_supplied" &&
@@ -1064,6 +1098,9 @@ Add("native singular project roots preserve context", NativeProtocolChecks.Singu
 
 Add("RL14 queued mutation whole-call deadline", NativeLeadChecks.QueuedDeadlineAsync);
 Add("VM3 inherited response pipes obey whole-call deadline", NativeLeadChecks.PipeDeadlineAsync);
+Add("VM3 fixture setup failure leaves no directory", NativeLeadChecks.PipeSetupFailureAsync);
+if (OperatingSystem.IsWindows())
+    Add("VM3 fixture marker sharing preserves bounded ownership reads", NativeLeadChecks.MarkerSharingAsync);
 Add("RL10 actual core guarded source attestation", NativeLeadChecks.SourceAttestationAsync);
 Add("FQ01 real filesystem attribute cause remains actionable", ErrorCauseChecks.AttributeCauseAsync);
 Add("GAP-D1 actual cross-surface recovery", RecoveryBridgeChecks.RunAsync);
