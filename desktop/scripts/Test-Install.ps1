@@ -59,6 +59,43 @@ Case 'fresh repeat selected config and literal launch arguments' {
  Check ($v.arguments[2] -eq $f.Db) 'CLI lost selected DB';Check ($v.arguments[-1] -eq 'a & café') 'CLI split argument'
  $r=Run $f @('-Mode','Uninstall');Check ($r.Code -eq 0) $r.Text;Check (Test-Path $f.Db) 'Uninstall deleted DB';Check ((Get-FileHash $f.Db).Hash -eq $dbHash) 'Uninstall changed DB'
 }
+Case 'offline history permits only an owned same-store install and remains visible on recovery' {
+ $f=Fixture 'offline-history'
+ if($HistoricalBundle){$f.Payload=$HistoricalBundle}
+ $r=Run $f;Check ($r.Code -eq 0) $r.Text
+ $hadPrevious=$f.Contains('Payload')
+ if($hadPrevious){$f.Remove('Payload')}
+ $seed=Join-Path $f.Home 'cold-fixture.mjs'
+ @'
+import {pathToFileURL} from "node:url";
+import path from "node:path";
+const [src, dbPath] = process.argv.slice(2);
+const {openConnection,admittedTransaction}=await import(pathToFileURL(path.join(src,"database.mjs")));
+const {archivedReceiptPointer}=await import(pathToFileURL(path.join(src,"receipt-storage.mjs")));
+const db=openConnection(dbPath), id="mutation-receipt:"+"a".repeat(64), now="2026-10-29T00:00:00.000Z";
+try { admittedTransaction(db,()=>db.prepare("INSERT INTO records VALUES(?,?,?,?,?,?,?)").run(
+id,"mutation-receipt",id,"global",archivedReceiptPointer(id,1,path.join(path.dirname(dbPath),"missing.json"),"b".repeat(64)),now,now)); }
+finally {db.close();}
+'@ | Set-Content -LiteralPath $seed -Encoding utf8NoBOM
+ & $node $seed (Join-Path $source 'core/src') $f.Db
+ Check ($LASTEXITCODE -eq 0) 'Could not seed archived fixture'
+ $before=(Get-FileHash -LiteralPath $f.Db).Hash
+ $cfg=(Get-FileHash -LiteralPath (Join-Path $f.App interfaces.json)).Hash
+ $foreign=Fixture 'offline-history-not-owned'
+ $foreign.Db=$f.Db
+ $r=Run $foreign;Check ($r.Code -ne 0 -and $r.Text -match 'archive_restore_required') 'Unowned install accepted offline history'
+ Check (-not (Test-Path -LiteralPath $foreign.App)) 'Unowned failure promoted an app'
+ if($hadPrevious){
+  $r=Run $f @('-Fault','BeforeSwap');Check ($r.Code -ne 0 -and $r.Text -match 'after sealing') $r.Text
+ } else {
+  $r=Run $f @('-Fault','AfterSwap');Check ($r.Code -ne 0 -and $r.Text -match 'after application promotion') $r.Text
+ }
+ $r=Run $f @('-Mode','Recover');Check ($r.Code -eq 0 -and $r.Text -match '1 historical receipts remain unverified') $r.Text
+ $receipt=Get-Content -LiteralPath ($f.App+'.lodestar-install.json') -Raw|ConvertFrom-Json
+ Check ($receipt.phase -eq 'registered' -and $receipt.history_validation.state -eq 'offline' -and $receipt.history_validation.unavailable_receipts -eq 1) 'History warning missing from receipt'
+ Check ((Get-FileHash -LiteralPath $f.Db).Hash -eq $before) 'Offline install changed database'
+ Check ((Get-FileHash -LiteralPath (Join-Path $f.App interfaces.json)).Hash -eq $cfg) 'Offline install changed configuration'
+}
 Case 'legacy receipt without icon metadata recovers upgrades and uninstalls safely' {
  $f=Fixture 'legacy-icon-receipt';$r=Run $f @('-DesktopShortcut');Check ($r.Code -eq 0) $r.Text
  $configHash=(Get-FileHash (Join-Path $f.App interfaces.json)).Hash;$dbHash=(Get-FileHash $f.Db).Hash

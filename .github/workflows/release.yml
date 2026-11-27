@@ -192,12 +192,18 @@ jobs:
               publish_status=$?
 
             remote=""
-            for _ in {1..10}; do
+            # Positively acknowledged provenanced publishes may take several
+            # minutes to appear in registry metadata. Never republish a version.
+            for _ in {1..36}; do
               remote="$(registry_integrity || true)"
               if [[ "${remote}" = "${PACKAGE_INTEGRITY}" ]]; then
                 break
               fi
-              sleep 2
+              if [[ -n "${remote}" ]]; then
+                echo "::error::npm registry returned different integrity for ${PACKAGE_SPEC}."
+                exit 1
+              fi
+              sleep 5
             done
             if [[ "${remote}" != "${PACKAGE_INTEGRITY}" ]]; then
               if [[ "${publish_status}" -ne 0 ]]; then
