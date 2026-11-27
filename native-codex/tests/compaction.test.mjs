@@ -68,6 +68,15 @@ async function fixture(t) {
 const pre = (f, extra = {}) => handleHook({ ...f.host, hook_event_name: 'PreCompact', trigger: 'manual', ...extra }, f.data, f.options);
 const start = f => read(f, ['start', '--cwd', f.root, ...identity(f)]);
 const resume = f => handleHook({ session_id: f.host.session_id, cwd: f.root, source: 'compact', hook_event_name: 'SessionStart' }, f.data, f.options);
+const resumeWork = (f, extra = {}) => {
+  const processResult = spawnSync(process.execPath, [hook], {
+    env: { ...f.env, PLUGIN_DATA: f.data }, encoding: 'utf8', windowsHide: true,
+    timeout: 10_000, maxBuffer: 1024 * 1024, input: JSON.stringify({
+      session_id: f.host.session_id, cwd: f.root, hook_event_name: 'SessionStart', source: 'resume', ...extra }) });
+  assert.equal(processResult.error, undefined, processResult.error?.message);
+  assert.equal(processResult.status, 0, processResult.stderr);
+  return JSON.parse(processResult.stdout);
+};
 async function journal(f) {
   const folder = path.join(f.data, 'requests');
   const files = await readdir(folder);
@@ -80,6 +89,31 @@ async function journal(f) {
 
 // These tests exercise hook/core process integration; they do not dispatch native
 // Desktop lifecycle events or establish Desktop host acceptance.
+test('exact resume reads the bound intent without advancing revision; failures keep the turn usable', async (t) => {
+  const f = await fixture(t);
+  const before = (await start(f)).revision;
+  const recovered = resumeWork(f);
+  assert.equal(recovered.continue, true);
+  const card = recovered.hookSpecificOutput.additionalContext;
+  assert.match(card, /resumed the explicitly bound work/);
+  assert.match(card, /Read the saved reason; verify the real boundary before finishing/);
+  assert.match(card, /"open_requirement_ids":\["R1"\]/);
+  assert.match(card, /work\.check/);
+  assert.doesNotMatch(resumeWork(f, { session_id: 'wrong-session' }).hookSpecificOutput.additionalContext,
+    /Read the saved reason/);
+  assert.doesNotMatch(resumeWork(f, { source: 'startup' }).hookSpecificOutput.additionalContext, /Read the saved reason/);
+  const file = path.join(f.root, '.omx/lodestar-compaction.json');
+  await writeFile(file, JSON.stringify({ ...f.binding, database: path.join(f.root, 'absent.db') }));
+  const unavailable = resumeWork(f);
+  assert.equal(unavailable.continue, true);
+  assert.match(unavailable.systemMessage, /could not read the exact work record/);
+  assert.match(unavailable.systemMessage, /knowledge:synthetic-current-intent/);
+  assert.equal(unavailable.hookSpecificOutput, undefined);
+  await writeFile(file, '{malformed');
+  assert.match(resumeWork(f).systemMessage, /could not use the checkout's continuity binding/);
+  assert.equal((await start(f)).revision, before);
+});
+
 test('hook/core process integration: checkpoint and fresh-process recovery preserve goal, reason and finish gate', async (t) => {
   const f = await fixture(t);
   const result = await pre(f); assert.equal(result.continue, true, result.systemMessage); assert.match(result.systemMessage, /saved/);

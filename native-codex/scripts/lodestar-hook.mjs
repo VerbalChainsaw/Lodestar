@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   authorizePrompt, attestTool, captureNotes, startupContext,
-  checkpointForCompaction, recoverCompactForHook, boundRuntimeOptions,
+  checkpointForCompaction, recoverCompactForHook, recoverWorkOnResume, boundRuntimeOptions,
 } from "./lodestar-runtime.mjs";
 import { resolvePluginData } from "./lodestar-mcp.mjs";
 import { assertJsonValue, readHookJson } from "./lodestar-json.mjs";
@@ -36,6 +36,12 @@ export async function handleHook(input, dataDir, options = {}) {
         hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } };
     } catch (error) { return { continue: false, stopReason: "lodestar_compact_recovery_failed",
       systemMessage: `Lodestar compact recovery failed: ${error.message}` }; }
+  }
+  if (input.hook_event_name === "SessionStart" && input.source === "resume") {
+    const recovered = await recoverWorkOnResume(input, options);
+    if (recovered) return { continue: true, ...(recovered.problem ? { systemMessage: recovered.problem } : {
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: recovered.context },
+    }) };
   }
   if (input.hook_event_name === "UserPromptSubmit") {
     const authorization = await authorizePrompt(input, dataDir);
