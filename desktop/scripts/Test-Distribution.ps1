@@ -232,7 +232,8 @@ Run-Case 'payload_version_mismatch_refused' {
     $payload = New-Case 'version-mismatch-payload'
     $manifestPath = Join-Path $payload.App 'distribution-manifest.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    $manifest.version = '3.0.1'
+    $version = [version]$manifest.version
+    $manifest.version = '{0}.{1}.{2}' -f $version.Major,$version.Minor,($version.Build + 1)
     [IO.File]::WriteAllText($manifestPath,($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
     $refused = $false
     try { Test-DistributionPayload $payload.App | Out-Null } catch { $refused = $true }

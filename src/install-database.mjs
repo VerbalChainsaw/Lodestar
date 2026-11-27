@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION, SCHEMA_V5_VERSION, SCHEMA_V4_VERSION } from "./schema.mjs";
 import { randomUUID } from "node:crypto";
 import { lstat, open, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -20,17 +21,26 @@ async function plainPath(file) {
     const parent = path.dirname(current); if (parent === current) break; current = parent;
   }
 }
-async function inspect(file) {
+async function inspect(file, allowOfflineHistory = false) {
   const db = await openDiagnosticDatabase(file);
   try {
+    db.exec("BEGIN");
     const schema = readMetadata(db, file).schema_version;
-    if (schema !== "5" && schema !== "4") throw lodestarError("unsupported_schema", "The selected store is incompatible with this installation.", {
-      identifiers: { database: file, actual: schema, supported: [4, 5] },
-      action: "Preserve this database and use its matching Lodestar release. Only inspected schema 4 can be explicitly migrated; schema 5 requires no migration.",
+    if (![SCHEMA_V4_VERSION, SCHEMA_V5_VERSION, SCHEMA_VERSION].map(String).includes(schema)) throw lodestarError("unsupported_schema", "The selected store is incompatible with this installation.", {
+      identifiers: { database: file, actual: schema, supported: [SCHEMA_V4_VERSION, SCHEMA_V5_VERSION, SCHEMA_VERSION] },
+      action: "Preserve this database and use its matching Lodestar release. Only inspected schema 4 can be explicitly migrated; supported schemas 5 and 6 require no migration.",
     });
     if (schema === "4") return { schema_version: 4 };
     const report = diagnoseDatabase(db, { database: file });
     if (!report.healthy) {
+      const counts = report.reporting?.issue_counts;
+      const unavailable = counts?.archive_restore_required;
+      if (allowOfflineHistory && schema === String(SCHEMA_VERSION) &&
+          report.healthy === null && report.complete === false &&
+          Number.isSafeInteger(unavailable) && unavailable > 0 &&
+          report.reporting.issue_count === unavailable && Object.keys(counts).length === 1) {
+        return { ...report, history_validation: { state: "offline", unavailable_receipts: unavailable } };
+      }
       const issue = report.issues?.[0] ?? report.checks?.issues?.[0];
       throw lodestarError(issue?.code ?? "database_unhealthy", issue?.message ?? "The selected store failed integrity and schema diagnosis.", {
         identifiers: { database: file, ...(issue?.identifiers ?? {}), issues: report.issues ?? report.checks },
@@ -38,12 +48,18 @@ async function inspect(file) {
       });
     }
     return report;
-  } finally { db.close(); }
+  } finally {
+    try { if (db.isTransaction) db.exec("ROLLBACK"); }
+    finally { db.close(); }
+  }
 }
 
 // Explicit installer operation only. Launchers never call this helper.
 export async function prepareInstallDatabase({ database, initialize = false, migrate = false,
-  migrationRequestPath, backupPath, fault = null } = {}) {
+  migrationRequestPath, backupPath, fault = null, allowOfflineHistory = false } = {}) {
+  if (allowOfflineHistory && (initialize || migrate)) {
+    throw lodestarError("invalid_option", "Offline history is only allowed for an existing store without initialization or migration.");
+  }
   if (typeof database !== "string" || !path.isAbsolute(database) || database.includes("\0")) {
     throw lodestarError("invalid_path", "The selected database must be an absolute path.");
   }
@@ -57,7 +73,7 @@ export async function prepareInstallDatabase({ database, initialize = false, mig
     });
     created = (await initializeDatabase(file)).created;
   }
-  const current = await inspect(file);
+  const current = await inspect(file, allowOfflineHistory);
   let request, requestWasLoaded = false;
   if (migrationRequestPath && await exists(migrationRequestPath)) {
     request = parseJsonText(decodeUtf8(await readFile(migrationRequestPath)), { resource: "installer migration request" });
@@ -123,6 +139,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const arg = process.argv[i];
       if (arg === "--initialize") options.initialize = true;
       else if (arg === "--migrate") options.migrate = true;
+      else if (arg === "--allow-offline-history") options.allowOfflineHistory = true;
       else if (names[arg] && process.argv[i + 1]) options[names[arg]] = process.argv[++i];
       else throw lodestarError("unknown_option", "Unknown installer database argument.", { identifiers: { argument: arg } });
     }

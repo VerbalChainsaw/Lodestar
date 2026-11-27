@@ -165,6 +165,76 @@ test('known runtime drift remains branded and corrective after error presentatio
   });
 }));
 
+for (const value of [null, false, 0, ''])
+  test(`present invalid manifest cannot downgrade custom CLI verification: ${JSON.stringify(value)}`, () => fixture(async ({ root, file, manifestFile, config }) => {
+    await writeFile(path.join(root, 'custom-cli.mjs'), 'fixture');
+    await writeFile(file, config.replace('core/lodestar.mjs', 'custom-cli.mjs'));
+    await writeFile(manifestFile, JSON.stringify(value));
+    const before = await readFile(manifestFile);
+    await assert.rejects(loadInterfaceConfig(file, { requireLoader: false }), error => {
+      assert.equal(error.code, 'interface_config_invalid');
+      assert.equal(error.identifiers.path, manifestFile);
+      assert.equal(error.identifiers.pointer, '/');
+      return true;
+    });
+    assert.deepEqual(await readFile(manifestFile), before);
+  }));
+
+test('ignored non-core manifest entries do not crash current core verification', () => fixture(async ({ file, manifestFile, manifest, root }) => {
+  const document = JSON.parse(manifest);
+  document.files.unshift(null, false, 0, '', [], { path: 'other/ignored' });
+  await writeFile(manifestFile, JSON.stringify(document));
+  const before = await readFile(manifestFile);
+  const selection = await loadInterfaceConfig(file, { requireLoader: false });
+  assert.equal(selection.coreSourceBasis, 'verified_manifest_core');
+  assert.equal(selection.database, path.join(root, '../a.db'));
+  assert.deepEqual(await readFile(manifestFile), before);
+}));
+
+test('manifest core hashes must be primitive strings', () => fixture(async ({ file, manifestFile, manifest, hash }) => {
+  const document = JSON.parse(manifest);
+  document.files[0].sha256 = [hash];
+  await writeFile(manifestFile, JSON.stringify(document));
+  const before = await readFile(manifestFile);
+  await assert.rejects(loadInterfaceConfig(file, { requireLoader: false }), error => {
+    assert.equal(error.code, 'interface_config_invalid');
+    assert.equal(error.identifiers.path, manifestFile);
+    assert.equal(error.identifiers.pointer, '/files/0');
+    return true;
+  });
+  assert.deepEqual(await readFile(manifestFile), before);
+}));
+
+for (const name of ['\0', '\uD800', '\uDC00'])
+  test(`manifest core path rejects unrepresentable identity ${JSON.stringify(name)}`, () => fixture(async ({ file, manifestFile, manifest, root, hash }) => {
+    // A surrogate must never alias this replacement-character file during Node path encoding.
+    await writeFile(path.join(root, 'core', '\uFFFD.mjs'), 'fixture');
+    const document = JSON.parse(manifest);
+    document.files.push({ path: `core/${name}.mjs`, bytes: 7, sha256: hash });
+    await writeFile(manifestFile, JSON.stringify(document));
+    const before = await readFile(manifestFile);
+    await assert.rejects(loadInterfaceConfig(file, { requireLoader: false }), error => {
+      assert.equal(error.code, 'interface_config_invalid');
+      assert.equal(error.identifiers.path, manifestFile);
+      assert.equal(error.identifiers.pointer, '/files/1');
+      return true;
+    });
+    assert.deepEqual(await readFile(manifestFile), before);
+    assert.equal(await readFile(path.join(root, 'core', '\uFFFD.mjs'), 'utf8'), 'fixture');
+  }));
+
+test('manifest core paths preserve valid supplementary Unicode names', () => fixture(async ({ file, manifestFile, manifest, root, hash }) => {
+  const relative = 'core/\u{1F600}.mjs';
+  await writeFile(path.join(root, relative), 'fixture');
+  const document = JSON.parse(manifest);
+  document.files.push({ path: relative, bytes: 7, sha256: hash });
+  await writeFile(manifestFile, JSON.stringify(document));
+  const before = await readFile(manifestFile);
+  const selection = await loadInterfaceConfig(file, { requireLoader: false });
+  assert.equal(selection.coreSourceBasis, 'verified_manifest_core');
+  assert.deepEqual(await readFile(manifestFile), before);
+}));
+
 test('legacy extra fields and UTF8 BOM load unchanged in config and manifest', () => fixture(async ({ file, manifestFile, config, manifest, root }) => {
   await writeFile(file, '\uFEFF' + config); await writeFile(manifestFile, '\uFEFF' + manifest);
   const before = await readFile(file);

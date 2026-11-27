@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from "../src/schema.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -268,9 +269,9 @@ test("unadmitted DML is blocked both by trusted_schema OFF and the UDF fallback 
     try {
       assert.throws(() => db.exec("UPDATE metadata SET value='bad' WHERE key='schema_version'"), /lodestar_write_contract_required/u);
     } finally { db.exec("ROLLBACK"); }
-    assert.equal(db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get().value, "5");
+    assert.equal(db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get().value, String(SCHEMA_VERSION));
     admittedTransaction(db, () => {
-      assert.equal(db.prepare("SELECT lodestar_write_contract() AS contract").get().contract, 5);
+      assert.equal(db.prepare("SELECT lodestar_write_contract() AS contract").get().contract, SCHEMA_VERSION);
       db.exec("UPDATE metadata SET value=value WHERE key='schema_version'");
     });
     assert.equal(db.prepare("PRAGMA trusted_schema").get().trusted_schema, 0);

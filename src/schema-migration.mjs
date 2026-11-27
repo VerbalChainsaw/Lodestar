@@ -11,7 +11,7 @@ import { assertJsonNumericDomain, canonicalStringify } from "./json.mjs";
 import { contentData, parseStoredContent, writeRecordSnapshot } from "./records.mjs";
 import { allocateRevision } from "./revisions.mjs";
 import { CONTRACT_VERSION, createDatabaseInstanceId, inspectSchemaDefinitions,
-  SCHEMA_V4_VERSION, WRITE_FENCE_SQL } from "./schema.mjs";
+  SCHEMA_V4_VERSION, SCHEMA_V5_VERSION, WRITE_FENCE_V5_SQL } from "./schema.mjs";
 import { validateIdentifier, validateSourceMetadata, validateTimestamp } from "./validate.mjs";
 
 const TABLE_COLUMNS = Object.freeze({
@@ -420,7 +420,7 @@ export async function migrateDatabase(file, { request, now = () => new Date() } 
       const update = db.prepare("UPDATE metadata SET value=? WHERE key=?");
       update.run(String(CONTRACT_VERSION), "schema_version");
       db.prepare("INSERT INTO metadata(key,value) VALUES('database_epoch',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(epoch);
-      db.exec(WRITE_FENCE_SQL);
+      db.exec(WRITE_FENCE_V5_SQL);
       for (const row of changes.records) {
         const content = JSON.parse(row.content_json), metadata = content._lodestar ?? {};
         const historical = row.type === "startup-snapshot" || row.type === "mutation-receipt"
@@ -451,7 +451,7 @@ export async function migrateDatabase(file, { request, now = () => new Date() } 
             database_epoch: epoch, contract: CONTRACT_VERSION, revision }, result } },
         aliases: [], links: [], sources: [] },
       { createdAt: timestamp, updatedAt: timestamp, revision });
-      const schema = inspectSchemaDefinitions(db);
+      const schema = inspectSchemaDefinitions(db, { version: SCHEMA_V5_VERSION });
       const foreignKeys = db.prepare("SELECT * FROM pragma_foreign_key_check").all();
       const after = rawInventory(db);
       const restored = { ...after, metadata: original.metadata,

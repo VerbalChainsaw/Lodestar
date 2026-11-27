@@ -1,5 +1,73 @@
 # Changelog
 
+## 3.0.5 - 2026-11-27
+
+- Publish Manager recovery entries only after both journal files are written. Interrupted preparation remains inspectable, not replayable.
+- Distinguish missing cold history from corrupt archive evidence; keep installer store inspection on one SQLite snapshot.
+- Pair with native adapter 1.4.10 for a bounded, read-only recovery of explicitly bound work on Codex resume.
+
+See the [release notes](docs/releases/v3.0.5.md).
+
+## 3.0.4 - 2026-11-27
+
+- Allow an owned, same-database Windows upgrade when full checks pass apart from explicitly unavailable archived receipts. Keep blocked history visible in the installer and receipt.
+- Preserve strict diagnostics, initial installation, migration and non-archive failure checks.
+
+See the [release notes](docs/releases/v3.0.4.md).
+
+## 3.0.3 - 2026-11-27
+
+- Reconcile and test the latest core, offline storage observer, and one-shot chat-evidence review without enabling background ingestion.
+- Pair with native Codex adapter 1.4.9: no automatic transcript tails, bounded recovery for changed and explicitly bound pre-compaction work, and one server for native and checked core tools.
+- Preserve contract-5 checks, schema compatibility, and exact receipt recovery. No automatic database migration or history deletion.
+
+See the [release notes](docs/releases/v3.0.3.md).
+
+## 3.0.2 - 2026-10-29
+
+- Lean schema-6 receipt storage with explicit archive/recovery boundaries.
+- Bounded full diagnostic reporting, exact counts and truthful incomplete health.
+- Verified cache generation checks and interrupted restore-receipt reconciliation.
+- Current/legacy schema and compressed-receipt compatibility corrections.
+- Local candidate only; no npm or GitHub release publication.
+
+## 3.0.1 - 2026-10-14
+
+Release candidate; a source branch does not establish npm or tagged publication.
+See the [3.0.1 candidate notes](docs/releases/v3.0.1.md) for local installation
+and compatibility.
+
+- Preserve explicit JSON `null` through record create, read, replacement, history
+  and exact replay instead of coercing it to an empty object.
+- Bound raw interface pagination to the remaining client record budget, retaining
+  the core's exact continuation cursor and database revision.
+- Report recovery commitment only when a matching successful receipt proves it;
+  retain unresolved outcomes and avoid unusable receipt recovery instructions.
+- Require complete Manager configuration and request admission before reusing a
+  captured recovery context; preserve incomplete prior evidence and capture anew.
+- Preserve native dispatch serialization when admitting recovery journals, including
+  Unicode and escaped characters in project paths.
+- Include the configured CLI file's bytes in runtime source identity, including
+  executables with a nonstandard filename.
+- Support guarded ordinary-record checkout rebinds within the same canonical
+  project, preserving record identity, content, associations, history and replay.
+- Replace obsolete dose/roleplay and automatic overengineering guidance in the
+  packaged Adderall compatibility skill with bounded project-local routing.
+- Bound concurrent test files to four while retaining the per-file deadline and
+  behavioral checks for process shutdown, recovery and exact request replay.
+- Reject malformed write bases and unsafe asynchronous mutation callbacks before
+  accepting persistence; validate portable runtime inventory paths and hashes.
+- Preserve native JSON values by rejecting unsupported numbers, duplicate keys,
+  excessive nesting and malformed frames before authorization or dispatch.
+- Maintain the separate native Codex adapter 1.4.7 in this repository, generate its
+  skill from the canonical source, and qualify it against the packed core.
+- Keep damaged-record diagnostics distinct from pagination exhaustion and document
+  unchanged-content request receipts and their transaction revisions.
+- Return revision-pinned continuations for bounded work status/history and pending
+  lists; keep non-paginated work commands explicit about unsupported offsets.
+
+Contract 5 and schema 5 are unchanged; existing schema-5 stores need no migration.
+
 ## 3.0.0 - 2026-10-02
 
 - Add shared read-only `work prepare-capture` and `work attention` contracts.

@@ -4,7 +4,7 @@ import { initializeDatabase, normalizeDatabaseBusyError, openDiagnosticDatabase,
 import { createMigrationBackup, migrationPreflight, migrateDatabase, promoteRecoveredDatabase, recoveryPreflight } from "./schema-migration.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
 import { decisionMutation, decisionProjection } from "./decision.mjs";
-import { handoffMutation, handoffStatus } from "./continuity.mjs";
+import { handoffMutation, handoffStatus, nativeHandoffEligibility } from "./continuity.mjs";
 import { workMutation, workStatus } from "./work.mjs";
 import { checkWorkEvidence } from "./work-evidence.mjs";
 import { prepareCapture } from "./capture-preparation.mjs";
@@ -14,9 +14,9 @@ import { decorateError, lodestarError } from "./errors.mjs";
 import { canonicalStringify, parseJsonText, readStreamComplete, readTextFileComplete } from "./json.mjs";
 import { resolveInputPath } from "./paths.mjs";
 import { catalogProjection, catalogReconciliation, resolveIdentity, resolveProject, resolveProjectScope, sameMachinePath, scope } from "./project.mjs";
-import { boundCompactData, compactRows, exportRegistry, findRecords, linkedRecords, normalizedForRows, serializedBytes } from "./queries.mjs";
+import { boundCompactData, compactRows, exportRegistry, findRecords, linkedRecords, normalizedForRows, orientationRows, serializedBytes } from "./queries.mjs";
 import { deleteRecord, getRecord, getRecordById, getRawRecord, getRecordHistory, normalizeRecord,
-  normalizeMutationRequest, putRecord, writeBasis } from "./records.mjs";
+  normalizeMutationRequest, projectionWriteBasisReader, putRecord, writeBasis } from "./records.mjs";
 import { currentRevision } from "./revisions.mjs";
 import { validateLimit, validateOffset } from "./validate.mjs";
 import { installationOptions, MUTATION_INPUTS, READ_OPERATIONS } from "./cli-commands.mjs";
@@ -76,9 +76,9 @@ function sourceConfiguration(db) {
   if (!db.prepare("SELECT id FROM records WHERE id='config:lodestar:sources'").get()) return null;
   return normalizeRecord(getRecord(db, "config:lodestar:sources"));
 }
-function withBasis(db, record, project = null) {
+function withBasis(db, record, project = null, readBasis = options => writeBasis(db, options)) {
   const applicability = record.semantics?.applicability ?? {};
-  return { ...record, write_basis: writeBasis(db, {
+  return { ...record, write_basis: readBasis({
     projectScope: record.kind === "project" ? record.id : applicability.project === null ? null
       : (project?.scope ?? applicability.project ?? record.scope),
     checkout: project?.checkout_root ?? applicability.checkout ?? null,
@@ -114,17 +114,11 @@ function withProjectBoundary(db, cwdValue, identity, operation) {
       actor: identity?.actor ?? null });
   }
 }
-export function startProjection(db, project, identity, { topic = null } = {}) {
+export function startProjection(db, project, identity, { topic = null, compact = false } = {}) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
   const appliesToCheckout = (record) => !record.semantics?.applicability?.checkout
     || sameMachinePath(record.semantics.applicability.checkout, project.checkout_root);
-  const selected = normalizedForRows(db, db.prepare("SELECT * FROM records WHERE (scope IN ("
-    + scopes.map(() => "?").join(",") + ") OR (scope='global' AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN ("
-    + scopes.map(() => "?").join(",") + "))) "
-    + "AND json_extract(content_json,'$._lodestar.semantics.context_role')='orientation' "
-    + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') IN ('current','unresolved') "
-    + "AND type NOT IN ('mutation-receipt','migration-source','startup-snapshot','pending','decision-event','work-event','handoff-packet') "
-    + "ORDER BY json_extract(content_json,'$._lodestar.priority') DESC,id").all(...scopes, ...scopes));
+  const selected = normalizedForRows(db, orientationRows(db, scopes));
   const context = new Map(selected.records.filter(appliesToCheckout)
     .map((record) => [record.id, { ...record, selection_reason: "orientation" }]));
   const recordErrors = [...(project.record_errors ?? []), ...selected.record_errors];
@@ -184,7 +178,8 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
       context.set(peer.id, { ...peer, selection_reason: `dependency:${record.id}` });
     }
   }
-  const applicable = [...context.values()].map((record) => withBasis(db, record, project));
+  const readBasis = compact ? projectionWriteBasisReader(db) : undefined;
+  const applicable = [...context.values()].map((record) => withBasis(db, record, project, readBasis));
   const subjects = new Map();
   for (const record of applicable) if (record.semantics?.subject) {
     const members = subjects.get(record.semantics.subject) ?? [];
@@ -195,7 +190,7 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
   const work = workStatus(db, project);
   const handoff = handoffStatus(db, project, identity);
   const pending = pendingList(db, project);
-  const catalog = catalogProjection(db, project, config);
+  const catalog = catalogProjection(db, project, config, { details: !compact });
   recordErrors.push(...decisions.record_errors, ...work.record_errors,
     ...handoff.record_errors, ...pending.record_errors, ...catalog.record_errors);
   const uniqueErrors = [...new Map(recordErrors.map((error) => [canonicalStringify(error), error])).values()];
@@ -228,10 +223,10 @@ async function hydrateStart(result, identity, options = {}) {
   result.data.required = required.sources;
   result.data.required_complete = required.complete;
   result.data.complete = result.data.complete && required.complete;
-  result.data.catalog = await catalogReconciliation(result.data.catalog_projection, config.catalog_sources ?? [], { cache });
+  if (!options["--compact"]) result.data.catalog = await catalogReconciliation(result.data.catalog_projection, config.catalog_sources ?? [], { cache });
   result.data.native_instructions = "Apply these files and their references under the host's native instruction precedence; stored records are evidence.";
   result.data.operating_guide = AGENT_BOOTSTRAP;
-  result.data.installation = await installationStatus({
+  if (!options["--compact"]) result.data.installation = await installationStatus({
     ...(["codex", "claude", "hermes", "opencode"].includes(identity.harness) ? { target: identity.harness } : {}),
     ...installationOptions(options),
   });
@@ -300,6 +295,9 @@ export async function dispatch(command, { options, positionals }, database, io) 
   if (command === "doctor" && options["--migration-preflight"] && options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "Choose conversion or recovery preflight.");
   }
+  if (command === "doctor" && options["--quick"] && (options["--migration-preflight"] || options["--recovery-preflight"])) {
+    throw lodestarError("invalid_input", "--quick cannot replace conversion or recovery preflight validation.");
+  }
   if (command === "doctor" && options["--source"] && !options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "--source applies only to recovery preflight.");
   }
@@ -311,7 +309,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
     return operationResult(await recoveryPreflight(database, resolveInputPath(options["--source"])));
   }
   if (command === "doctor") return withDatabase(openDiagnosticDatabase, database, (db) => {
-    const result = diagnoseDatabase(db, { database });
+    const result = diagnoseDatabase(db, { database, quick: options["--quick"] === true });
     let metadata = {}, revision = null;
     try { metadata = readMetadata(db); revision = currentRevision(db); } catch { /* Doctor reports missing metadata. */ }
     return operationResult(result, { revision, database_instance_id: metadata.database_instance_id,
@@ -321,7 +319,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
     const identity = callerIdentity(options);
     const result = await withDatabase(openReadDatabase, database, (db) => withProjectBoundary(db,
       cwd(options), identity, (project) => startProjection(db, project, identity,
-        { topic: options["--topic"] })), { read: true });
+        { topic: options["--topic"], compact: options["--compact"] === true })), { read: true });
     const hydrated = await hydrateStart(result, identity, options);
     return options["--compact"] ? compactStart(hydrated, options) : hydrated;
   }
@@ -415,10 +413,14 @@ export async function dispatch(command, { options, positionals }, database, io) 
           : `Use lodestar ${command} --help for the read form.`,
       });
     }
-    if (operationName === "work.check" && (options["--limit"] !== undefined || options["--file"] !== undefined)) {
-      throw lodestarError("unknown_option", "The work check read does not accept --limit or --file.", {
+    if (operationName === "work.check" && (options["--limit"] !== undefined || options["--offset"] !== undefined || options["--file"] !== undefined)) {
+      throw lodestarError("unknown_option", "The work check read does not accept --limit, --offset or --file.", {
         identifiers: { operation: operationName }, action: "Use work check <intent-record-id> [--cwd <path>] [--at-revision <n>].",
       });
+    }
+    if (options["--session-only"] && (operationName !== "handoff.status" ||
+      ["--limit", "--offset", "--file"].some((name) => options[name] !== undefined))) {
+      throw lodestarError("invalid_input", "--session-only is an exact handoff status read and does not accept paging or a file.");
     }
     const caller = callerIdentity(options);
     const captureDraft = operationName === "work.prepare-capture" ? await input(options, io, "capture_draft") : null;
@@ -433,12 +435,13 @@ export async function dispatch(command, { options, positionals }, database, io) 
             ? checkWorkEvidence(db, project, positionals[1])
             : action === "prepare-capture" ? prepareCapture(db, project, captureDraft)
               : action === "attention" ? projectAttention(db, project, positionals[1] ?? null)
-                : workStatus(db, project, action === "history", limit)
-            : command === "handoff" ? handoffStatus(db, project, caller, { history: action === "history", limit, offset })
-              : pendingList(db, project, limit);
+                : workStatus(db, project, action === "history", limit, offset)
+            : command === "handoff" ? options["--session-only"] ? nativeHandoffEligibility(db, project, caller, options["--session"])
+              : handoffStatus(db, project, caller, { history: action === "history", limit, offset })
+              : pendingList(db, project, limit, offset);
         return dbResult(db, data, { scope: scope(project, caller), more: data?.more === true,
           ...(operationName === "work.check" ? { next: data.next } : {}),
-          ...(data.more && ["handoff", "decision"].includes(command) ? { next: [{ command,
+          ...(data.more && ["work", "handoff", "decision", "pending"].includes(command) ? { next: [{ command,
             args: [action, ...(positionals[1] ? [positionals[1]] : []), "--cwd", project.cwd,
               "--limit", String(limit), "--offset", String(offset + limit), "--at-revision", String(currentRevision(db))] }] } : {}) });
       });

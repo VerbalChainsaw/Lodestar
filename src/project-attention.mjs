@@ -1,4 +1,4 @@
-import { checkWorkEvidence, inspectWorkIntent } from "./work-evidence.mjs";
+import { checkWorkEvidence, validateWorkIntentRecord } from "./work-evidence.mjs";
 import { workStatus } from "./work.mjs";
 import { pendingList } from "./pending.mjs";
 import { normalizedForRows } from "./queries.mjs";
@@ -15,7 +15,7 @@ export function projectAttention(db, project, intentId = null) {
     if (record.data?.intent === undefined || record.semantics.lifecycle !== "current") continue;
     try {
       // Selection uses the same persisted contract as work check and capture.
-      inspectWorkIntent(db, project, record.id);
+      validateWorkIntentRecord(project, record);
       intents.push(record);
     } catch (error) {
       if (error.code !== "invalid_intent_contract") throw error;
