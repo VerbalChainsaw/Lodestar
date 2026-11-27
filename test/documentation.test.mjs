@@ -9,6 +9,35 @@ import { validatePutInput } from "../src/validate.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
+test("current local candidate has one dated changelog entry and exact artifact installation guidance", async () => {
+  const { version } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const changelog = await readFile(path.join(root, "CHANGELOG.md"), "utf8");
+  const entries = [...changelog.matchAll(/^## ([^\r\n]*)/gmu)]
+    .filter((match) => match[1].startsWith(`${version} - `));
+  assert.equal(entries.length, 1, "Current changes must share one release entry");
+  const candidateDate = entries[0][1].slice(version.length + 3);
+  assert.match(candidateDate, /^\d{4}-\d{2}-\d{2}$/u);
+  assert.equal(new Date(candidateDate).toISOString().slice(0, 10), candidateDate);
+  const notes = await readFile(path.join(root, `docs/releases/v${version}.md`), "utf8");
+  const dated = notes.match(/^Candidate date: (\d{4}-\d{2}-\d{2})\.?$/mu);
+  assert.equal(dated?.[1], candidateDate, "Release notes and changelog must agree on the candidate date");
+  for (const file of ["README.md", "docs/installation.md", `docs/releases/v${version}.md`]) {
+    const text = await readFile(path.join(root, file), "utf8");
+    assert.ok(text.includes(`npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-${version}.tgz"`), file);
+    assert.ok(text.includes("https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0"), file);
+    assert.match(text, /Node\.js 24\.15\.0/u);
+    assert.match(text, /\.NET 10\s+Desktop\s+Runtime \(x64\)/u);
+    assert.match(text, /PowerShell 7/u);
+    assert.match(text, /local candidate/iu, file);
+    assert.match(text, /has not been published to\s+npm or GitHub/iu, file);
+    assert.ok(!text.includes(`npm install --global lodestar-agent-context@${version}`), file);
+    assert.ok(!text.includes(`https://github.com/VerbalChainsaw/Lodestar/releases/tag/v${version}`), file);
+  }
+  const previous = await readFile(path.join(root, "docs/releases/v3.0.0.md"), "utf8");
+  assert.match(previous, /^Release date: 2026-10-02\.?$/mu);
+  assert.ok(previous.includes("npm install --global lodestar-agent-context@3.0.0"));
+});
+
 async function filesUnder(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   return (await Promise.all(entries.map(async (entry) => {
@@ -19,20 +48,30 @@ async function filesUnder(directory) {
 
 async function shippedDocuments() {
   const direct = ["README.md", "CHANGELOG.md", "SECURITY.md", "docs/README.md", "docs/agent-bootstrap.json",
-    "docs/limitations.md", "docs/schema.md", "docs/releases/v2.0.0.md", "docs/releases/v2.0.1.md",
-    "docs/releases/v2.0.2.md", "docs/releases/v2.1.0.md", "docs/releases/v2.1.1.md", "docs/releases/v2.1.2.md", "docs/installation.md"].map((file) => path.join(root, file));
+    "docs/limitations.md", "docs/schema.md", "docs/installation.md"].map((file) => path.join(root, file));
+  const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const declaredMarkdown = packageJson.files.filter((file) => file.endsWith(".md") && !file.startsWith("!"))
+    .map((file) => path.join(root, file));
   const managed = (await filesUnder(path.join(root, "managed-assets")))
     .filter((file) => /\.(?:md|json)$/u.test(file));
   const plugin = (await filesUnder(path.join(root, "codex-plugin")))
     .filter((file) => /\.(?:md|json)$/u.test(file));
-  return [...direct, ...managed, ...plugin];
+  return [...new Set([...direct, ...declaredMarkdown, ...managed, ...plugin])];
 }
 
 function jsonFences(text) {
   return [...text.matchAll(/```json\s*\r?\n([\s\S]*?)\r?\n```/gu)].map((match) => match[1]);
 }
 
-test("every shipped JSON example parses and documented put input matches the current contract", async () => {
+test("the shipped-example gate includes every explicitly packaged Markdown document", async () => {
+  const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const inspected = new Set(await shippedDocuments());
+  for (const file of packageJson.files.filter((file) => file.endsWith(".md") && !file.startsWith("!"))) {
+    assert.ok(inspected.has(path.join(root, file)), `Packaged documentation bypasses the example gate: ${file}`);
+  }
+});
+
+test("every shipped JSON example parses and documented put inputs match the current contract", async () => {
   const documents = await shippedDocuments();
   const examples = [];
   for (const file of documents) {
@@ -42,8 +81,21 @@ test("every shipped JSON example parses and documented put input matches the cur
   assert.ok(examples.length > 0, "at least one shipped JSON example is required");
   const mutations = examples.filter(({ value }) => value?.v === 5 && value?.write_basis && value?.input);
   assert.ok(mutations.length > 0, "at least one complete mutation example is required");
+  let updateExamples = 0;
   for (const { value } of mutations) {
     const request = normalizeMutationRequest(value);
+    if (request.input.mode === "update") {
+      updateExamples += 1;
+      assert.equal(typeof request.input.id, "string");
+      assert.ok(request.input.set !== null && typeof request.input.set === "object"
+        && !Array.isArray(request.input.set)
+        && Object.getPrototypeOf(request.input.set) === Object.prototype,
+        "update examples carry a plain-object set");
+      assert.ok(Array.isArray(request.input.remove)
+        && request.input.remove.every((key) => typeof key === "string"),
+        "update examples carry an array remove of string keys");
+      continue;
+    }
     assert.equal(request.input.mode, "create");
     const record = request.input.record;
     validatePutInput({ id: record.id, type: record.kind, name: record.name, scope: record.scope,
@@ -51,9 +103,10 @@ test("every shipped JSON example parses and documented put input matches the cur
         _lodestar: { priority: record.priority ?? 0, revision: 1, semantics: record.semantics } },
       aliases: record.aliases, links: record.links, sources: record.sources });
   }
+  assert.ok(updateExamples >= 1, "at least one shipped update example is required");
 });
 
-test("shipped command examples use current command families and the local release artifact", async () => {
+test("shipped command examples use current command families and versioned release artifacts", async () => {
   for (const file of await shippedDocuments()) {
     if (["CHANGELOG.md", "SECURITY.md"].includes(path.basename(file))) continue;
     const text = await readFile(file, "utf8");
@@ -63,6 +116,35 @@ test("shipped command examples use current command families and the local releas
       assert.ok(Object.hasOwn(COMMANDS, match[1]), `${file} documents unknown command ${match[1]}`);
     }
     assert.doesNotMatch(text, /npm install --global lodestar-agent-context(?:@2\.0\.0)?(?:\s|$)/u,
-      `${file} points at an unpublished registry artifact`);
+      `${file} must identify a supported package version`);
   }
+});
+
+test("current package guidance includes the canonical FAQ, troubleshooting and maintainer guides", async () => {
+  const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  for (const file of ["Q&A.md", "HEADACHES.md", "docs/README.md", "docs/publishing.md"]) {
+    assert.ok(packageJson.files.includes(file), `Missing maintained package guide: ${file}`);
+  }
+  const readme = await readFile(path.join(root, "README.md"), "utf8");
+  assert.match(readme, /\[FAQ\]\(Q&A\.md\)/u);
+  const index = await readFile(path.join(root, "docs/README.md"), "utf8");
+  assert.match(index, /\[publishing guide\]\(publishing\.md\)/u);
+  for (const file of ["Q&A.md", "HEADACHES.md", "NEEDS.md"]) {
+    const text = await readFile(path.join(root, file), "utf8");
+    assert.doesNotMatch(text, /lodestar-agent-context@2\.1\.2|(?:current release|public design boundary) for Lodestar 2\.1\.2/u);
+  }
+  const toolchain = await readFile(path.join(root, "managed-assets/skills/lodestar/references/toolchain.md"), "utf8");
+  const installation = toolchain.slice(0, toolchain.indexOf("```bash"));
+  assert.match(installation, /Do not substitute\s+a local candidate version until its matching package has been published/iu,
+    'npm example must distinguish the retained release from an unpublished candidate');
+  assert.match(installation, /candidate.*tarball/isu, 'current local evaluation needs an exact candidate path');
+});
+
+test("Windows application manifest identity agrees with the release assembly version", async () => {
+  const project = await readFile(path.join(root, "desktop/Lodestar.Loader/Lodestar.Loader.csproj"), "utf8");
+  const manifest = await readFile(path.join(root, "desktop/Lodestar.Loader/app.manifest"), "utf8");
+  const version = /<AssemblyVersion>([^<]+)<\/AssemblyVersion>/u.exec(project)?.[1];
+  assert.ok(version);
+  assert.equal(/<assemblyIdentity version="([^"]+)"/u.exec(manifest)?.[1], version);
+  assert.match(manifest, /manifestVersion="1\.0"/u);
 });

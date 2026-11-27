@@ -1,20 +1,23 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { encodeReceiptStorage, decodeReceiptStorage, decodeReceiptRow, isExternalReceiptStorage, isRetiredReceipt } from "./receipt-storage.mjs";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { inspectLocalSourceSync } from "./bootstrap.mjs";
-import { resolveSourceLocator } from "./paths.mjs";
+import { resolveInputPath, resolveSourceLocator } from "./paths.mjs";
 
 import { lodestarError } from "./errors.mjs";
 import {
   admittedTransaction,
   assertSupportedSchema,
+  consumeAsyncResult,
   readMetadata,
   transactionRevision,
 } from "./database.mjs";
 import { assertJsonNumericDomain, canonicalStringify } from "./json.mjs";
-import { prepareProjectRoots, resolveProjectScope, sameMachinePath, validateProjectBindings } from "./project.mjs";
+import { prepareProjectRoots, resolveProject, resolveProjectScope, sameMachinePath, validateProjectBindings } from "./project.mjs";
 import { allocateRevision, currentRevision } from "./revisions.mjs";
 import { CONTRACT_VERSION } from "./schema.mjs";
+import { requireStoredRecordSemantics, storedSourceCorrection, validateStoredReceipt } from "./stored-semantics.mjs";
 import {
   CONTEXT_ROLES,
   FRESHNESS_STATES,
@@ -217,16 +220,10 @@ function storedJson(text, validate, identifiers) {
     return value;
   } catch (error) {
     if (error?.code === "unsupported_numeric_value") {
-      throw lodestarError(
-        "record_requires_source_correction",
+      throw storedSourceCorrection(
         "The stored record contains a number outside the current numeric domain.",
-        {
-          identifiers: { ...identifiers, ...error.identifiers },
-          action: identifiers.id
-            ? `Use get ${identifiers.id} --raw, then submit a guarded replacement from the source owner.`
-            : "Inspect the raw stored JSON and correct its source representation.",
-          cause: error,
-        },
+        { ...identifiers, ...error.identifiers },
+        error,
       );
     }
     throw lodestarError(
@@ -241,7 +238,7 @@ function storedJson(text, validate, identifiers) {
   }
 }
 export function parseStoredContent(text, identifiers = {}) {
-  return storedJson(text, validateContent, {
+  return storedJson(decodeReceiptStorage(text, identifiers), validateContent, {
     field: "content_json",
     ...identifiers,
   });
@@ -254,12 +251,10 @@ export function parseStoredMetadata(text, identifiers = {}) {
   });
 }
 function parsedRecord(row) {
+  row = decodeReceiptRow(row);
   const stored = parseStoredContent(row.content_json, { id: row.id });
   const metadata = stored._lodestar ?? {};
-  if (!metadata.semantics) throw lodestarError("record_requires_source_correction", "The record is missing current-contract semantic metadata.", {
-    identifiers: { id: row.id, pointer: "/_lodestar/semantics" },
-    action: `Inspect get ${row.id} --raw and use an explicit checked source correction.`,
-  });
+  requireStoredRecordSemantics(stored, { id: row.id });
   const { _lodestar: _ignored, ...content } = stored;
   return {
     id: row.id,
@@ -478,6 +473,16 @@ function assertAliasAvailability(db, id, aliases) {
     }
     const owner = aliasOwner.get(alias);
     if (owner && owner.record_id !== id) {
+      let action = "Choose a globally unique alias.";
+      try {
+        const ownerRow = db.prepare(
+          "SELECT type, COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') AS lifecycle "
+            + "FROM records WHERE id=?",
+        ).get(owner.record_id);
+        if (ownerRow && ownerRow.type === "rejection" && ownerRow.lifecycle === "current") {
+          action = `Alias belongs to current rejection record ${owner.record_id}; read it before choosing a different alias.`;
+        }
+      } catch { /* Keep the standard guidance when the owner row cannot be inspected. */ }
       throw lodestarError(
         "alias_conflict",
         "An alias already belongs to another record.",
@@ -487,7 +492,7 @@ function assertAliasAvailability(db, id, aliases) {
             alias,
             record_id: owner.record_id,
           },
-          action: "Choose a globally unique alias.",
+          action,
         },
       );
     }
@@ -517,7 +522,8 @@ function replaceRecord(
     input.type,
     input.name,
     input.scope,
-    input.content_json,
+    input.type === "mutation-receipt" && readMetadata(db).schema_version === "6"
+      ? encodeReceiptStorage(input.content_json, input.id) : input.content_json,
     current?.created_at ?? createdAt,
     updatedAt,
   );
@@ -588,10 +594,11 @@ function plain(value) {
     && Object.getPrototypeOf(value) === Object.prototype;
 }
 
-function invalidMutation(message, identifiers = {}) {
+function invalidMutation(message, identifiers = {},
+  action = "Upgrade the caller and submit the complete Lodestar contract-5 mutation.") {
   throw lodestarError("invalid_mutation_contract", message, {
     identifiers,
-    action: "Upgrade the caller and submit the complete Lodestar contract-5 mutation.",
+    action,
   });
 }
 
@@ -639,6 +646,14 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
     const basis = value.write_basis;
     if (!plain(basis)) invalidMutation("write_basis must be an object.");
     exactKeys(basis, Object.keys(WRITE_BASIS_SCHEMA.properties), "write_basis");
+    if (!Array.isArray(basis.targets)) {
+      invalidMutation("write_basis.targets must be an array.", { field: "write_basis.targets" });
+    }
+    for (const field of ["project_scope", "checkout"]) {
+      if (!Object.hasOwn(basis, field) || (basis[field] !== null && typeof basis[field] !== "string")) {
+        invalidMutation(`write_basis.${field} must be null or a string.`, { field: `write_basis.${field}` });
+      }
+    }
     request = {
       v: CONTRACT_VERSION,
       request_id: value.request_id,
@@ -647,7 +662,7 @@ export function normalizeMutationRequest(value, { actor = null } = {}) {
       project_scope: basis.project_scope ?? null,
       checkout: basis.checkout ?? null,
       actor,
-      preconditions: (basis.targets ?? []).map((entry, index) => {
+      preconditions: basis.targets.map((entry, index) => {
         if (!plain(entry) || !Object.hasOwn(entry, "expected_revision")) {
           invalidMutation("Each write-basis target needs expected_revision.", { index });
         }
@@ -723,8 +738,14 @@ function beforeImage(db, id) {
   return row ? { raw_record: row, raw_associations: rawAssociations(db, id) } : null;
 }
 
-function targetRevision(db, target) {
+function targetRevision(db, target, decisionHeads) {
   if (target.kind === "record") {
+    if (target.id.startsWith("mutation-receipt:")) {
+      const receipt = rawRecordById(db, target.id);
+      if (!receipt) return null;
+      if (isRetiredReceipt(receipt.content_json, { id: target.id })) return Number(JSON.parse(receipt.content_json)._lodestar.revision);
+      return Number(parseStoredContent(receipt.content_json, { id: target.id })._lodestar.revision);
+    }
     const row = db.prepare("SELECT id, json_extract(content_json, '$._lodestar.revision') "
       + "AS revision FROM records WHERE id=?").get(target.id);
     if (!row) return null;
@@ -738,33 +759,53 @@ function targetRevision(db, target) {
     }
     return revision;
   }
-  const rows = db.prepare("SELECT content_json FROM records WHERE type='decision-event' "
-    + "AND scope=? ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
-    .all(target.scope);
-  let revision = null;
-  for (const row of rows) {
-    const content = parseStoredContent(row.content_json);
-    if (contentData(content)?.key === target.key) {
+  if (!decisionHeads.has(target.scope)) {
+    const rows = db.prepare("SELECT content_json FROM records WHERE type='decision-event' "
+      + "AND scope=? ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
+      .all(target.scope);
+    const heads = new Map();
+    for (const row of rows) {
+      const content = parseStoredContent(row.content_json);
+      const key = contentData(content)?.key;
       const candidate = Number(content._lodestar?.revision ?? 0);
-      if (Number.isSafeInteger(candidate) && candidate > (revision ?? 0)) {
-        revision = candidate;
+      if (Number.isSafeInteger(candidate) && candidate > (heads.get(key) ?? 0)) {
+        heads.set(key, candidate);
       }
     }
+    decisionHeads.set(target.scope, heads);
   }
-  return revision;
+  return decisionHeads.get(target.scope).get(target.key) ?? null;
 }
 
-export function writeBasis(db, {
+export function writeBasis(db, options) {
+  return writeBasisWithBinding(db, options, resolveProjectScope);
+}
+
+// Use only within one synchronous, admitted read transaction; do not retain
+// the reader beyond it. No target revision or metadata is reused, and outside
+// a transaction no binding is memoized.
+export function projectionWriteBasisReader(db) {
+  const bindings = new Map();
+  return (options) => writeBasisWithBinding(db, options, (connection, projectScope, checkout) => {
+    if (!connection.isTransaction) return resolveProjectScope(connection, projectScope, checkout);
+    const key = JSON.stringify([projectScope, checkout]);
+    if (!bindings.has(key)) bindings.set(key, resolveProjectScope(connection, projectScope, checkout));
+    return bindings.get(key);
+  });
+}
+
+function writeBasisWithBinding(db, {
   projectScope = null,
   checkout = null,
   targets = [],
-} = {}) {
+} = {}, resolveBinding) {
   const metadata = readMetadata(db);
-  const binding = resolveProjectScope(db, projectScope, checkout);
+  const binding = resolveBinding(db, projectScope, checkout);
   const distinct = [...new Map([...targets, ...(binding?.binding_preconditions ?? []).map(({ target }) => target)].map((target, index) => {
     const normalized = normalizedTarget(target, `targets[${index}]`);
     return [targetKey(normalized), normalized];
   })).values()];
+  const decisionHeads = new Map();
   return {
     database_instance_id: metadata.database_instance_id,
     database_epoch: metadata.database_epoch,
@@ -772,7 +813,7 @@ export function writeBasis(db, {
     checkout,
     targets: distinct.map((target) => ({
       ...target,
-      expected_revision: targetRevision(db, target),
+      expected_revision: targetRevision(db, target, decisionHeads),
     })),
   };
 }
@@ -786,16 +827,39 @@ function receiptId(request) {
     ])).digest("hex")}`;
 }
 
-function storedReceipt(db, id) {
-  const row = rawRecordById(db, id);
-  if (!row) return null;
-  const record = parseStoredContent(row.content_json, { id });
+function receiptContent(row) {
+  const content = parseStoredContent(row.content_json, { id: row.id });
   if (row.type !== "mutation-receipt") {
     throw lodestarError("database_integrity", "A mutation receipt ID is owned by another record type.", {
-      identifiers: { id, type: row.type },
+      identifiers: { id: row.id, type: row.type },
     });
   }
-  return contentData(record);
+  return content;
+}
+
+function receiptValue(row, content, databaseInstanceId, expected = null) {
+  return validateStoredReceipt(content, { id: row.id, databaseInstanceId, expected });
+}
+
+const sameReceiptRow = (left, right) => right !== null &&
+  ["id", "type", "name", "scope", "content_json", "created_at", "updated_at"]
+    .every(field => left[field] === right[field]);
+const receiptPreparations = new WeakMap();
+
+function nestedArchiveReplay(id) {
+  throw lodestarError("invalid_transaction", "An archived request cannot be replayed inside an existing transaction.", {
+    identifiers: { receipt_id: id },
+    action: "Finish the outer transaction and reconcile the exact request without holding a writer reservation.",
+  });
+}
+
+function changedReceipt(id) {
+  // This invocation wrote nothing; the observed historical request is unresolved.
+  // Keep the journal rather than treating its outcome as a known rejection.
+  throw lodestarError("revision_conflict", "The observed request receipt changed before replay admission.", {
+    identifiers: { receipt_id: id, committed: "unknown" },
+    action: "Inspect the exact saved request and current receipt. Do not submit this request as new work.",
+  });
 }
 
 export function mutate(db, operation, value, callback, {
@@ -805,16 +869,30 @@ export function mutate(db, operation, value, callback, {
   actor = null,
   project = null,
   resolveBinding = false,
+  receiptPreparation = null,
 } = {}) {
   validateIdentifier(operation, "operation");
   if (typeof callback !== "function" || callback.constructor?.name === "AsyncFunction") {
     invalidMutation("Mutation callbacks must be synchronous.");
   }
   const request = normalizeMutationRequest(value, { actor });
-  const payloadHash = createHash("sha256")
-    .update(canonicalStringify([operation, request])).digest("hex");
+  const requestKey = canonicalStringify([operation, request]);
+  const payloadHash = createHash("sha256").update(requestKey).digest("hex");
   const id = receiptId(request);
-  return admittedTransaction(db, () => {
+  const expected = { request_id: request.request_id,
+    database_epoch: request.database_epoch, operation, payload_sha256: payloadHash };
+  const nested = db.isTransaction;
+  let prepared = receiptPreparations.get(receiptPreparation) ?? null;
+  receiptPreparations.delete(receiptPreparation);
+  if (prepared && (prepared.db !== db || prepared.row.id !== id)) prepared = null;
+  // Options (for example a fallback actor) may change the normalized payload
+  // without changing its receipt ID. The observed row still fences execution,
+  // but the prepared decode is usable only for its exact normalized request.
+  if (prepared && prepared.requestKey !== requestKey) {
+    prepared = { row: prepared.row, instance: prepared.instance, external: prepared.external };
+  }
+  let deferred = null;
+  const admit = () => admittedTransaction(db, () => {
     assertSupportedSchema(db, database);
     const metadata = readMetadata(db, database);
     const revisionBefore = currentRevision(db);
@@ -832,7 +910,21 @@ export function mutate(db, operation, value, callback, {
         action: "Refresh the record after recovery and submit a new logical request.",
       });
     }
-    const receipt = storedReceipt(db, id);
+    const row = rawRecordById(db, id);
+    if (prepared && (!sameReceiptRow(prepared.row, row)
+      || prepared.instance !== metadata.database_instance_id)) changedReceipt(id);
+    let receipt = null;
+    if (row && (prepared ? prepared.external : isExternalReceiptStorage(row.content_json))) {
+      if (nested) nestedArchiveReplay(id);
+      if (!prepared || (!prepared.content && !prepared.value && !prepared.error)) {
+        deferred = { row, instance: metadata.database_instance_id, external: true };
+        return;
+      }
+      if (prepared.error) throw prepared.error;
+      receipt = prepared.value ?? receiptValue(row, prepared.content, prepared.instance, expected);
+    } else if (row) {
+      receipt = receiptValue(row, receiptContent(row), metadata.database_instance_id, expected);
+    }
     if (receipt) {
       if (receipt.payload_sha256 !== payloadHash) {
         throw lodestarError("request_conflict", "The request ID was already accepted with different input.", {
@@ -873,8 +965,9 @@ export function mutate(db, operation, value, callback, {
         action: "Refresh the named targets and retry with a new logical request.",
       });
     }
+    const decisionHeads = new Map();
     for (const entry of request.preconditions) {
-      const actual = targetRevision(db, entry.target);
+      const actual = targetRevision(db, entry.target, decisionHeads);
       if (actual !== entry.expected_revision) {
         throw lodestarError("revision_conflict", "A mutation target changed after it was read.", {
           identifiers: { request_id: request.request_id, target: entry.target,
@@ -902,16 +995,18 @@ export function mutate(db, operation, value, callback, {
     } finally {
       activeMutations.delete(db);
     }
-    if (callbackResult && typeof callbackResult.then === "function") {
+    if (consumeAsyncResult(callbackResult)) {
       invalidMutation("Mutation callbacks must be synchronous.");
     }
     const data = plain(callbackResult) && Object.hasOwn(callbackResult, "data")
       ? callbackResult.data : callbackResult;
     const changedIds = plain(callbackResult) && Array.isArray(callbackResult.changed_ids)
       ? callbackResult.changed_ids : [];
+    const advisoryNext = plain(callbackResult) && Array.isArray(callbackResult.next)
+      ? callbackResult.next.filter((line) => typeof line === "string") : [];
     const beforeImages = changedIds.map((changedId) => captures.get(changedId))
       .filter(Boolean);
-    const accepted = { data };
+    const accepted = { data, ...(advisoryNext.length ? { next: advisoryNext } : {}) };
     canonicalStringify(accepted);
     const receiptData = {
       request_id: request.request_id,
@@ -933,13 +1028,24 @@ export function mutate(db, operation, value, callback, {
       aliases: [], links: [], sources: [],
     }, { createdAt: timestamp, updatedAt: timestamp, revision });
     return {
-      data,
+      ...accepted,
       request: { id: request.request_id, replayed: false,
         committed_revision: revision },
       receipt_id: id,
       revision,
     };
   }, database);
+  const result = admit();
+  if (!deferred) return result;
+  // The first admission completed normally and made no changes. Capture the
+  // decoder result outside it; publish even a failure only after the fence.
+  prepared = deferred;
+  try {
+    prepared.value = receiptValue(prepared.row, receiptContent(prepared.row), prepared.instance, expected);
+  } catch (error) {
+    prepared.error = error;
+  }
+  return admit();
 }
 
 export function writeRecordSnapshot(db, value, {
@@ -992,7 +1098,7 @@ function internalRecord(value) {
     name: value.name,
     scope: value.scope,
     priority: value.priority === undefined ? 0 : value.priority,
-    content: { state: value.availability ?? "unknown", value: value.data ?? {} },
+    content: { state: value.availability ?? "unknown", value: value.data },
     aliases: value.aliases ?? [],
     links: value.links ?? [],
     sources: value.sources ?? [],
@@ -1043,7 +1149,9 @@ function assertSubjectAvailable(db, record) {
 function updateRecordValue(current, input) {
   exactKeys(input, PUT_UPDATE_FIELDS, "input");
   if (!plain(input.set) || !Array.isArray(input.remove)) {
-    invalidMutation("update requires object set and array remove fields.");
+    invalidMutation("update requires object set and array remove fields.",
+      { mode: "update" },
+      "Include \"remove\": [] when the update removes no keys; see lodestar put --help.");
   }
   exactKeys(input.set, UPDATE_SET_FIELDS, "input.set");
   if (input.remove.some((key) => typeof key !== "string")) {
@@ -1070,11 +1178,23 @@ function updateRecordValue(current, input) {
   });
 }
 
-export function preparePutEvidence(db, input, value) {
+export function preparePutEvidence(db, input, value, operation = null) {
   const request = normalizeMutationRequest(value);
   // Replay is settled under admission before applying any input. Its original
   // result remains available even if the source has since moved or disappeared.
-  if (storedReceipt(db, receiptId(request))) return {};
+  const row = rawRecordById(db, receiptId(request));
+  if (row) {
+    const external = isExternalReceiptStorage(row.content_json);
+    if (external && db.isTransaction) nestedArchiveReplay(row.id);
+    const content = receiptContent(row);
+    const instance = readMetadata(db).database_instance_id;
+    receiptValue(row, content, instance);
+    const prepared = {};
+    if (operation !== null) receiptPreparations.set(prepared, { db,
+      requestKey: canonicalStringify([operation, request]), row, instance, external,
+      ...(external ? { content } : {}) });
+    return prepared;
+  }
   const projectRoots = prepareProjectRoots(db, input);
   const current = input.mode === "update" ? normalizeRecord(getRecordById(db, input.id)) : null;
   const record = current ? updateRecordValue(current, input) : internalRecord(input.record);
@@ -1086,16 +1206,18 @@ export function preparePutEvidence(db, input, value) {
     project.root = data.roots?.[0] ?? data.root;
   }
   let sourceRoots = {};
+  let sourceConfiguration;
   for (const source of record.sources ?? []) {
     const metadata = source.metadata;
     if (metadata.relation !== "content_owner" || !["local_file", "package_manifest"].includes(metadata.kind)) continue;
     validateSourceMetadata(metadata);
-    if (metadata.locator.base === "source_root") {
+    if (metadata.locator.base === "source_root" && sourceConfiguration === undefined) {
       const configRow = rawRecordById(db, "config:lodestar:sources");
-      const config = configRow ? normalizeRecord(getRecordById(db, configRow.id)).data : {};
+      sourceConfiguration = configRow ? normalizeRecord(getRecordById(db, configRow.id)) : null;
       sourceBindings.push({ target: { kind: "record", id: "config:lodestar:sources" },
-        expected_revision: configRow ? normalizeRecord(getRecordById(db, configRow.id)).revision : null });
-      sourceRoots = Object.fromEntries((config.skill_source_roots ?? []).map((source) => [source.id, source.locator]));
+        expected_revision: sourceConfiguration?.revision ?? null });
+      sourceRoots = Object.fromEntries((sourceConfiguration?.data.skill_source_roots ?? [])
+        .map((source) => [source.id, source.locator]));
     }
     const located = resolveSourceLocator(metadata.locator, { project, sourceRoots });
     const actual = inspectLocalSourceSync(located.path);
@@ -1124,11 +1246,130 @@ export function putRecord(db, value, options = {}) {
   }
   const id = mode === "update" ? input.id : input?.record?.id;
   validateIdentifier(id, "input.id");
-  const prepared = preparePutEvidence(db, input, value);
-  return mutate(db, "put", value, ({ revision, timestamp }) => {
+  const prepared = preparePutEvidence(db, input, value, "put");
+  return mutate(db, "put", value, ({ request, revision, timestamp }) => {
     const data = applyPutInput(db, input, { revision, timestamp, ...prepared });
-    return { data, changed_ids: data.revision === revision ? [id] : [] };
-  }, { ...options, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
+    // Non-blocking rediscovery interception for direct put create/update only
+    // (rejection register contract: references/knowledge.md "Settled rejections").
+    // Computed at acceptance so the stored receipt replays its advisory exactly.
+    const next = (data.kind ?? data.type) === "rejection"
+      ? [] : rejectionAdvisories(db, data, request.project_scope ?? null, request.checkout ?? null);
+    return { data, changed_ids: data.revision === revision ? [id] : [],
+      ...(next.length ? { next } : {}) };
+  }, { ...options, receiptPreparation: prepared, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
+}
+
+function rejectionAdvisories(db, record, projectScope, requestCheckout) {
+  const subject = record?.data?.subject;
+  if (typeof projectScope !== "string" || typeof subject !== "string"
+    || subject.length === 0) return [];
+  try {
+    const fold = (value) => typeof value === "string" ? value.normalize("NFC").toLowerCase() : null;
+    const foldPath = (value) => typeof value === "string" ? fold(value.replace(/\\/g, "/")) : null;
+    const wanted = fold(subject);
+    const memberScopes = db.prepare(
+      "SELECT DISTINCT scope FROM records WHERE type='project' "
+        + "AND json_extract(content_json,'$.value.canonical_project_id') IN (?, ?) "
+        + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current')='current'",
+    ).all(projectScope, projectScope.replace(/^project:/, ""));
+    const scopes = [...new Set([projectScope,
+      ...memberScopes.map(({ scope }) => scope).filter((scope) => typeof scope === "string")])];
+    const scopeList = scopes.map(() => "?").join(",");
+    const rows = db.prepare(
+      "SELECT id, json_extract(content_json,'$.value.subject') AS subject, "
+        + "json_extract(content_json,'$.value.reason') AS reason, "
+        + "json_extract(content_json,'$._lodestar.semantics.applicability.checkout') AS checkout "
+        + "FROM records WHERE type='rejection' AND id<>? "
+        + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current')='current' "
+        + "AND (scope IN (" + scopeList + ") OR (scope='global' "
+        + "AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN (" + scopeList + "))) "
+        + "ORDER BY id",
+    ).all(record.id, ...scopes, ...scopes);
+    const matching = rows.filter(({ subject: candidate, checkout }) => fold(candidate) === wanted
+      && (typeof checkout !== "string" || (typeof requestCheckout === "string"
+        && foldPath(checkout) === foldPath(requestCheckout))));
+    const lines = matching.slice(0, 3).map(({ id, reason }) => {
+      const text = typeof reason === "string" ? reason.trim() : "";
+      const points = [...text];
+      const summary = points.length > 140 ? `${points.slice(0, 137).join("")}...` : text;
+      return summary.length
+        ? `Settled rejection covers this subject: ${id} — ${summary} Read it before proceeding.`
+        : `Settled rejection covers this subject: ${id}. Read it before proceeding.`;
+    });
+    if (matching.length > 3) {
+      const extra = matching.length - 3;
+      lines.push(`${extra} more current rejection${extra === 1 ? "" : "s"} share${extra === 1 ? "s" : ""} this subject; run lodestar find "${subject}".`);
+    }
+    return lines;
+  } catch {
+    // Advisory generation is best-effort: unreadable rejection rows must never
+    // abort an otherwise accepted write.
+    return [];
+  }
+}
+
+
+function assertRecordApplicability(db, record, request) {
+  const applicability = (record.kind ?? record.type) === "project"
+    ? { project: resolveProjectScope(db, record.id)?.scope, checkout: null }
+    : record.semantics?.applicability ?? { project: record.scope, checkout: null };
+  const scope = applicability.project === "global" ? null : applicability.project ?? null;
+  const requestScope = request.project_scope === "global" ? null : request.project_scope;
+  const binding = scope !== requestScope ? resolveProjectScope(db, scope, request.checkout) : null;
+  if (scope !== requestScope && binding?.scope !== requestScope) {
+    throw lodestarError("invalid_input", "Record applicability does not match the mutation project scope.", {
+      identifiers: { id: record.id, expected: request.project_scope, actual: scope },
+      action: "Read the target record again and retain its complete write_basis before preparing a new logical request.",
+    });
+  }
+  if (binding) {
+    const supplied = new Set(request.preconditions.map(({ target }) => targetKey(target)));
+    const missing = binding.binding_preconditions.map(({ target }) => target)
+      .filter((target) => !supplied.has(targetKey(target)));
+    if (missing.length) throw lodestarError("missing_precondition", "The record's project mapping needs its observed revision.", {
+      identifiers: { required_basis: writeBasis(db, { projectScope: scope, checkout: request.checkout, targets: missing }) },
+      action: "Read the record again and retain its complete mapping basis.",
+    });
+  }
+  if (applicability.checkout != null && (request.checkout === null ||
+    !sameMachinePath(applicability.checkout, request.checkout))) {
+    throw lodestarError("invalid_input", "Record applicability does not match the observed checkout basis.", {
+      identifiers: { id: record.id, expected: request.checkout, actual: applicability.checkout },
+      action: "Read the target record and its checkout context, then prepare the correction from that complete basis.",
+    });
+  }
+}
+
+function assertCheckoutRebind(db, record, request) {
+  // A scope lookup alone echoes the requested checkout. Resolve the actual
+  // destination, including worktree identity and every canonical/member binding.
+  assertRecordApplicability(db, record, request);
+  const checkoutPath = resolveInputPath(request.checkout);
+  let directory = false;
+  try { directory = statSync(checkoutPath).isDirectory(); } catch { /* reported below */ }
+  if (!directory) throw lodestarError("invalid_input", "A checkout rebind requires an accessible destination directory.", {
+    identifiers: { id: record.id, checkout: request.checkout },
+    action: "Read the destination checkout context and retain its complete write_basis before rebinding.",
+  });
+  const destination = resolveProject(db, checkoutPath);
+  if (destination.scope !== request.project_scope
+    || !sameMachinePath(destination.checkout_root, request.checkout)) {
+    throw lodestarError("project_binding_conflict", "A checkout rebind must stay within the observed project and destination checkout.", {
+      identifiers: { id: record.id, requested: request.project_scope, current: destination.scope,
+        requested_checkout: request.checkout, current_checkout: destination.checkout_root },
+      action: "Read the destination checkout context and combine its complete write_basis with the target record's observed revisions.",
+    });
+  }
+  const supplied = new Map(request.preconditions.map((entry) => [targetKey(entry.target), entry]));
+  const missing = destination.binding_preconditions.filter(({ target, expected_revision }) =>
+    supplied.get(targetKey(target))?.expected_revision !== expected_revision);
+  if (missing.length) throw lodestarError("missing_precondition", "A checkout rebind needs the destination's complete observed mapping basis.", {
+    identifiers: { id: record.id, required_basis: writeBasis(db, {
+      projectScope: destination.scope, checkout: destination.checkout_root,
+      targets: missing.map(({ target }) => target),
+    }) },
+    action: "Read the destination checkout context and retain every binding target alongside the existing record revision.",
+  });
 }
 
 export function applyPutInput(db, input, {
@@ -1149,6 +1390,7 @@ export function applyPutInput(db, input, {
   }
   if (mode === "create" && existing) throw lodestarError("record_exists", "Create requires an absent record ID.", { identifiers: { id } });
   if (mode === "replace" && !existing) throw lodestarError("record_not_found", "Replace requires an existing record ID.", { identifiers: { id } });
+  if (existing) assertOrdinaryType(existing.type);
   let record;
   if (mode === "update") {
     record = updateRecordValue(normalizeRecord(getRecordById(db, id)), input);
@@ -1186,37 +1428,36 @@ export function applyPutInput(db, input, {
       });
     }
   }
-  const applicability = record.semantics?.applicability;
-  const applicabilityBinding = request.project_scope !== null && applicability?.project !== request.project_scope
-    ? resolveProjectScope(db, applicability?.project, request.checkout) : null;
-  if (request.project_scope !== null
-    && applicability?.project !== request.project_scope && applicabilityBinding?.scope !== request.project_scope) {
-    throw lodestarError("invalid_input",
-      "Record applicability does not match the mutation project scope.", {
-        identifiers: { id, expected: request.project_scope,
-          actual: applicability?.project ?? null },
-      });
+  if (existing && existing.type !== "project") {
+    let prior;
+    try { prior = normalizeRecord(getRecordById(db, id)); }
+    catch (error) {
+      if (mode !== "replace" || error.code !== "record_requires_source_correction") throw error;
+      // An explicit source correction still requires the stored origin scope.
+      prior = { id, kind: existing.type, scope: existing.scope };
+    }
+    const priorCheckout = prior.semantics?.applicability?.checkout;
+    const nextCheckout = record.semantics?.applicability?.checkout;
+    if (typeof priorCheckout === "string" && typeof nextCheckout === "string"
+      && !sameMachinePath(priorCheckout, nextCheckout)) {
+      // The admitted record revision pins the old binding. The request basis
+      // describes the destination; neither side may change canonical project.
+      assertRecordApplicability(db, prior, { ...request, checkout: priorCheckout });
+      assertCheckoutRebind(db, record, request);
+    } else {
+      assertRecordApplicability(db, prior, request);
+    }
   }
-  if (applicabilityBinding) {
-    const supplied = new Set(request.preconditions.map(({ target }) => targetKey(target)));
-    const missing = applicabilityBinding.binding_preconditions.map(({ target }) => target)
-      .filter((target) => !supplied.has(targetKey(target)));
-    if (missing.length) throw lodestarError("missing_precondition", "The record's project mapping needs its observed revision.", {
-      identifiers: { required_basis: writeBasis(db, { projectScope: applicability.project, checkout: request.checkout, targets: missing }) },
-      action: "Read the record again and retain its complete mapping basis." });
-  }
-  if (applicability?.checkout !== null && applicability?.checkout !== undefined
-    && (request.checkout === null || !sameMachinePath(applicability.checkout, request.checkout))) {
-    throw lodestarError("invalid_input",
-      "Record applicability does not match the observed checkout basis.", {
-        identifiers: { id, expected: request.checkout,
-          actual: applicability?.checkout ?? null },
-      });
-  }
+  // Registration establishes a project's identity; ordinary facts already have
+  // an applicability. Project roots and canonical links are validated below.
+  if (record.type !== "project") assertRecordApplicability(db, record, request);
   assertSubjectAvailable(db, record);
   if (mode === "create" && record.type !== "project" && request.project_scope !== null
     && record.scope !== request.project_scope && record.scope !== "global") {
-    throw lodestarError("project_binding_conflict", "New facts must use the resolved canonical project scope.");
+    throw lodestarError("project_binding_conflict", "New facts must use the resolved canonical project scope.", {
+      identifiers: { scope: record.scope, project_scope: request.project_scope },
+      action: "Set the new record's scope to the resolved project scope or run the write from that project's checkout.",
+    });
   }
   if (existing && mode !== "replace") {
     const prior = normalizeRecord(getRecordById(db, id));
@@ -1253,6 +1494,7 @@ export function deleteRecord(db, value, options = {}) {
   return mutate(db, "delete", value, ({ revision, timestamp }) => {
     const current = normalizeRecord(getRecordById(db, input.id));
     assertOrdinaryType(current.kind);
+    assertRecordApplicability(db, current, activeMutations.get(db));
     const semantics = {
       ...(current.semantics ?? {}),
       lifecycle: "historical",
@@ -1284,28 +1526,57 @@ export function normalizeRecord(record) {
     semantics: record.semantics };
 }
 
+function rawReadWriteBasis(db, row) {
+  // Inspection stays available for malformed rows, but an unsafe basis must not be issued.
+  let projectScope, checkout;
+  if (row.type === "project") {
+    // Project descriptors use observed targets and validated bindings. Raw
+    // inspection must stay available before an ambiguous mapping is repaired.
+    projectScope = null;
+    checkout = null;
+  } else try {
+    const applicability = JSON.parse(row.content_json)?._lodestar?.semantics?.applicability;
+    if (!applicability || typeof applicability !== "object" || Array.isArray(applicability) ||
+      !Object.hasOwn(applicability, "project")) return null;
+    projectScope = applicability.project;
+    checkout = applicability.checkout ?? null;
+    if ((projectScope !== null && (typeof projectScope !== "string" || !projectScope)) ||
+      (checkout !== null && (typeof checkout !== "string" || !checkout))) return null;
+  } catch { return null; }
+  const sourceRootUsed = rawAssociations(db, row.id).sources.some(({ metadata_json }) => {
+    try { return JSON.parse(metadata_json)?.locator?.base === "source_root"; }
+    catch { return false; }
+  });
+  return writeBasis(db, { projectScope, checkout,
+    targets: [{ kind: "record", id: row.id },
+      ...(sourceRootUsed ? [{ kind: "record", id: "config:lodestar:sources" }] : [])] });
+}
+
 export function getRawRecord(db, identifier) {
   const id = resolveRecordId(db, identifier);
-  const rawRecord = rawRecordById(db, id);
+  const stored = rawRecordById(db, id);
+  const rawRecord = stored ? decodeReceiptRow(stored) : stored;
   return {
     raw_record: rawRecord,
     raw_associations: rawAssociations(db, id),
-    write_basis: writeBasis(db, {
-      projectScope: rawRecord.scope,
-      targets: [{ kind: "record", id }],
-    }),
+    write_basis: rawReadWriteBasis(db, rawRecord),
   };
 }
 
 export function getRecordHistory(db, identifier) {
   const id = resolveRecordId(db, identifier);
   const versions = [];
-  const receipts = db.prepare("SELECT id,content_json FROM records "
+  const removed_receipts = [];
+  const receipts = db.prepare("SELECT id,type,content_json FROM records "
     + "WHERE type IN ('mutation-receipt','migration-source') "
     + "ORDER BY CAST(json_extract(content_json, '$._lodestar.revision') AS INTEGER), id")
     .all();
+  const databaseInstanceId = readMetadata(db).database_instance_id;
   for (const receipt of receipts) {
-    const data = contentData(parseStoredContent(receipt.content_json, { id: receipt.id }));
+    if(receipt.type === "mutation-receipt" && isRetiredReceipt(receipt.content_json,{id:receipt.id})) { removed_receipts.push(receipt.id); continue; }
+    const content = parseStoredContent(receipt.content_json, { id: receipt.id });
+    const data = receipt.type === "mutation-receipt"
+      ? validateStoredReceipt(content, { id: receipt.id, databaseInstanceId }) : contentData(content);
     for (let sequence = 0; sequence < (data.before_images ?? []).length; sequence += 1) {
       const image = data.before_images[sequence];
       if (image.raw_record?.id === id) versions.push({
@@ -1316,14 +1587,13 @@ export function getRecordHistory(db, identifier) {
       });
     }
   }
+  versions.sort((a,b)=>a.revision-b.revision||a.receipt_id.localeCompare(b.receipt_id)||a.sequence-b.sequence);
   return {
     id,
     versions,
+    ...(removed_receipts.length ? {removed_receipts,complete:false} : {}),
     current: beforeImage(db, id),
-    write_basis: writeBasis(db, {
-      projectScope: rawRecordById(db, id)?.scope ?? null,
-      targets: [{ kind: "record", id }],
-    }),
+    write_basis: rawReadWriteBasis(db, rawRecordById(db, id)),
   };
 }
 

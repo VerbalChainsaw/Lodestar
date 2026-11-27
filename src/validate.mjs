@@ -1,5 +1,5 @@
 import { lodestarError } from "./errors.mjs";
-import { canonicalStringify } from "./json.mjs";
+import { canonicalStringify, validateJsonValue } from "./json.mjs";
 
 export const KNOWLEDGE_STATES = Object.freeze([
   "known",
@@ -150,7 +150,7 @@ export function validateTimestamp(value, field = "timestamp") {
   return value;
 }
 
-export function validateContent(value) {
+export function validateContent(value, { serialize = true } = {}) {
   plainObject(value, "content");
   if (
     !Object.hasOwn(value, "state")
@@ -173,7 +173,26 @@ export function validateContent(value) {
       validateSemantics(value._lodestar.semantics);
     }
   }
-  return canonicalStringify(value);
+  return serialize ? canonicalStringify(value, { maximumDepth: 1000 })
+    : validateJsonValue(value, { maximumDepth: 1000 });
+}
+
+export function validateResearchReview(data) {
+  if (data?.review_acquisition !== "operator_attested") return data;
+  const fail = field => { throw lodestarError("invalid_input", field === "reviewed_at"
+    ? "Source observation date must be an actual calendar date in YYYY-MM-DD form."
+    : `Operator source review field '${field}' is invalid or missing.`, {
+    identifiers: { field }, action: "Supply reviewed_at as a real YYYY-MM-DD calendar date, nonempty reviewed_by and review_qualifiers, and source_version as nonempty text or null. An attestation records a human review; it does not establish automatic verification.",
+  }); };
+  const date = data.reviewed_at;
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(date) ||
+      !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) ||
+      new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) fail("reviewed_at");
+  for (const field of ["reviewed_by", "review_qualifiers"]) {
+    if (typeof data[field] !== "string" || !data[field].trim() || (field === "review_qualifiers" ? data[field].includes("\0") : /[\u0000-\u001f\u007f]/u.test(data[field]))) fail(field);
+  }
+  if (data.source_version !== null && (typeof data.source_version !== "string" || !data.source_version.trim() || /[\u0000-\u001f\u007f]/u.test(data.source_version))) fail("source_version");
+  return data;
 }
 
 export function validateSemantics(value, field = "semantics") {
@@ -216,7 +235,7 @@ export function validateSourceMetadata(value, field = "source.metadata", {
       { value: metadata.inspection ?? null },
     );
   }
-  if (allowLegacy && metadata.kind === undefined) return canonicalStringify(metadata);
+  if (allowLegacy && metadata.kind === undefined) return canonicalStringify(metadata, { maximumDepth: 1000 });
   exactKeys(metadata, new Set(["inspection", "kind", "relation", "locator",
     "observed_at", "fingerprint", "claim", "evidence_ref"]), field);
   if (!SOURCE_KINDS.includes(metadata.kind)) {
@@ -255,7 +274,7 @@ export function validateSourceMetadata(value, field = "source.metadata", {
     && metadata.evidence_ref !== null && metadata.evidence_ref !== undefined) {
     validString(metadata.evidence_ref, `${field}.evidence_ref`, { requireNfc: false });
   }
-  return canonicalStringify(metadata);
+  return canonicalStringify(metadata, { maximumDepth: 1000 });
 }
 
 function validateAlias(value, index) {
@@ -350,8 +369,8 @@ export function validatePutInput(value) {
     if (!Object.hasOwn(value, field)) invalid(field, "missing or empty");
   }
   if (value.priority !== undefined
-    && (!Number.isSafeInteger(value.priority) || value.priority < 0)) {
-    invalid("priority", "not a nonnegative safe integer");
+    && !Number.isSafeInteger(value.priority)) {
+    invalid("priority", "not a safe integer");
   }
   const aliases = arrayValue(
     Object.hasOwn(value, "aliases") ? value.aliases : undefined,
@@ -372,6 +391,7 @@ export function validatePutInput(value) {
     ({ relationship, to_id: toId }) => `${relationship}\0${toId}`,
   );
   unique(sources, "sources", ({ origin }) => origin);
+  if (value.type === "research") validateResearchReview(value.content?.value);
   return {
     id: validateIdentifier(value.id),
     type: validateType(value.type),
@@ -402,8 +422,9 @@ export function validateLimit(value, {
   // Query limits are returned as JSON numbers and used for one-row lookahead;
   // safe integers avoid lossy pagination without imposing a product-policy maximum.
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    invalid(field, "required to be a positive safe integer", {
-      value,
+    throw lodestarError("invalid_input", `${field} is required to be a positive safe integer.`, {
+      identifiers: { field, value },
+      action: "Set limit to a positive safe integer (for example --limit 25), or omit it for the operation's default. Read that operation's --help for supported paging and revision options.",
     });
   }
   return parsed;
@@ -416,8 +437,9 @@ export function validateOffset(value, { field = "offset" } = {}) {
       ? Number(value)
       : Number.NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    invalid(field, "required to be a nonnegative safe integer", {
-      value,
+    throw lodestarError("invalid_input", `${field} is required to be a nonnegative safe integer.`, {
+      identifiers: { field, value },
+      action: "Set offset to a nonnegative safe integer (for example --offset 0). Read that operation's --help for supported paging and revision options.",
     });
   }
   return parsed;

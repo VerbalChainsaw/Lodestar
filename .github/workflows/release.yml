@@ -46,6 +46,12 @@ jobs:
         with:
           node-version: 24.15.0
       - run: npm test
+      - name: Exercise cold archive recovery on disposable fixtures
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq "Windows") { python -B test/restore-archive.test.py }
+          else { python3 -B test/restore-archive.test.py }
+          exit $LASTEXITCODE
       - run: npm run pack:check
       - run: npm pack --json
       - name: Resolve package artifact
@@ -54,13 +60,21 @@ jobs:
           $version = node -p "require('./package.json').version"
           "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
       - run: npm install --ignore-scripts --no-audit --no-fund --prefix .package-smoke "./${{ env.PACKAGE }}"
+      - name: Exercise the packed executable (Linux launcher)
+        if: runner.os == 'Linux'
+        run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs .package-smoke/node_modules/.bin/lodestar
       - name: Exercise the packed executable
+        if: runner.os != 'Linux'
         run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
+
+  desktop:
+    uses: ./.github/workflows/desktop.yml
 
   publish:
     needs:
       - codeql
       - verify
+      - desktop
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,6 +101,26 @@ jobs:
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
       - run: npm test
       - run: npm run pack:check
+      - name: Download verified Windows distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: lodestar-windows
+          path: .
+      - name: Verify Windows archive against desktop job checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          archive="Lodestar-${version}-win-x64.zip"
+          test -f "${archive}"
+          test -f SHA256SUMS.txt
+          mapfile -t checksum_lines < SHA256SUMS.txt
+          test "${#checksum_lines[@]}" -eq 1
+          read -r expected filename <<< "${checksum_lines[0]}"
+          test "${filename}" = "${archive}"
+          [[ "${expected}" =~ ^[[:xdigit:]]{64}$ ]]
+          actual="$(sha256sum -- "${archive}" | cut -d ' ' -f1)"
+          test "${actual}" = "${expected}"
       - name: Build release assets
         shell: bash
         run: |
@@ -97,12 +131,35 @@ jobs:
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
           test -f "${package}"
-          sha256sum "${package}" > SHA256SUMS.txt
           {
             echo "PACKAGE=${package}"
             echo "PACKAGE_INTEGRITY=${integrity}"
             echo "PACKAGE_SPEC=${name}@${version}"
           } >> "${GITHUB_ENV}"
+      - name: Smoke the exact publication archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund --prefix .release-smoke "./${PACKAGE}"
+          node scripts/smoke-packed-package.mjs .release-smoke/node_modules/lodestar-agent-context/lodestar.mjs .release-smoke/node_modules/.bin/lodestar
+      - name: Build and smoke paired native Codex archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/build-native-codex.mjs .native-release
+          native_version="$(node -p "require('./native-codex/.codex-plugin/plugin.json').version")"
+          native_archive=".native-release/lodestar-native-codex-${native_version}.tgz"
+          node scripts/smoke-native-codex.mjs "${native_archive}" .release-smoke/node_modules/lodestar-agent-context/lodestar.mjs
+          native_filename="lodestar-native-codex-${native_version}.tgz"
+          test ! -e "${native_filename}"
+          cp -- "${native_archive}" "${native_filename}"
+          echo "NATIVE_ARCHIVE=${native_filename}" >> "${GITHUB_ENV}"
+      - name: Build final release checksum inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          sha256sum "${PACKAGE}" "Lodestar-${version}-win-x64.zip" "${NATIVE_ARCHIVE}" > SHA256SUMS.txt
       - name: Publish exact package to npm
         shell: bash
         env:
@@ -135,12 +192,18 @@ jobs:
               publish_status=$?
 
             remote=""
-            for _ in {1..10}; do
+            # Positively acknowledged provenanced publishes may take several
+            # minutes to appear in registry metadata. Never republish a version.
+            for _ in {1..36}; do
               remote="$(registry_integrity || true)"
               if [[ "${remote}" = "${PACKAGE_INTEGRITY}" ]]; then
                 break
               fi
-              sleep 2
+              if [[ -n "${remote}" ]]; then
+                echo "::error::npm registry returned different integrity for ${PACKAGE_SPEC}."
+                exit 1
+              fi
+              sleep 5
             done
             if [[ "${remote}" != "${PACKAGE_INTEGRITY}" ]]; then
               if [[ "${publish_status}" -ne 0 ]]; then
@@ -152,7 +215,10 @@ jobs:
       - name: Attest release package provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
-          subject-path: ${{ env.PACKAGE }}
+          subject-path: |
+            ${{ env.PACKAGE }}
+            Lodestar-*-win-x64.zip
+            ${{ env.NATIVE_ARCHIVE }}
       - name: Publish GitHub release
         shell: bash
         env:
@@ -161,6 +227,8 @@ jobs:
           set -euo pipefail
           release_assets=(
             "${PACKAGE}"
+            "Lodestar-${GITHUB_REF_NAME#v}-win-x64.zip"
+            "${NATIVE_ARCHIVE}"
             SHA256SUMS.txt
           )
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then

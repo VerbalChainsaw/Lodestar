@@ -1,0 +1,25 @@
+{
+  "name": "lodestar",
+  "version": "1.4.10",
+  "description": "Lodestar startup, knowledge, work, continuity, and decisions integration",
+  "author": {
+    "name": "VerbalChainsaw"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Lodestar",
+    "shortDescription": "One suite for context, work, continuity, and decisions.",
+    "longDescription": "Routes agents to targeted Lodestar reads at startup without injecting project records. Preserves the installed contract-5 work and continuity operations.",
+    "developerName": "VerbalChainsaw",
+    "category": "Productivity",
+    "capabilities": [
+      "skills",
+      "hooks",
+      "MCP tools"
+    ],
+    "defaultPrompt": [
+      "Use handoff now to save this project context for the next session."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

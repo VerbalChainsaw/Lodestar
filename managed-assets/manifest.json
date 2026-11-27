@@ -8,14 +8,14 @@
       "source_entrypoint": "skills/adderall/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "17e7b7020e836f7141dec897dda636112e4166663bba0eb91da5e4e2f816e0e1"
+        "value": "fcd88c28e5de01cbf2f76428dd0f4a178c4ce03eee203872d6d01f1538fed64c"
       },
       "payload_root": "skills/adderall",
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 3430,
-          "sha256": "d83d35ff61828e6b224fc22fb05aec96873c54b3c2647c4c695e6a96f250dd56"
+          "bytes": 1373,
+          "sha256": "9f2a27fbe1a702135f8bb9a9f3513c0004c050e46ceb36666e2346ee18cdf650"
         }
       ],
       "distribution_owner": "npm:lodestar-agent-context"
@@ -109,29 +109,6 @@
       "distribution_owner": "npm:lodestar-agent-context"
     },
     {
-      "name": "center-multigeometry",
-      "source_id": "golden-rules:center-multigeometry",
-      "source_entrypoint": "skills/center-multigeometry/SKILL.md",
-      "source_identity": {
-        "algorithm": "sha256",
-        "value": "83f6a9193fba35bf70cc6c1201a437109eb7bb5df451b703149b3b731c1d26c8"
-      },
-      "payload_root": "skills/center-multigeometry",
-      "files": [
-        {
-          "path": "LICENSE",
-          "bytes": 1069,
-          "sha256": "702ab85bb649424b323bada15b0e37c41d180ba97eff5c0932e04da4e75cd3d4"
-        },
-        {
-          "path": "SKILL.md",
-          "bytes": 10298,
-          "sha256": "598acdbd464f2f72331c6e0165d39a730d0a3c30fa3b61c5935f73f775972a6b"
-        }
-      ],
-      "distribution_owner": "npm:lodestar-agent-context"
-    },
-    {
       "name": "codeplan",
       "source_id": "golden-rules:codeplan",
       "source_entrypoint": "skills/codeplan/SKILL.md",
@@ -211,19 +188,19 @@
       "source_entrypoint": "skills/lodestar/SKILL.md",
       "source_identity": {
         "algorithm": "sha256",
-        "value": "06d1b3a62061ec7f35f91fc47456d69054d5a77abcccc5f49629c606e8bc34ef"
+        "value": "d095956ec0e436412398fb363c86de97872dd3c2873c026d35acd0113c558294"
       },
       "payload_root": "skills/lodestar",
       "files": [
         {
           "path": "agents/openai.yaml",
-          "bytes": 241,
-          "sha256": "bb4dc921e7ba318b94b14d444598607bfc1159e43bf59a35fe52f9dd969ef5ed"
+          "bytes": 240,
+          "sha256": "9aea211cb4fc4cae985e7546f4d16d96265e5634afc86293b6a7a571dfc25fba"
         },
         {
           "path": "assets/templates/_stub-pattern.AGENTS.md",
-          "bytes": 1659,
-          "sha256": "805b34f4aa542045c07fdc80bec6f4a46763042098a30b493f57e2d8e5bc64d2"
+          "bytes": 1684,
+          "sha256": "e2f78dd2aa0f7a82b3df98c3efdfcf403dfab0915ec83986712238038f3790e2"
         },
         {
           "path": "assets/templates/AGENTS.template.md",
@@ -247,18 +224,18 @@
         },
         {
           "path": "references/continuity.md",
-          "bytes": 1171,
-          "sha256": "09553b4fbc6c1f489dc92188bf0880147381b14738a1643a2e35802461cba940"
+          "bytes": 11985,
+          "sha256": "8afd4c5a078987717a6ff1c6b077fb72c8d286af48f34ef3ab4fcf3edb04465c"
         },
         {
           "path": "references/decisions.md",
-          "bytes": 1280,
-          "sha256": "6e9ba51bfc5917778e18d5902026ceba8e84297fe028bc7010ded42cf3b24650"
+          "bytes": 1397,
+          "sha256": "1cda9f49c9d1fa54c1cdf2838b00b62e8b2669ed66bbe62a39e175702be1c82a"
         },
         {
           "path": "references/knowledge.md",
-          "bytes": 2426,
-          "sha256": "01c558a7c7938aa087e587256f5f4c69877853b600478aaaf80f9f28535e3041"
+          "bytes": 8779,
+          "sha256": "8a145e29f827eb82be9743c809bcde018fd7da82bd0c9d3eac3a47c955df7b47"
         },
         {
           "path": "references/templates.md",
@@ -267,18 +244,18 @@
         },
         {
           "path": "references/toolchain.md",
-          "bytes": 7496,
-          "sha256": "4dbc8f9bb86011f1d05fb0dee1563ccca7fc8f762a72bc3361b0422150dd336a"
+          "bytes": 10469,
+          "sha256": "fa46e15af0be8875d8d6c5f90ee0bba0a0133bb160d36e7b1e88bd3fc3f62e36"
         },
         {
           "path": "references/work-presence.md",
-          "bytes": 1050,
-          "sha256": "69916efb4e5ce8acc537ceb0070a8a5e487f70cb33b03fc7b4debd9cc1e34982"
+          "bytes": 1711,
+          "sha256": "8a7c675cafe253b6dac34219d29deeae9af6ea7c5403cb5ece187344a8fcb456"
         },
         {
           "path": "SKILL.md",
-          "bytes": 5463,
-          "sha256": "e0a0889bec091d12d9940e21196a306185d6fb2f5f665515fad5ff9549167ee7"
+          "bytes": 7172,
+          "sha256": "c51b52e03b1175dd1682b0e0d47782e59e50f943806bec08e55e41995382b494"
         }
       ],
       "distribution_owner": "npm:lodestar-agent-context"

@@ -5,11 +5,16 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isPromise } from "node:util/types";
 
-import { lodestarError, wrapError } from "./errors.mjs";
+import { errorPayload, lodestarError, wrapError } from "./errors.mjs";
 import {
   assertSupportedSchema,
+  databaseFile,
+  nativeDatabasePath,
   readMetadata,
+  rememberDatabaseFile,
+  sqliteError,
 } from "./database-schema.mjs";
 import {
   createDatabaseInstanceId,
@@ -21,6 +26,18 @@ import { validateTimestamp } from "./validate.mjs";
 export const DATABASE_BUSY_TIMEOUT_MS = 0;
 
 const connectionState = new WeakMap();
+const promiseThen = Function.prototype.call.bind(Promise.prototype.then);
+const promiseResolve = Promise.resolve.bind(Promise);
+
+export function consumeAsyncResult(value) {
+  const nativePromise = isPromise(value);
+  if (!nativePromise && !(value && typeof value.then === "function")) return false;
+  // Native promises may override then/catch; use their internal Promise state
+  // without reading or invoking either callback-owned method.
+  try { promiseThen(nativePromise ? value : promiseResolve(value), undefined, () => {}); }
+  catch { /* Custom species or thenables may refuse handler attachment. */ }
+  return true;
+}
 
 function stateFor(db) {
   const state = connectionState.get(db);
@@ -33,84 +50,7 @@ function stateFor(db) {
   return state;
 }
 
-function ownDataProperty(value, key) {
-  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
-    return undefined;
-  }
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return descriptor && Object.hasOwn(descriptor, "value")
-      ? descriptor.value
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function normalizeDatabaseBusyError(error, file = null) {
-  const rawCode = ownDataProperty(error, "code");
-  const code = typeof rawCode === "string" ? rawCode : "";
-  const rawErrorCode = ownDataProperty(error, "errcode");
-  const primaryCode = Number.isInteger(rawErrorCode)
-    ? rawErrorCode & 0xff
-    : null;
-  const nativeSqliteError = code === "ERR_SQLITE_ERROR"
-    || code.startsWith("SQLITE_");
-  if (
-    nativeSqliteError
-    && (
-      code.includes("SQLITE_BUSY")
-      || code.includes("SQLITE_LOCKED")
-      || primaryCode === 5
-      || primaryCode === 6
-    )
-  ) {
-    return lodestarError(
-      "database_busy",
-      "The Lodestar database is busy.",
-      {
-        identifiers: { database: file },
-        action: "Wait for the other writer to finish and retry.",
-        cause: error,
-      },
-    );
-  }
-  return error;
-}
-
-function sqliteError(error, file) {
-  const busyError = normalizeDatabaseBusyError(error, file);
-  if (busyError !== error) return busyError;
-  const code = String(error?.code ?? "");
-  const primaryCode = Number.isInteger(error?.errcode)
-    ? error.errcode & 0xff
-    : null;
-  if (
-    code.includes("SQLITE_CORRUPT")
-    || code.includes("SQLITE_NOTADB")
-    || primaryCode === 11
-    || primaryCode === 26
-  ) {
-    return lodestarError(
-      "database_integrity",
-      "The database is corrupt or is not a SQLite database.",
-      {
-        identifiers: { database: file },
-        action: "Run lodestar doctor and restore an external backup if needed.",
-        cause: error,
-      },
-    );
-  }
-  return wrapError(
-    error,
-    "database_error",
-    "SQLite could not complete the database operation.",
-    {
-      identifiers: { database: file },
-      action: "Run lodestar doctor for a structured diagnosis.",
-    },
-  );
-}
+export { normalizeDatabaseBusyError } from "./database-schema.mjs";
 
 async function existingFile(file) {
   try {
@@ -151,18 +91,21 @@ export function openConnection(
 ) {
   let db;
   try {
-    db = new DatabaseSync(file, {
+    db = new DatabaseSync(nativeDatabasePath(file), {
       readOnly,
       timeout: DATABASE_BUSY_TIMEOUT_MS,
       enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false,
       allowExtension: false,
     });
-    const state = { admission: 0, revision: null };
+    rememberDatabaseFile(db, file);
+    const existingMetadata = db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='metadata'").get();
+    const storedVersion = existingMetadata ? db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value : null;
+    const state = { admission: 0, revision: null, schemaContract: ["4", "5"].includes(storedVersion) ? 5 : SCHEMA_VERSION };
     connectionState.set(db, state);
     if (!readOnly) {
       db.function("lodestar_write_contract", {}, () =>
-        state.admission > 0 ? SCHEMA_VERSION : 0);
+        state.admission > 0 ? state.schemaContract : 0);
     }
     if (typeof db.enableDefensive === "function") {
       db.enableDefensive(true);
@@ -184,6 +127,7 @@ export function openConnection(
 }
 
 export function beginImmediate(db, file = null) {
+  file = databaseFile(db, file);
   try {
     db.exec("BEGIN IMMEDIATE");
   } catch (error) {
@@ -192,6 +136,7 @@ export function beginImmediate(db, file = null) {
 }
 
 export function commit(db, file = null) {
+  file = databaseFile(db, file);
   try {
     db.exec("COMMIT");
   } catch (error) {
@@ -199,16 +144,40 @@ export function commit(db, file = null) {
   }
 }
 
-export function rollback(db) {
+function cleanupFailure(db, file, phase, cleanupError, primaryError, committed) {
+  const failure = lodestarError(
+    phase === "rollback" ? "database_rollback_failed" : "database_connection_cleanup_failed",
+    phase === "rollback" ? "SQLite did not confirm transaction rollback."
+      : "SQLite could not confirm the owned connection's safe configuration.",
+    {
+      identifiers: {
+        database: databaseFile(db, file), phase, committed,
+        transaction_active: typeof db.isTransaction === "boolean" ? db.isTransaction : null,
+        primary: primaryError ? errorPayload(sqliteError(primaryError, file)) : null,
+        cleanup: errorPayload(sqliteError(cleanupError, file)),
+      },
+      action: "Discard or close this owned connection and reopen for read-only diagnosis. Preserve the exact request; reconcile its receipt and current records before any replay or new write.",
+      cause: new AggregateError(primaryError ? [primaryError, cleanupError] : [cleanupError],
+        "SQLite connection cleanup failed."),
+    },
+  );
+  stateFor(db).failure = failure;
+  return failure;
+}
+
+export function rollback(db, file = null, primaryError = null) {
   if (typeof db.isTransaction === "boolean" && !db.isTransaction) return;
   try {
     db.exec("ROLLBACK");
-  } catch {
-    // Preserve the operation failure. Doctor will diagnose a rollback failure.
+  } catch (error) {
+    throw cleanupFailure(db, file, "rollback", error, primaryError, "unknown");
   }
 }
 
 export function transaction(db, operation, file = null) {
+  file = databaseFile(db, file);
+  const state = stateFor(db);
+  if (state.failure) throw state.failure;
   if (
     typeof operation !== "function"
     || operation.constructor?.name === "AsyncFunction"
@@ -220,7 +189,7 @@ export function transaction(db, operation, file = null) {
   }
   if (db.isTransaction === true) {
     const nested = operation();
-    if (nested && typeof nested.then === "function") {
+    if (consumeAsyncResult(nested)) {
       throw lodestarError(
         "invalid_transaction",
         "Synchronous SQLite transactions cannot accept an async callback.",
@@ -232,21 +201,21 @@ export function transaction(db, operation, file = null) {
   let result;
   try {
     result = operation();
-    if (result && typeof result.then === "function") {
+    if (consumeAsyncResult(result)) {
       throw lodestarError(
         "invalid_transaction",
         "Synchronous SQLite transactions cannot accept an async callback.",
       );
     }
   } catch (error) {
-    rollback(db);
+    rollback(db, file, error);
     throw error?.name === "LodestarError" ? error : sqliteError(error, file);
   }
   try {
     commit(db, file);
   } catch (error) {
     if (db.isTransaction === true) {
-      rollback(db);
+      rollback(db, file, error);
       throw error;
     }
     throw lodestarError(
@@ -269,6 +238,7 @@ export function transaction(db, operation, file = null) {
 
 export function admittedTransaction(db, operation, file = null) {
   const state = stateFor(db);
+  if (state.failure) throw state.failure;
   if (db.isTransaction === true && state.admission < 1) {
     throw lodestarError(
       "invalid_transaction",
@@ -276,17 +246,31 @@ export function admittedTransaction(db, operation, file = null) {
     );
   }
   const outerAdmission = state.admission === 0;
-  if (outerAdmission) db.exec("PRAGMA trusted_schema = ON");
+  if (outerAdmission) {
+    try { db.exec("PRAGMA trusted_schema = ON"); }
+    catch (error) { throw cleanupFailure(db, file, "trusted_schema_admission", error, null, false); }
+  }
   state.admission += 1;
+  let result, failure, failed = false;
   try {
-    return transaction(db, operation, file);
+    result = transaction(db, operation, file);
+  } catch (error) {
+    failure = error;
+    failed = true;
   } finally {
     state.admission -= 1;
     if (outerAdmission) {
       state.revision = null;
-      db.exec("PRAGMA trusted_schema = OFF");
+      try {
+        db.exec("PRAGMA trusted_schema = OFF");
+      } catch (error) {
+        const committed = failed ? errorPayload(failure).identifiers.committed ?? false : true;
+        throw cleanupFailure(db, file, "trusted_schema_reset", error, failure, committed);
+      }
     }
   }
+  if (failed) throw failure;
+  return result;
 }
 
 export function transactionRevision(db) {
@@ -455,7 +439,7 @@ export async function initializeDatabase(
       const metadata = readMetadata(existing, file);
       return {
         database: file,
-        schema_version: SCHEMA_VERSION,
+        schema_version: Number(metadata.schema_version),
         created: false,
         created_at: metadata.created_at,
         database_instance_id: metadata.database_instance_id,
@@ -497,16 +481,17 @@ export async function initializeDatabase(
     } catch {
       // Cleanup still runs against the exact new target.
     }
-    const commitOutcomeUnknown =
-      error?.code === "database_commit_outcome_unknown";
-    if (commitOutcomeUnknown) throw error;
+    const requiresReconciliation = error?.code === "database_commit_outcome_unknown"
+      || error?.code === "database_rollback_failed"
+      || error?.code === "database_connection_cleanup_failed";
+    if (requiresReconciliation) throw error;
     let existing;
     try {
       existing = await openReadDatabase(file);
       const metadata = readMetadata(existing, file);
       return {
         database: file,
-        schema_version: SCHEMA_VERSION,
+        schema_version: Number(metadata.schema_version),
         created: false,
         created_at: metadata.created_at,
         database_instance_id: metadata.database_instance_id,

@@ -34,6 +34,12 @@
   faulty storage, or unavailable post-backup writes.
 - The file is not encrypted, signed, or authenticated. Protect it with operating-system
   permissions and tested backups.
+- Contract-5 triggers fence INSERT, UPDATE, and DELETE row operations. They do not
+  fence DDL such as DROP TABLE or isolate a file-owning SQLite client. Internal schema
+  creation and migration SQL remain trusted code; external clients can read both
+  records and schema. `trusted_schema=OFF` blocks trigger application functions
+  outside admission, and the connection-scoped function also rejects unadmitted
+  row writes when trusted schema is ON.
 - Request receipts make database effects idempotent. They do not make an external
   action and its later ledger update one atomic transaction.
 - `doctor` diagnoses; it does not repair. Raw source correction is deliberate because
@@ -41,13 +47,15 @@
 
 ## Compatibility and recovery
 
-- Current runtime reads and writes schema 5 only. It has one explicit, preserving
-  schema-4 conversion and no general historical converter suite.
+- New stores use schema 6. This runtime still reads and writes existing schema-5
+  stores; the explicit schema-4 conversion targets schema 5. Ordinary operations
+  do not migrate a store or restore cold history. See [lean storage](lean-storage.md)
+  for schema-6 storage and bounded archive recovery.
 - Converting another actual store requires an exact inspected preservation mapping.
-- After accepted schema-5 writes, restoring a pre-conversion store as active would
-  discard accepted history and is unsupported. Forward recovery must account for all
-  known records, events, receipts, raw history, and associations before promotion.
-- There is no schema-5 downgrade converter.
+- After accepted writes, restoring a pre-conversion store as active would discard
+  accepted history and is unsupported. Forward recovery must account for all known
+  records, events, receipts, raw history, and associations before promotion.
+- There is no downgrade converter. Older schema-5-only binaries refuse schema 6.
 
 ## Distribution
 
@@ -83,11 +91,58 @@
 - Shell and host output limits are external. File/stdin argument transport and
   complete output files provide a supported way around them; they cannot recover
   a request already truncated by its caller. Do not act on clipped required input.
+- Mutation bodies and JSON argument arrays are limited to 16 MiB of UTF-8 input
+  bytes, including whitespace and a BOM. File/stdin overflow returns `resource_limit`
+  before parsing or dispatch and reports the observed byte count and maximum.
+  Stdin stops at the first overflowing chunk; the reported count is a lower bound
+  on its complete size. Preserve the original request at its source and reduce it
+  deliberately before retrying; the CLI does not truncate or reread overflow input.
 - Argument-file contents are core arguments, not shell commands. Under WSL and
   Git Bash they require Windows-visible paths and explicit context/home options;
   adapters do not reinterpret embedded JSON. Structured input supports exact
   runtime JSON numbers, not arbitrary-precision numeric storage.
+- Shared JSON processing has a 1,024-container nesting limit. Oversized nesting
+  fails with a typed `resource_limit`; use shallower objects or linked records.
+  Canonical numeric normalization treats `-0` as `0`; use a string when the sign
+  itself carries meaning. Standalone parser helpers use their supplied byte budget;
+  file/stdin admission and the Manager editor enforce the 16 MiB input limit.
+- Stored SQLite JSON has a 1,000-container limit including its enclosing record
+  and receipt wrappers; see docs/schema.md. MCP frames, metadata included, use
+  the 16 MiB input limit. Its child calls share a 30-second deadline, 64 MiB combined
+  stdout/stderr budget and complete two-channel envelope validation. Oversized
+  frames fail explicitly and discard through newline to keep the next frame
+  aligned. A dispatched mutation with an incomplete response remains unknown;
+  preserve the original tool request and reconcile before exact replay.
+- Manager automatic find loading stops at 10,000 records or 128 pages by default,
+  including empty pages. A stopped read is explicitly partial and includes a
+  revision-pinned continuation argument array. Damaged-row coverage is preserved.
+  This bounds a misbehaving configured CLI; it does not silently claim completion.
+- Bounded work status/history and pending-list reads return literal `next` argument
+  arrays with offset and database revision. Follow those arguments unchanged;
+  a concurrent accepted transaction requires a fresh read. Record diagnostics
+  remain separate from whether another page exists. An initial unpinned read
+  observes its current snapshot; continuation pages pin that observed revision.
+- Both response channels must contain valid UTF-8. A malformed stdout or stderr
+  identifies its channel and retains an unknown outcome after write dispatch.
+  A valid envelope on the other channel cannot prove that the malformed channel
+  contains no conflicting response. Pre-aborted operations report no dispatch.
+- Windows path comparison retains the established ASCII case rule. Unicode
+  folding is accepted only when filesystem resolution proves the folded name
+  refers to the same path. Unavailable paths do not supply Unicode alias proof.
+  Arbitrary ASCII case-sensitive Windows path identity is not claimed by this
+  comparison; use project roots that differ beyond ASCII letter case.
+  Drive-mount translation preserves ordinary UNC
+  server/share identity. Correct genuinely ambiguous legacy mappings deliberately.
+  If stored rows use a changed older Unicode fallback scope, orientation reports
+  the difference with a supported literal read; it does not silently attach those
+  records to another physical directory.
 - A successful local transaction proves acceptance, not truth of caller-supplied
   content or completion of an external action. Preserve observed evidence, its
   applicability, and uncertainty; resolve stale or conflicting records through the
   existing guarded update path instead of silently treating old prose as authority.
+- A live mutation error followed by an unclassified or unsupported process exit
+  leaves the write outcome unknown. Loader preserves the original response,
+  error instructions and an identity-bound uncertainty diagnostic through reopen
+  and later rejection. Saved response JSON has no process exit to infer; Loader
+  validates its envelope and the original request independently. A matching
+  successful receipt can settle the pending request.

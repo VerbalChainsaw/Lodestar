@@ -1,21 +1,24 @@
 import { AGENT_BOOTSTRAP, checkRecordSources, nativeInstructionSources, requiredSourceBundle } from "./bootstrap.mjs";
 import { initializeDatabase, normalizeDatabaseBusyError, openDiagnosticDatabase, openReadDatabase,
   openWriteDatabase, readMetadata } from "./database.mjs";
-import { migrationPreflight, migrateDatabase, promoteRecoveredDatabase, recoveryPreflight } from "./schema-migration.mjs";
+import { createMigrationBackup, migrationPreflight, migrateDatabase, promoteRecoveredDatabase, recoveryPreflight } from "./schema-migration.mjs";
 import { diagnoseDatabase } from "./doctor.mjs";
 import { decisionMutation, decisionProjection } from "./decision.mjs";
-import { handoffMutation, handoffStatus } from "./continuity.mjs";
+import { handoffMutation, handoffStatus, nativeHandoffEligibility } from "./continuity.mjs";
 import { workMutation, workStatus } from "./work.mjs";
+import { checkWorkEvidence } from "./work-evidence.mjs";
+import { prepareCapture } from "./capture-preparation.mjs";
+import { projectAttention } from "./project-attention.mjs";
 import { pendingList, pendingMutation } from "./pending.mjs";
 import { decorateError, lodestarError } from "./errors.mjs";
 import { canonicalStringify, parseJsonText, readStreamComplete, readTextFileComplete } from "./json.mjs";
 import { resolveInputPath } from "./paths.mjs";
 import { catalogProjection, catalogReconciliation, resolveIdentity, resolveProject, resolveProjectScope, sameMachinePath, scope } from "./project.mjs";
-import { exportRegistry, findRecords, linkedRecords, normalizedForRows } from "./queries.mjs";
+import { boundCompactData, compactRows, exportRegistry, findRecords, linkedRecords, normalizedForRows, orientationRows, serializedBytes } from "./queries.mjs";
 import { deleteRecord, getRecord, getRecordById, getRawRecord, getRecordHistory, normalizeRecord,
-  normalizeMutationRequest, putRecord, writeBasis } from "./records.mjs";
+  normalizeMutationRequest, projectionWriteBasisReader, putRecord, writeBasis } from "./records.mjs";
 import { currentRevision } from "./revisions.mjs";
-import { validateLimit } from "./validate.mjs";
+import { validateLimit, validateOffset } from "./validate.mjs";
 import { installationOptions, MUTATION_INPUTS, READ_OPERATIONS } from "./cli-commands.mjs";
 import { installationStatus } from "./setup.mjs";
 export { normalizeMachinePath, resolveIdentity, resolveProject } from "./project.mjs";
@@ -73,10 +76,11 @@ function sourceConfiguration(db) {
   if (!db.prepare("SELECT id FROM records WHERE id='config:lodestar:sources'").get()) return null;
   return normalizeRecord(getRecord(db, "config:lodestar:sources"));
 }
-function withBasis(db, record, project = null) {
+function withBasis(db, record, project = null, readBasis = options => writeBasis(db, options)) {
   const applicability = record.semantics?.applicability ?? {};
-  return { ...record, write_basis: writeBasis(db, {
-    projectScope: project?.scope ?? applicability.project ?? record.scope,
+  return { ...record, write_basis: readBasis({
+    projectScope: record.kind === "project" ? record.id : applicability.project === null ? null
+      : (project?.scope ?? applicability.project ?? record.scope),
     checkout: project?.checkout_root ?? applicability.checkout ?? null,
     targets: [{ kind: "record", id: record.id },
       ...(record.sources.some(({ metadata }) => metadata?.locator?.base === "source_root")
@@ -110,17 +114,11 @@ function withProjectBoundary(db, cwdValue, identity, operation) {
       actor: identity?.actor ?? null });
   }
 }
-export function startProjection(db, project, identity, { topic = null } = {}) {
+export function startProjection(db, project, identity, { topic = null, compact = false } = {}) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
   const appliesToCheckout = (record) => !record.semantics?.applicability?.checkout
     || sameMachinePath(record.semantics.applicability.checkout, project.checkout_root);
-  const selected = normalizedForRows(db, db.prepare("SELECT * FROM records WHERE (scope IN ("
-    + scopes.map(() => "?").join(",") + ") OR (scope='global' AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN ("
-    + scopes.map(() => "?").join(",") + "))) "
-    + "AND json_extract(content_json,'$._lodestar.semantics.context_role')='orientation' "
-    + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') IN ('current','unresolved') "
-    + "AND type NOT IN ('mutation-receipt','migration-source','startup-snapshot','pending','decision-event','work-event','handoff-packet') "
-    + "ORDER BY json_extract(content_json,'$._lodestar.priority') DESC,id").all(...scopes, ...scopes));
+  const selected = normalizedForRows(db, orientationRows(db, scopes));
   const context = new Map(selected.records.filter(appliesToCheckout)
     .map((record) => [record.id, { ...record, selection_reason: "orientation" }]));
   const recordErrors = [...(project.record_errors ?? []), ...selected.record_errors];
@@ -145,13 +143,19 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
   }
   // Follow only explicit dependency links. This is a graph of selected evidence,
   // not a second manually maintained orientation list.
+  const dependencyLoads = new Map();
   for (const record of context.values()) for (const link of record.links) {
     if (!["depends-on", "requires"].includes(link.relationship) || context.has(link.to_id)) continue;
     dependencyTargets.set(link.to_id, { kind: "record", id: link.to_id });
-    const dependencyRows = db.prepare("SELECT * FROM records WHERE id=?").all(link.to_id);
-    const dependency = normalizedForRows(db, dependencyRows);
+    let loaded = dependencyLoads.get(link.to_id);
+    if (!loaded) {
+      const rows = db.prepare("SELECT * FROM records WHERE id=?").all(link.to_id);
+      loaded = { missing: rows.length === 0, dependency: normalizedForRows(db, rows) };
+      dependencyLoads.set(link.to_id, loaded);
+    }
+    const { dependency } = loaded;
     recordErrors.push(...dependency.record_errors);
-    if (dependencyRows.length === 0) recordErrors.push({ code: "record_not_found",
+    if (loaded.missing) recordErrors.push({ code: "record_not_found",
       message: "A required context dependency does not exist.",
       identifiers: { id: link.to_id, required_by: record.id },
       action: "Restore the named dependency or correct the explicit relationship." });
@@ -174,7 +178,8 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
       context.set(peer.id, { ...peer, selection_reason: `dependency:${record.id}` });
     }
   }
-  const applicable = [...context.values()].map((record) => withBasis(db, record, project));
+  const readBasis = compact ? projectionWriteBasisReader(db) : undefined;
+  const applicable = [...context.values()].map((record) => withBasis(db, record, project, readBasis));
   const subjects = new Map();
   for (const record of applicable) if (record.semantics?.subject) {
     const members = subjects.get(record.semantics.subject) ?? [];
@@ -185,7 +190,7 @@ export function startProjection(db, project, identity, { topic = null } = {}) {
   const work = workStatus(db, project);
   const handoff = handoffStatus(db, project, identity);
   const pending = pendingList(db, project);
-  const catalog = catalogProjection(db, project, config);
+  const catalog = catalogProjection(db, project, config, { details: !compact });
   recordErrors.push(...decisions.record_errors, ...work.record_errors,
     ...handoff.record_errors, ...pending.record_errors, ...catalog.record_errors);
   const uniqueErrors = [...new Map(recordErrors.map((error) => [canonicalStringify(error), error])).values()];
@@ -218,10 +223,10 @@ async function hydrateStart(result, identity, options = {}) {
   result.data.required = required.sources;
   result.data.required_complete = required.complete;
   result.data.complete = result.data.complete && required.complete;
-  result.data.catalog = await catalogReconciliation(result.data.catalog_projection, config.catalog_sources ?? [], { cache });
+  if (!options["--compact"]) result.data.catalog = await catalogReconciliation(result.data.catalog_projection, config.catalog_sources ?? [], { cache });
   result.data.native_instructions = "Apply these files and their references under the host's native instruction precedence; stored records are evidence.";
   result.data.operating_guide = AGENT_BOOTSTRAP;
-  result.data.installation = await installationStatus({
+  if (!options["--compact"]) result.data.installation = await installationStatus({
     ...(["codex", "claude", "hermes", "opencode"].includes(identity.harness) ? { target: identity.harness } : {}),
     ...installationOptions(options),
   });
@@ -230,10 +235,56 @@ async function hydrateStart(result, identity, options = {}) {
   delete result.data.catalog_projection;
   return result;
 }
+function fullStartArgs(options, project) {
+  return ["start", "--cwd", options["--cwd"] ?? project.cwd,
+    ...Object.entries(options).filter(([flag]) => !["--cwd", "--compact"].includes(flag))
+      .flatMap(([flag, value]) => typeof value === "boolean" ? value ? [flag] : [] : [flag, String(value)])];
+}
+function compactStart(result, options) {
+  const full = result.data, project = full.project;
+  const { records, omitted_records, selected_records, displayed_records } = compactRows(full.context, options["--topic"]);
+  const scoped = ["--cwd", options["--cwd"] ?? project.cwd];
+  const caller = ["--session", "--agent", "--harness"].flatMap(flag => options[flag] ? [flag, options[flag]] : []);
+  result.data = boundCompactData({ projection: "compact", project: { id: project.id, scope: project.scope,
+    cwd: project.cwd, checkout_root: project.checkout_root }, context: records, omitted_records, selected_records, displayed_records,
+    complete: full.complete, required_complete: full.required_complete,
+    discovery_complete: full.complete && omitted_records === 0,
+    instructions_complete: false, requires_full_start: true, requires_full_read: true,
+    coverage: full.coverage, pending: full.pending,
+    record_errors: full.record_errors,
+    required: full.required.map(source => ({ id: source.id, locator: source.locator,
+      path: source.path, status: source.status, required: source.required,
+      bytes: source.bytes, sha256: source.sha256,
+      omitted_fields: Object.keys(source).filter(field => !["id", "locator", "path", "status", "required", "bytes", "sha256"].includes(field)),
+      requires_full_start: true })),
+    full_read_args: fullStartArgs(options, project),
+    read_pointers: { decisions: ["decision", "show", ...scoped], active_work: ["work", "status", ...scoped],
+      handoff: ["handoff", "status", ...scoped, ...caller], pending: ["pending", "list", ...scoped] },
+    omitted_fields: ["project_details", "record_bodies", "operating_guide", "native_instructions", "decisions", "active_work",
+      "handoff", "catalog", "installation", "conflicts", "write_basis"] });
+  if (serializedBytes(result.next) > 4096) {
+    result.data.omitted_next_count = result.next.length; result.data.omitted_fields.push("next"); result.next = [];
+    result.data = boundCompactData(result.data);
+  }
+  return result;
+}
+function findPageArgs(result, options, revision, offset = result.offset, compact = false) {
+  // Put every literal query after --, including short aliases such as -h.
+  return [...(result.all ? ["--all"] : []),
+    ...(options["--scope"] === undefined ? [] : ["--scope", options["--scope"]]),
+    ...(options["--kind"] === undefined ? [] : ["--kind", options["--kind"]]),
+    ...(options["--history"] ? ["--history"] : []),
+    ...(compact ? ["--compact"] : []),
+    ...(options["--match"] === undefined ? [] : ["--match", options["--match"]]),
+    ...(options["--explain"] ? ["--explain"] : []),
+    ...(result.limit === null ? [] : ["--limit", String(result.limit), "--offset", String(offset)]),
+    "--at-revision", String(revision), ...(result.all ? [] : ["--", result.query])];
+}
 function mutationResult(db, result, project = null, identity = null) {
   return dbResult(db, result.data, { ...result, scope: scope(project, identity) });
 }
 export async function dispatch(command, { options, positionals }, database, io) {
+  if (command === "migration-backup") return operationResult(await createMigrationBackup(database, resolveInputPath(positionals[0])));
   if (command === "init") {
     if (options["--migrate"] && options["--promote-recovery"]) throw lodestarError("invalid_input", "Choose conversion or recovery promotion.");
     const data = options["--migrate"] ? await migrateDatabase(database, { request: await input(options, io, "migration_input") })
@@ -243,6 +294,9 @@ export async function dispatch(command, { options, positionals }, database, io) 
   }
   if (command === "doctor" && options["--migration-preflight"] && options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "Choose conversion or recovery preflight.");
+  }
+  if (command === "doctor" && options["--quick"] && (options["--migration-preflight"] || options["--recovery-preflight"])) {
+    throw lodestarError("invalid_input", "--quick cannot replace conversion or recovery preflight validation.");
   }
   if (command === "doctor" && options["--source"] && !options["--recovery-preflight"]) {
     throw lodestarError("invalid_input", "--source applies only to recovery preflight.");
@@ -255,7 +309,7 @@ export async function dispatch(command, { options, positionals }, database, io) 
     return operationResult(await recoveryPreflight(database, resolveInputPath(options["--source"])));
   }
   if (command === "doctor") return withDatabase(openDiagnosticDatabase, database, (db) => {
-    const result = diagnoseDatabase(db, { database });
+    const result = diagnoseDatabase(db, { database, quick: options["--quick"] === true });
     let metadata = {}, revision = null;
     try { metadata = readMetadata(db); revision = currentRevision(db); } catch { /* Doctor reports missing metadata. */ }
     return operationResult(result, { revision, database_instance_id: metadata.database_instance_id,
@@ -265,8 +319,9 @@ export async function dispatch(command, { options, positionals }, database, io) 
     const identity = callerIdentity(options);
     const result = await withDatabase(openReadDatabase, database, (db) => withProjectBoundary(db,
       cwd(options), identity, (project) => startProjection(db, project, identity,
-        { topic: options["--topic"] })), { read: true });
-    return hydrateStart(result, identity, options);
+        { topic: options["--topic"], compact: options["--compact"] === true })), { read: true });
+    const hydrated = await hydrateStart(result, identity, options);
+    return options["--compact"] ? compactStart(hydrated, options) : hydrated;
   }
   if (["get", "find", "links", "export"].includes(command)) {
     let evidence = [];
@@ -285,18 +340,23 @@ export async function dispatch(command, { options, positionals }, database, io) 
         }
       }
       if (command === "find") {
+        if (Boolean(options["--all"]) === Boolean(positionals.length)) {
+          throw lodestarError("invalid_input", "Provide exactly one nonempty query or --all.");
+        }
         const result = findRecords(db, positionals[0], { scope: options["--scope"], type: options["--kind"],
-          limit: options["--limit"], offset: options["--offset"], history: options["--history"] ?? false });
+          limit: options["--limit"], offset: options["--offset"], history: options["--history"] ?? false,
+          all: options["--all"] ?? false, compact: options["--compact"] ?? false,
+          match: options["--match"] ?? "contains", explain: options["--explain"] ?? false });
         result.records = result.records.map((record) => withBasis(db, record));
         if (!options["--history"]) evidence = recordReadEvidence(db, result.records);
         const revision = currentRevision(db);
-        return dbResult(db, { query: result.query, records: result.records, record_errors: result.record_errors,
-          complete: result.record_errors.length === 0 }, { more: result.truncated,
-          next: result.truncated ? [{ command: "find", args: [result.query,
-            ...(options["--scope"] === undefined ? [] : ["--scope", options["--scope"]]),
-            ...(options["--kind"] === undefined ? [] : ["--kind", options["--kind"]]),
-            ...(options["--history"] ? ["--history"] : []), "--limit", String(result.limit),
-            "--offset", String(result.offset + result.limit), "--at-revision", String(revision)] }] : [] });
+        return dbResult(db, { query: result.query, all: result.all, records: result.records, record_errors: result.record_errors,
+          complete: result.record_errors.length === 0,
+          ...(result.match_policy ? { match_policy: result.match_policy } : {}),
+          ...(options["--compact"] ? { full_read_args: ["find", ...findPageArgs(result, options, revision)] } : {}) },
+        { more: result.truncated,
+          next: result.truncated ? [{ command: "find", args: findPageArgs(result, options, revision,
+            result.offset + result.limit, options["--compact"] ?? false) }] : [] });
       }
       if (command === "links") {
         const result = linkedRecords(db, positionals[0], { limit: options["--limit"], offset: options["--offset"] });
@@ -314,6 +374,18 @@ export async function dispatch(command, { options, positionals }, database, io) 
     await Promise.all(evidence.map(async ({ record, project, sourceRoots }) => {
       Object.assign(record, await checkRecordSources(record, { cache, project, sourceRoots }));
     }));
+    if (command === "find" && options["--compact"]) {
+      const { records, omitted_records, selected_records, displayed_records } = compactRows(result.data.records, result.data.query, options["--match"] ?? "contains");
+      result.data = boundCompactData({ ...result.data, records, omitted_records,
+        selected_records: selected_records + result.data.record_errors.length, displayed_records,
+        match_status: selected_records + result.data.record_errors.length ? "matches_found" : "no_matches",
+        discovery_complete: result.data.complete && !result.more && omitted_records === 0, projection: "compact",
+        requires_full_read: true, omitted_fields: ["record_bodies", "write_basis"] });
+      if (serializedBytes(result.next) > 4096) {
+        result.data.omitted_next_count = result.next.length; result.data.omitted_fields.push("next"); result.next = [];
+        result.data = boundCompactData(result.data);
+      }
+    }
     return result;
   }
   if (["put", "delete"].includes(command)) {
@@ -326,23 +398,52 @@ export async function dispatch(command, { options, positionals }, database, io) 
     });
   }
   if (["work", "handoff", "decision", "pending"].includes(command)) {
-    const action = positionals[0] ?? (command === "pending" ? "list" : "status");
+    const action = positionals[0] ?? (command === "pending" ? "list" : command === "decision" ? "show" : "status");
     const operationName = `${command}.${action}`;
     const read = Object.hasOwn(READ_OPERATIONS, operationName);
     if (!read && !Object.hasOwn(MUTATION_INPUTS, operationName)) {
       throw lodestarError("unknown_operation", "Unsupported domain operation.", { identifiers: { operation: operationName },
         action: `Use lodestar ${command} --help for supported operations.` });
     }
+    if (read && (action === "check" ? positionals.length !== 2
+      : positionals.length > (["decision.show", "work.attention"].includes(operationName) ? 2 : 1))) {
+      throw lodestarError("missing_argument", "The read received the wrong number of positional arguments.", {
+        identifiers: { operation: operationName, actual: positionals.length },
+        action: action === "check" ? "Use work check <intent-record-id> [--cwd <path>]."
+          : `Use lodestar ${command} --help for the read form.`,
+      });
+    }
+    if (operationName === "work.check" && (options["--limit"] !== undefined || options["--offset"] !== undefined || options["--file"] !== undefined)) {
+      throw lodestarError("unknown_option", "The work check read does not accept --limit, --offset or --file.", {
+        identifiers: { operation: operationName }, action: "Use work check <intent-record-id> [--cwd <path>] [--at-revision <n>].",
+      });
+    }
+    if (options["--session-only"] && (operationName !== "handoff.status" ||
+      ["--limit", "--offset", "--file"].some((name) => options[name] !== undefined))) {
+      throw lodestarError("invalid_input", "--session-only is an exact handoff status read and does not accept paging or a file.");
+    }
     const caller = callerIdentity(options);
+    const captureDraft = operationName === "work.prepare-capture" ? await input(options, io, "capture_draft") : null;
     if (read) return withDatabase(openReadDatabase, database, (db) => {
       checkReadRevision(db, options);
       return withProjectBoundary(db, cwd(options), caller, (project) => {
         const limit = options["--limit"] === undefined ? null : validateLimit(options["--limit"], {});
-        const data = command === "decision" ? decisionProjection(db, project, positionals[1] ?? null)
-          : command === "work" ? workStatus(db, project, action === "history", limit)
-            : command === "handoff" ? handoffStatus(db, project, caller, { history: action === "history" })
-              : pendingList(db, project, limit);
-        return dbResult(db, data, { scope: scope(project, caller) });
+        const offset = options["--offset"] === undefined ? 0 : validateOffset(options["--offset"]);
+        if (offset && limit === null) throw lodestarError("invalid_input", "--offset requires --limit for this domain page.");
+        const data = command === "decision" ? decisionProjection(db, project, positionals[1] ?? null, { limit, offset })
+          : command === "work" ? action === "check"
+            ? checkWorkEvidence(db, project, positionals[1])
+            : action === "prepare-capture" ? prepareCapture(db, project, captureDraft)
+              : action === "attention" ? projectAttention(db, project, positionals[1] ?? null)
+                : workStatus(db, project, action === "history", limit, offset)
+            : command === "handoff" ? options["--session-only"] ? nativeHandoffEligibility(db, project, caller, options["--session"])
+              : handoffStatus(db, project, caller, { history: action === "history", limit, offset })
+              : pendingList(db, project, limit, offset);
+        return dbResult(db, data, { scope: scope(project, caller), more: data?.more === true,
+          ...(operationName === "work.check" ? { next: data.next } : {}),
+          ...(data.more && ["work", "handoff", "decision", "pending"].includes(command) ? { next: [{ command,
+            args: [action, ...(positionals[1] ? [positionals[1]] : []), "--cwd", project.cwd,
+              "--limit", String(limit), "--offset", String(offset + limit), "--at-revision", String(currentRevision(db))] }] } : {}) });
       });
     }, { read: true });
     const request = normalizeMutationRequest(await input(options, io, `${command}_${action}_input`), { actor: actorRecord(caller) });

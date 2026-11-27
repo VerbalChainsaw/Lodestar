@@ -1,6 +1,7 @@
 # Lodestar schema and contract 5
 
-Schema 5 stores all durable state in five strict, without-rowid tables:
+The current storage schema is 6; existing schema-5 stores remain readable and
+writable. Both use the same five strict, without-rowid tables:
 
 ```text
 metadata(key, value)
@@ -12,7 +13,9 @@ sources(record_id, origin, freshness, metadata_json)
 
 The exact DDL and writer triggers live in `src/schema.mjs`. Metadata contains
 `schema_version`, `database_instance_id`, `database_epoch`, `database_revision`, and
-`created_at`.
+`created_at`. Schema 6 adds losslessly compressed receipt records and explicit
+cold-history references without changing contract-5 requests. See [lean storage](lean-storage.md)
+for the storage and recovery contract.
 
 ## Read model
 
@@ -21,6 +24,14 @@ accepted revision, timestamps, application data, aliases, links, sources, and
 semantics. Application-owned JSON remains application-owned. Raw inspection and
 history preserve exact stored JSON text and associations. JSON numeric tokens outside
 JavaScript's safe integer domain fail normalized processing before rounding.
+Normalized JSON uses mathematical zero: `-0` becomes `0`, just as ordinary JSON
+serialization does. Store a sign-sensitive value as a string. The shared parser
+and canonical writer support at most 1,024 nested containers; deeper data returns
+`resource_limit` with flattening or linked-record guidance, without truncation.
+Persisted content and source metadata are validated against SQLite's lower
+1,000-container limit, including Lodestar's stored wrappers and receipt shape.
+The rejection identifies the actual limit and preserves the previous database.
+See [SQLite JSON compatibility](https://www.sqlite.org/json1.html#compatibility).
 
 Semantics identify basis (`asserted`, `observed`, `user_direction`, or
 `legacy_unverified`), lifecycle, context role, and project/checkout applicability. Local and
@@ -41,9 +52,50 @@ allocates one database revision, preserves raw before-images, applies the domain
 mutation, and commits its receipt in one admitted immediate transaction. Nested domain
 helpers reuse that revision. Lock contention fails immediately as retryable busy.
 
+A newly accepted request receives a receipt even if its input leaves the target
+record unchanged. The envelope's `revision` identifies that accepted transaction;
+the unchanged record's `data.revision` remains its last content revision. Retrying
+the exact same request ID and body replays the original receipt without advancing
+either revision. Use a new request ID for a new logical operation, not to recover
+a lost response. A new accepted receipt can invalidate a revision-pinned read even
+when the target content did not change.
+
+Ordinary update/replacement checks both the existing and proposed applicability;
+retirement checks the existing target too. A null/global basis is valid for global
+applicability, and historical project-member scopes resolve through guarded current
+bindings. Read the target again and retain its complete basis after a mismatch.
+
+To rebind an ordinary record from checkout A to checkout B in the same project,
+read the existing record with `get`, then `start --cwd <B>`. Use B's returned
+`write_basis` and merge in the target revisions from the record read, deduplicating
+identical targets. If their revisions disagree, read again before writing. Submit
+an ordinary `put` update with `set.semantics.applicability.checkout` set to B,
+retaining the rest of `semantics`; include `remove: []`. Replacement mode follows
+the same guard. The existing revision pins A, while the destination must resolve
+to an accessible checkout in the same canonical project with its full mapping
+basis. A missing or mismatched destination basis, stale revision or changed source
+is refused without committing. The ID, creation time, unrelated fields and
+receipt-backed before-image remain intact. This is not a cross-project transfer.
+
+Content-owner sources are still inspected using the proposed record and B's
+checkout context. Reinspect checkout-relative sources at B and retain their
+current fingerprints; do not assume matching relative paths imply matching bytes.
+Absolute sources keep their original path, `project_root` keeps the canonical
+project's first root, and `source_root` keeps its configured root and configuration
+revision guard. Changing checkout applicability does not relocate those sources.
+Replay a lost receipt with the exact original request ID and body.
+
+Project descriptors establish identity through observed target revisions, roots,
+peers and canonical links. Registration can use the pre-registration checkout
+basis. Normal project reads return the current canonical basis. Raw project reads
+return a target-observed null basis so a malformed or ambiguous mapping can be
+deliberately corrected; include each canonical target's observed revision.
+Distinct canonical project IDs cannot share one derived scope. Existing ambiguous
+mapping reads fail explicitly; raw reads remain available and no history is rewritten.
+
 Schema triggers call the connection-scoped `lodestar_write_contract()` guard on every
 state-table insert, update, and delete. A retained old connection or prepared statement
-cannot write after schema-5 activation.
+cannot write after activation of a newer schema fence.
 
 ## Ordering and history
 
@@ -58,11 +110,16 @@ Runtime contains one explicit schema-4 to schema-5 conversion. Ordinary operatio
 not migrate. Preflight identifies the exact source metadata, schema fingerprint,
 logical row digest, unsafe numeric rows, and deterministic accounting. A consistent
 backup is restore-inspected before a locked source recheck and atomic conversion.
+Before conversion, the claimed backup must resolve to a different physical file.
+Resolved-path and filesystem identity checks refuse the source itself and hard-link
+aliases. Missing or unavailable identity proof produces an actionable conflict;
+exact replay of an already completed migration uses its retained provenance.
 
 `doctor --migration-preflight` returns the source observation inside the normal
 contract-5 envelope. The migration request contains `{v,request_id,preflight,backup}`;
 `backup` carries the restore-inspected backup path, logical digest, and schema
-fingerprint. `init --migrate --file <request.json>` is the only conversion command.
+fingerprint. `init --migrate --file <request.json>` runs that schema-4-to-5 conversion;
+it does not convert schema 5 to 6.
 
 For current content owners, write preparation reopens the declared local/package
 source and requires the exact fingerprint and byte count. A `source_root` locator

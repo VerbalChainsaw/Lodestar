@@ -130,20 +130,29 @@ export function boundedDiagnosticValue(
       try {
         keys = Object.keys(current).sort();
       } catch {
-        keys = [];
+        seen.delete(current);
+        return { diagnostic_unreadable: true };
       }
       const selected = keys.slice(0, MAXIMUM_ITEMS);
+      let omittedKeys = 0;
       for (const key of selected) {
-        const boundedKey = truncateString(key, 256);
-        state.remaining -= Buffer.byteLength(boundedKey, "utf8");
+        if (Buffer.byteLength(key, "utf8") > 256) { omittedKeys += 1; continue; }
+        state.remaining -= Buffer.byteLength(key, "utf8");
         try {
-          result[boundedKey] = visit(current[key], depth + 1);
+          result[key] = visit(current[key], depth + 1);
         } catch {
-          result[boundedKey] = "[unreadable diagnostic value]";
+          result[key] = "[unreadable diagnostic value]";
         }
       }
+      const omissions = {};
+      if (omittedKeys) omissions.diagnostic_omitted_keys = omittedKeys;
       if (keys.length > selected.length) {
-        result.diagnostic_omitted_properties = keys.length - selected.length;
+        omissions.diagnostic_omitted_properties = keys.length - selected.length;
+      }
+      if (Object.keys(omissions).some((key) => Object.hasOwn(result, key))) {
+        result = { diagnostic_value: result, ...omissions };
+      } else {
+        Object.assign(result, omissions);
       }
     }
     seen.delete(current);

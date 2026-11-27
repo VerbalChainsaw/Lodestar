@@ -1,12 +1,15 @@
 {
   "name": "lodestar-agent-context",
-  "version": "2.1.2",
+  "version": "3.0.5",
   "description": "Local contract-5 project context, evidence, decisions, work, and continuity",
   "type": "module",
   "bin": {
     "lodestar": "lodestar.mjs"
   },
   "files": [
+    ".codex-plugin/",
+    ".mcp.json",
+    ".agents/plugins/marketplace.json",
     "lodestar.mjs",
     "src/",
     "!src/continuity-schema.mjs",
@@ -14,6 +17,10 @@
     "managed-assets/",
     "codex-plugin/",
     "docs/agent-bootstrap.json",
+    "docs/README.md",
+    "native-codex/README.md",
+    "docs/publishing.md",
+    "desktop/README.md",
     "docs/limitations.md",
     "docs/schema.md",
     "docs/releases/v2.0.0.md",
@@ -22,17 +29,36 @@
     "docs/releases/v2.1.0.md",
     "docs/releases/v2.1.1.md",
     "docs/releases/v2.1.2.md",
+    "docs/releases/v2.1.3.md",
+    "docs/releases/v2.1.4.md",
+    "docs/releases/v2.2.0.md",
+    "docs/releases/v2.2.1.md",
+    "docs/releases/v3.0.0.md",
+    "docs/releases/v3.0.1.md",
+    "docs/releases/v3.0.2.md",
+    "docs/releases/v3.0.3.md",
+    "docs/releases/v3.0.4.md",
+    "docs/releases/v3.0.5.md",
     "docs/installation.md",
+    "docs/client-deployment.md",
+    "docs/intent-evidence.md",
+    "docs/operator-recipes.md",
     "README.md",
+    "Q&A.md",
+    "HEADACHES.md",
     "CHANGELOG.md",
     "SECURITY.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/lean-storage.md",
+    "tools/restore-archive.py"
   ],
   "scripts": {
     "assets:build": "node scripts/build-managed-assets.mjs --write",
     "assets:check": "node scripts/build-managed-assets.mjs --check",
-    "test": "npm run assets:check && node --test",
-    "pack:check": "npm pack --dry-run --json"
+    "test": "npm run assets:check && node scripts/run-tests.mjs",
+    "pack:check": "npm pack --dry-run --json",
+    "native:pack": "node scripts/build-native-codex.mjs",
+    "native:smoke": "node scripts/smoke-native-codex.mjs"
   },
   "engines": {
     "node": ">=24.15.0"

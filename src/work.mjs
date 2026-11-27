@@ -8,23 +8,26 @@ import { safeText } from "./decision.mjs";
 const recordTarget = (id) => ({ kind: "record", id });
 const optionalWork = (db, id) => db.prepare("SELECT id FROM records WHERE id=?").get(id)
   ? getRecordById(db, id) : null;
-export function workStatus(db, project, history = false, limit = null) {
+export function workStatus(db, project, history = false, limit = null, offset = 0) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
   const result = normalizedRowsResult(db, "SELECT id FROM records WHERE scope IN ("
     + scopes.map(() => "?").join(",") + ") AND "
-    + (history ? "type IN ('work','work-event') " : "type='work' AND json_extract(content_json,'$.value.status')='open' ")
+    + (history ? "type IN ('work','work-event') " : "type='work' AND json_extract(content_json,'$.value.status')='open' "
+      + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') NOT IN ('historical','superseded') ")
     + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
-  const selected = limit === null ? result.records : result.records.slice(0, limit);
+  const selected = limit === null ? result.records : result.records.slice(offset, offset + limit);
   return { advisory: true, notice: "Work reports describe observed progress; they confer no project lock or ownership.",
     records: selected, record_errors: result.record_errors, complete: result.record_errors.length === 0,
-    more: selected.length < result.records.length,
+    more: offset + selected.length < result.records.length,
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
       targets: [...selected.filter(({ kind }) => kind === "work").map(({ id }) => recordTarget(id)),
         ...(project.binding_preconditions ?? []).map(({ target }) => target)] }) };
 }
 export function workMutation(db, project, identity, action, request, options = {}) {
   const input = validateDomainInput(`work.${action}`, request?.input);
-  if (!identity.actor) throw lodestarError("identity_required", "A work write needs the actual actor identity.");
+  if (!identity.actor) throw lodestarError("identity_required", "A work write needs the actual actor identity.", {
+    action: "Run the write under the Lodestar plugin, or pass the session and actor identity the host exposes (see lodestar work start --help), then retry.",
+  });
   const admittedScopes = new Set([project.scope, ...(project.historical_scopes ?? [])]);
   const ids = action === "expire" ? input.targets : [input.id];
   if (!ids.length || ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length) {

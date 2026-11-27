@@ -1,5 +1,194 @@
 # Changelog
 
+## 3.0.5 - 2026-11-27
+
+- Publish Manager recovery entries only after both journal files are written. Interrupted preparation remains inspectable, not replayable.
+- Distinguish missing cold history from corrupt archive evidence; keep installer store inspection on one SQLite snapshot.
+- Pair with native adapter 1.4.10 for a bounded, read-only recovery of explicitly bound work on Codex resume.
+
+See the [release notes](docs/releases/v3.0.5.md).
+
+## 3.0.4 - 2026-11-27
+
+- Allow an owned, same-database Windows upgrade when full checks pass apart from explicitly unavailable archived receipts. Keep blocked history visible in the installer and receipt.
+- Preserve strict diagnostics, initial installation, migration and non-archive failure checks.
+
+See the [release notes](docs/releases/v3.0.4.md).
+
+## 3.0.3 - 2026-11-27
+
+- Reconcile and test the latest core, offline storage observer, and one-shot chat-evidence review without enabling background ingestion.
+- Pair with native Codex adapter 1.4.9: no automatic transcript tails, bounded recovery for changed and explicitly bound pre-compaction work, and one server for native and checked core tools.
+- Preserve contract-5 checks, schema compatibility, and exact receipt recovery. No automatic database migration or history deletion.
+
+See the [release notes](docs/releases/v3.0.3.md).
+
+## 3.0.2 - 2026-10-29
+
+- Lean schema-6 receipt storage with explicit archive/recovery boundaries.
+- Bounded full diagnostic reporting, exact counts and truthful incomplete health.
+- Verified cache generation checks and interrupted restore-receipt reconciliation.
+- Current/legacy schema and compressed-receipt compatibility corrections.
+- Local candidate only; no npm or GitHub release publication.
+
+## 3.0.1 - 2026-10-14
+
+Release candidate; a source branch does not establish npm or tagged publication.
+See the [3.0.1 candidate notes](docs/releases/v3.0.1.md) for local installation
+and compatibility.
+
+- Preserve explicit JSON `null` through record create, read, replacement, history
+  and exact replay instead of coercing it to an empty object.
+- Bound raw interface pagination to the remaining client record budget, retaining
+  the core's exact continuation cursor and database revision.
+- Report recovery commitment only when a matching successful receipt proves it;
+  retain unresolved outcomes and avoid unusable receipt recovery instructions.
+- Require complete Manager configuration and request admission before reusing a
+  captured recovery context; preserve incomplete prior evidence and capture anew.
+- Preserve native dispatch serialization when admitting recovery journals, including
+  Unicode and escaped characters in project paths.
+- Include the configured CLI file's bytes in runtime source identity, including
+  executables with a nonstandard filename.
+- Support guarded ordinary-record checkout rebinds within the same canonical
+  project, preserving record identity, content, associations, history and replay.
+- Replace obsolete dose/roleplay and automatic overengineering guidance in the
+  packaged Adderall compatibility skill with bounded project-local routing.
+- Bound concurrent test files to four while retaining the per-file deadline and
+  behavioral checks for process shutdown, recovery and exact request replay.
+- Reject malformed write bases and unsafe asynchronous mutation callbacks before
+  accepting persistence; validate portable runtime inventory paths and hashes.
+- Preserve native JSON values by rejecting unsupported numbers, duplicate keys,
+  excessive nesting and malformed frames before authorization or dispatch.
+- Maintain the separate native Codex adapter 1.4.7 in this repository, generate its
+  skill from the canonical source, and qualify it against the packed core.
+- Keep damaged-record diagnostics distinct from pagination exhaustion and document
+  unchanged-content request receipts and their transaction revisions.
+- Return revision-pinned continuations for bounded work status/history and pending
+  lists; keep non-paginated work commands explicit about unsupported offsets.
+
+Contract 5 and schema 5 are unchanged; existing schema-5 stores need no migration.
+
+## 3.0.0 - 2026-10-02
+
+- Add shared read-only `work prepare-capture` and `work attention` contracts.
+  Loader and Manager review creation before separately linking the confirmed
+  record to mission/requirements; failed or canceled association retains its ID.
+  Recorded observations do not infer passed acceptance. Attention reports each
+  section's coverage, with local recovery observed separately.
+- Admit active context/dependencies before orientation and use one deterministic
+  record/decision order under existing limits. Native integration keeps exact
+  required reads or an explicitly counted current-work read catalog.
+- Add nested-menu project jump with retained original-scope drafts in Manager.
+  Show observed source/build identities and contract/schema support separately
+  from release labels and package verification.
+
+- Add optional continuation context associations outside the approved intent hash
+  and one bounded read-only continuity projection through `work check`.
+  Preserve applicable rejection reasons, dependency gaps, current decision replay,
+  exact public reads and separate coverage/acceptance status. Native integration
+  checkpoints and their existing preview carry the same projection; old pending
+  request bytes resolve before an upgrade.
+
+- Prevent ordinary replacement from overwriting an existing reserved receipt,
+  work, decision, pending or alteration record. Preserve exact replay and history.
+- Make doctor and normalized reads agree when current semantic metadata is
+  missing. Supply literal raw-read arguments without rewriting damaged data.
+- Reject invalid UTF-8, duplicate decoded JSON members, lossy consumed control
+  numbers and ambiguous multiline CLI output across operator and host readers.
+  Preserve uncertain writes and exact recovery files with corrective guidance.
+- Reuse one package-use check for Loader and Manager during update, recovery and
+  retirement. Explain an unavailable process snapshot before any file move.
+- Reuse dependency loads and a locked recovery inventory digest within an
+  operation. Index captured migration associations and before-images while
+  retaining full reconstruction and integrity checks.
+
+- Preserve project context and dirty drafts across delayed reads and capability
+  refreshes; clear an absent selected record after a complete library refresh.
+- Keep literal IDs, queries and decision keys exact across both interfaces.
+  Reject self-overwriting candidate promotion and superseded acceptance evidence.
+- Reject ambiguous or invalid binding bytes with public corrective diagnostics,
+  while preserving compatible ignored metadata and strict meaningful fields.
+
+- Add explicit first-project and reviewed operator actions to both interfaces,
+  cross-project search in Loader, and read-only plan/actual/difference projections
+  with stale-evidence checks through `work check`.
+- Keep incomplete recovery journals visible, refresh Manager details after Save,
+  reject unsupported decision/handoff list limits, and isolate Setup's Node child
+  environment from inherited preload and host identity variables.
+- Add the separate Windows Loader console and compatible menu Manager for
+  inspecting and correcting the same Lodestar store through the one-shot CLI.
+- Add typed discovery, dense project and record navigation, readable health and
+  provenance, reviewed saves with recovery, diagnostics, and bounded library
+  continuation.
+- Provide a portable Windows distribution with first-use configuration, launchers,
+  and staged updates with interrupted-update recovery. See the [3.0.0 release notes](docs/releases/v3.0.0.md)
+  for prerequisites and upgrade steps.
+- Keep contract 5 and schema 5. Existing schema-5 stores require no 3.0 migration.
+
+## 2.2.1 - 2026-09-28
+
+- Cover historical member scopes in the rejection advisory so a rebinding
+  project still intercepts settled subjects.
+- Signal omitted records: limited `work` and `pending` reads now set envelope
+  `more`; JSON help declares nested input shapes, global options, and that
+  read-only options do not guard mutations.
+- Report Git discovery execution failures as typed `project_discovery_failed`
+  instead of silently deriving a working-directory identity.
+- Document the managed-asset verification invariants in AGENTS.md.
+
+## 2.2.0 - 2026-09-28
+
+- Add guided corrective actions to conflict failures. Update-mode `set`/`remove`
+  rules, both decision-conflict sites, the project binding conflicts, and pending
+  promotion bindings now name the exact repair instead of leaving a generic hint.
+- Add the rejection register convention. A `kind: "rejection"` record records a
+  subject the project has settled against; current rejections surface in
+  orientation and search, and a write that carries a matching subject receives a
+  non-blocking advisory persisted in the acceptance receipt so exact retries
+  replay it. Alias reuse that targets a rejection names the owning record.
+- Broaden large-read guidance. Bootstrap instructions, the packaged skill, and
+  the knowledge reference now cover large responses as well as clipped ones,
+  directing callers to `--output` capture before a host truncates.
+- Document the repository verification invariants in the managed-assets build
+  script docblock.
+- Verify migration backup evidence on disk: the claimed backup is opened and
+  restore-tested before conversion, and a missing or changed backup is refused.
+- Match rejection-advisory subjects with Unicode-aware case folding, never split
+  code points when trimming stored reasons, and answer an occupied `--output`
+  path with a typed `output_conflict`.
+- Keep advisory generation best-effort so unreadable rows can never block an
+  accepted write, follow the normalized request inside `put`, reject forbidden
+  async transaction callbacks without unhandled rejections, and name the
+  pending default read `pending.list` in envelopes.
+- Retain the 2.1.4 plugin packaging and invocation corrections. Contract 5 and
+  schema 5 are unchanged; no data migration is required.
+
+## 2.1.4 - 2026-09-08
+
+- Fix Codex plugin startup after native installation by making the complete npm
+  package the plugin root. Keep the adapter and its single shared core together
+  when the host copies the plugin into its cache.
+- Ship root plugin/MCP manifests and a local marketplace entry; document migration
+  from the incomplete `codex-plugin/` source path and separate cached-plugin upgrades.
+- Route WSL-hosted plugin operations through the installed Windows-boundary
+  launcher, translating declared paths while retaining complete stdin transport.
+- Exercise the declared plugin from an isolated cache in package and release
+  checks, including durable writes, reads, retries, and rejected stale updates.
+- Retain the automatic invocation correction from 2.1.3. Contract 5 and schema 5
+  are unchanged; no data migration is required.
+
+## 2.1.3 - 2026-09-08
+
+- Allow automatic Codex selection of Lodestar by correcting its native invocation
+  policy. Version 2.1.2's explicit-only metadata contradicted its automatic-use
+  description. Check both maintained and plugin metadata in regression tests.
+- Clarify the difference between installed file integrity, native skill discovery,
+  and automatic selection during a model task.
+- Exercise native setup, installed invocation policy, plugin parity, and preservation
+  of user settings and locally edited policy in the packed release checks.
+- Automatically include new release notes in documentation checks and verify that
+  the plugin version and packaged release notes match the package version.
+
 ## 2.1.2 - 2026-09-07
 
 - Publish current product documentation and a static landing page with shared hero artwork.

@@ -1,0 +1,14 @@
+{
+  "owner": "Lodestar Loader UI",
+  "status": "service integration requests",
+  "needs": [
+    {
+      "api": "ProjectContextResult / ValidateProjectContextAsync",
+      "reason": "The UI withholds selected-project Manager launch when Matched is false. Please verify alias/rebinding handling against the exact selected record and ensure a valid canonical mapping is accepted while stale ID/root mismatches remain blocked."
+    },
+    {
+      "api": "Project domain read projection",
+      "reason": "The current WPF Work/Handoff, Decisions/Pending, and Rejections tabs render exact kinds present in LibrarySnapshot. If find --all excludes a domain register, expose its dedicated read projection through the service with explicit project identity and coverage so these tabs can show it without inventing status or treating missing records as empty."
+    }
+  ]
+}

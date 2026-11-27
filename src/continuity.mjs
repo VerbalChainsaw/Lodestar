@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { canonicalStringify } from "./json.mjs";
 import { lodestarError } from "./errors.mjs";
 import { normalizedRowsResult, recordInput } from "./project.mjs";
@@ -19,22 +20,47 @@ export function validateHandoff(checkpoint) {
   }
   return { valid: true, checkpoint };
 }
-export function handoffStatus(db, project, identity = {}, { history = false } = {}) {
+export function handoffStatus(db, project, identity = {}, { history = false, limit = null, offset = 0 } = {}) {
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
-  const result = normalizedRowsResult(db, "SELECT id FROM records WHERE scope IN ("
+  const where = "scope IN ("
     + scopes.map(() => "?").join(",") + ") AND "
-    + (history ? "(type='handoff' OR type LIKE 'handoff-%') " : "type='handoff' AND json_extract(content_json,'$.value.state') IN ('open','claimed') ")
-    + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
+    + (history ? "(type='handoff' OR type LIKE 'handoff-%') " : "type='handoff' AND json_extract(content_json,'$.value.state') IN ('open','claimed') ");
+  const total = limit === null ? null : db.prepare("SELECT COUNT(*) AS total FROM records WHERE " + where).get(...scopes).total;
+  const result = normalizedRowsResult(db, "SELECT id FROM records WHERE " + where
+    + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id"
+    + (limit === null ? "" : " LIMIT ? OFFSET ?"), ...scopes, ...(limit === null ? [] : [limit, offset]));
+  const more = total !== null && total - offset > limit;
   return { advisory: true, records: result.records, record_errors: result.record_errors,
-    complete: result.record_errors.length === 0,
+    complete: result.record_errors.length === 0 && !more, more,
     notice: "Reading does not claim a transfer. Use an explicit claim with its observed revision.",
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
       targets: [...result.records.filter(({ kind }) => kind === "handoff").map(({ id }) => target(id)),
         ...(project.binding_preconditions ?? []).map(({ target: dependency }) => dependency)] }) };
 }
+export function nativeHandoffEligibility(db, project, identity, session = identity.session) {
+  if (!identity.session || identity.agent !== "codex" || identity.harness !== "codex") {
+    throw lodestarError("identity_required", "Native handoff eligibility requires a Codex session identity.");
+  }
+  // Byte-for-byte native adapter sessionRecordId, including its terminating LF.
+  const tuple = canonicalStringify([project.scope, project.checkout_root, session]) + "\n";
+  const id = "codex-plugin:handoff:" + createHash("sha256").update(tuple).digest("hex").slice(0, 40);
+  const row = db.prepare(`
+    SELECT type, scope, json_extract(content_json,'$.value.checkout') AS checkout,
+      json_extract(content_json,'$.value.source_actor') AS actor,
+      json_extract(content_json,'$.value.state') AS state
+    FROM records WHERE id = ?`).get(id);
+  if (!row) return { eligible: false };
+  if (row.type !== "handoff" || row.scope !== project.scope || row.checkout !== project.checkout_root ||
+      row.actor !== identity.actor || !["open", "claimed", "closed", "cancelled"].includes(row.state)) {
+    throw lodestarError("handoff_conflict", "The exact native handoff has invalid ownership or state.", { identifiers: { id } });
+  }
+  return { eligible: row.state === "open" };
+}
 export function handoffMutation(db, project, identity, action, request, options = {}) {
   const input = validateDomainInput(`handoff.${action}`, request?.input);
-  if (!identity.actor) throw lodestarError("identity_required", "Continuity writes require the actual actor identity.");
+  if (!identity.actor) throw lodestarError("identity_required", "Continuity writes require the actual actor identity.", {
+    action: "Run the write under the Lodestar plugin, or pass the session and actor identity the host exposes (see lodestar handoff --help), then retry.",
+  });
   if (input.checkpoint) validateHandoff(input.checkpoint);
   const admittedScopes = new Set([project.scope, ...(project.historical_scopes ?? [])]);
   return mutate(db, `handoff.${action}`, request, ({ revision, timestamp }) => {

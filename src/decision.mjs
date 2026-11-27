@@ -66,7 +66,7 @@ export function renderDecisions(state) {
   }
   return lines.join("\n");
 }
-export function decisionProjection(db, project, key = null) {
+export function decisionProjection(db, project, key = null, { limit = null, offset = 0 } = {}) {
   if (key !== null) normalizeDecisionKey(key);
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
   const streams = scopes.map((origin) => { const result = events(db, origin); return {
@@ -94,10 +94,23 @@ export function decisionProjection(db, project, key = null) {
   const state = { enabled: canonical.enabled, facts, blocked, conflicts,
     dead: streams.flatMap((stream) => stream.dead).filter((item) => key === null || item.key === key),
     heads: canonical.heads };
+  let more = false, omitted = 0;
+  if (limit !== null) {
+    // Replay complete event streams first. Limiting the causal history could
+    // resurrect a superseded choice or change its current meaning.
+    const rows = ["facts", "blocked", "conflicts", "dead"].flatMap(kind => state[kind].map(item => ({ kind, item })));
+    const selected = rows.slice(offset, offset + limit);
+    more = rows.length - offset > limit; omitted = rows.length - selected.length;
+    const keys = new Set(selected.map(({ item }) => item.key));
+    for (const kind of ["facts", "blocked", "conflicts", "dead"]) state[kind] = selected.filter(row => row.kind === kind).map(row => row.item);
+    state.heads = Object.fromEntries(Object.entries(state.heads).filter(([subject]) => keys.has(subject)));
+    for (let i = targets.length - 1; i >= 0; i--) if (!keys.has(targets[i].key)) targets.splice(i, 1);
+  }
   const recordErrors = streams.flatMap((stream) => stream.record_errors);
   const complete = recordErrors.length === 0;
-  return { ...state, projection: renderDecisions(state),
-    record_errors: recordErrors, complete,
+  return { ...state, projection: renderDecisions(state), more,
+    ...(limit !== null ? { omitted_items: omitted, offset, limit } : {}),
+    record_errors: recordErrors, complete: complete && !more,
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
       targets: [...(complete ? targets : []),
         ...(project.binding_preconditions ?? []).map(({ target }) => target)] }),
@@ -143,7 +156,8 @@ export function applyDecision(db, project, identity, action, input, { revision, 
     }
     if (input.supersedes_event_id !== undefined && input.supersedes_event_id !== head?.event_id) {
       throw lodestarError("decision_conflict", "The supplied predecessor is not the current decision head.",
-        { identifiers: { key, current_event_id: head?.event_id ?? null } });
+        { identifiers: { key, current_event_id: head?.event_id ?? null },
+          action: "Omit supersedes_event_id for a key without a current head; otherwise pass the current head event_id from identifiers.current_event_id." });
     }
     if (action !== "inject") safeText(input.reason, "Decision reason");
     if (action === "set") {
@@ -164,7 +178,8 @@ export function applyDecision(db, project, identity, action, input, { revision, 
           const event = replayDecisions(result.history).heads[key]; return event ? [event.event_id] : []; }));
       if (input.resolved_heads.some((id) => !actual.has(id)) || input.resolved_heads.length !== actual.size) {
         throw lodestarError("decision_conflict", "Resolution must identify every current historical stream head.",
-          { identifiers: { key, heads: [...actual] } });
+          { identifiers: { key, heads: [...actual] },
+            action: "Re-read each historical stream with decision show <key> and resupply resolved_heads with every current head listed in identifiers.heads." });
       }
     }
     const data = action === "inject" ? { event: "injection", key,

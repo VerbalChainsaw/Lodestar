@@ -7,30 +7,34 @@ import { validateDomainInput } from "./cli-commands.mjs";
 export const pendingScope = (project) => `pending:${project.scope}`;
 const candidateScopes = (project) => [...new Set([project.scope, pendingScope(project),
   ...(project.historical_scopes ?? []).flatMap((scope) => [scope, `pending:${scope}`])])];
-export function pendingList(db, project, limit = null) {
+export function pendingList(db, project, limit = null, offset = 0) {
   const scopes = candidateScopes(project);
   const result = normalizedRowsResult(db, "SELECT id FROM records WHERE type='pending' AND scope IN ("
     + scopes.map(() => "?").join(",") + ") AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'unresolved') NOT IN ('historical','superseded') "
     + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
+  const selected = limit === null ? result.records : result.records.slice(offset, offset + limit);
   return { count: result.records.length,
-    records: limit === null ? result.records : result.records.slice(0, limit),
+    records: selected,
+    more: offset + selected.length < result.records.length,
     record_errors: result.record_errors, complete: result.record_errors.length === 0,
     write_basis: writeBasis(db, { projectScope: project.scope, checkout: project.checkout_root,
-      targets: [...result.records.map(({ id }) => ({ kind: "record", id })),
+      targets: [...selected.map(({ id }) => ({ kind: "record", id })),
         ...(project.binding_preconditions ?? []).map(({ target }) => target)] }) };
 }
 export const pendingCount = (db, project) => pendingList(db, project).count;
 export function pendingMutation(db, project, identity, action, request, options = {}) {
   const input = validateDomainInput(`pending.${action}`, request?.input);
+  const destinationId = input.destination?.operation === "put"
+    ? input.destination.input?.mode === "update" ? input.destination.input.id : input.destination.input?.record?.id
+    : null;
   const putEvidence = input.destination?.operation === "put"
-    ? preparePutEvidence(db, input.destination.input, request) : {};
+    ? preparePutEvidence(db, input.destination.input, request, `pending.${action}`) : {};
   const targets = [{ kind: "record", id: input.id }, ...(project.binding_preconditions ?? []).map(({ target }) => target)];
   if (action === "promote") {
     const destination = input.destination;
     if (destination.operation === "put") {
-      const id = destination.input?.id ?? destination.input?.record?.id;
-      if (!id) throw lodestarError("invalid_input", "A promotion destination needs an exact record ID.");
-      targets.push({ kind: "record", id });
+      if (!destinationId) throw lodestarError("invalid_input", "A promotion destination needs an exact record ID.");
+      targets.push({ kind: "record", id: destinationId });
     } else if (destination.operation === "decision.set") {
       validateDomainInput("decision.set", destination.input);
       targets.push({ kind: "decision", scope: project.scope, key: normalizeDecisionKey(destination.input.key) });
@@ -39,6 +43,12 @@ export function pendingMutation(db, project, identity, action, request, options 
   }
   return mutate(db, `pending.${action}`, request, (context) => {
     const { revision, timestamp } = context;
+    if (action === "promote" && destinationId === input.id) {
+      throw lodestarError("invalid_input", "A promotion destination cannot use its candidate's record ID.", {
+        identifiers: { candidate_id: input.id, destination_id: destinationId },
+        action: "Choose a distinct destination record ID, read its current write basis, then prepare the promotion again.",
+      });
+    }
     const row = db.prepare("SELECT id FROM records WHERE id=?").get(input.id);
     const prior = row ? getRecordById(db, input.id) : null;
     if (prior && (prior.type !== "pending" || !candidateScopes(project).includes(prior.scope))) {
@@ -62,9 +72,10 @@ export function pendingMutation(db, project, identity, action, request, options 
       }
       const destination = input.destination;
       if (destination.operation === "put") {
-        const destinationId = destination.input.id ?? destination.input.record?.id;
         const destinationScope = destination.input.record?.scope ?? db.prepare("SELECT scope FROM records WHERE id=?").get(destinationId)?.scope;
-        if (destinationScope !== project.scope) throw lodestarError("project_binding_conflict", "Promotion must target this canonical project.");
+        if (destinationScope !== project.scope) throw lodestarError("project_binding_conflict", "Promotion must target this canonical project.",
+          { identifiers: { destination: destinationId, destination_scope: destinationScope, project: project.scope },
+            action: "Promote into this project's scope or run promotion from the destination project's checkout." });
         promoted = applyPutInput(db, destination.input, { ...context, ...putEvidence });
         if (promoted.revision === revision) changed.push(promoted.id);
       } else {
@@ -79,5 +90,5 @@ export function pendingMutation(db, project, identity, action, request, options 
       semantics: { ...prior.semantics, lifecycle: action === "promote" ? "superseded" : "historical", context_role: "on_demand" } },
     { createdAt: prior.created_at, updatedAt: timestamp, revision });
     return { data: { settled: true, record: normalizeRecord(getRecordById(db, input.id)), promoted }, changed_ids: changed };
-  }, { ...options, requiredTargets: targets });
+  }, { ...options, receiptPreparation: putEvidence, requiredTargets: targets });
 }

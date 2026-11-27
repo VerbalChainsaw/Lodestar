@@ -2,3 +2,13 @@ node_modules/
 *.tgz
 .DS_Store
 coverage/
+desktop/**/bin/
+desktop/**/obj/
+desktop/**/Smoke/evidence/
+work/
+outputs/
+.bundle-update-test-*/
+.bundle-validation-test-*/
+.bundle-build-check-*/
+.bundle-build-final-*/
+.json-admission-test-*/

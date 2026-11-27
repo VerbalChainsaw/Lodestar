@@ -1,0 +1,24 @@
+{
+  "name": "lodestar",
+  "version": "3.0.5",
+  "description": "Native contract-5 tools and automatic project context guidance",
+  "author": {
+    "name": "VerbalChainsaw"
+  },
+  "skills": "./codex-plugin/skills/",
+  "interface": {
+    "displayName": "Lodestar",
+    "shortDescription": "One suite for context, work, continuity, and decisions.",
+    "longDescription": "Provides automatic project-context guidance and native tools that invoke the same installed Lodestar one-shot package and guarded mutation contract.",
+    "developerName": "VerbalChainsaw",
+    "category": "Productivity",
+    "capabilities": [
+      "skills",
+      "MCP tools"
+    ],
+    "defaultPrompt": [
+      "Use Lodestar automatically for substantive project orientation and evidence-backed updates when it is available."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

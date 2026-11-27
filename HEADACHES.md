@@ -1,13 +1,19 @@
-# Troubleshooting Lodestar 2.1.2
+# Troubleshooting Lodestar 3.0.0
 
 This page covers the current release. Start with the [installation guide](docs/installation.md), then use the matching recovery path below. `lodestar doctor` reports problems; it does not repair the database.
 
 ## `lodestar` is missing or reports the wrong version
 
-Install the current package, open a new shell, and confirm the executable:
+For local candidate evaluation, use the verified tarball procedure in the
+[installation guide](docs/installation.md#cli-and-native-skills) and invoke that
+exact package. Owned Windows applications upgrade through `Install.cmd`; portable
+bundles use `Update.cmd` from a separate verified extraction.
+
+After the verified release is published, install the public package, open a new
+shell, and confirm the executable:
 
 ```text
-npm install --global lodestar-agent-context@2.1.2
+npm install --global lodestar-agent-context@3.0.0
 lodestar --version
 ```
 
