@@ -187,6 +187,9 @@ accessed. The installer warns and records their count. It does not restore or
 modify them, and full doctor continues to report incomplete historical
 validation. A fresh install, store change, migration, or any other database
 diagnostic error still blocks.
+Full read-only validation of a large existing store can take several minutes.
+Each such check is bounded to 20 minutes; initialization and migration keep
+their separate existing deadline.
 
 Plan reads and validates without initializing or migrating data. The database must
 be external to the app, payload and update folders. Reparse-point paths, conflicting

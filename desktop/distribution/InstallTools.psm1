@@ -157,7 +157,10 @@ function Invoke-InstallDatabase([string]$App,[string]$Node,[string]$Database,[bo
     if($Migrate){$arguments+=@('--migrate','--request',$Request,'--backup',$Backup)}
     if($AllowOfflineHistory){$arguments+='--allow-offline-history'}
     if($Fault -in @('AfterBackup','AfterRequest','AfterMigration')){$arguments+=@('--fault',$Fault)}
-    $result=Invoke-CleanNode $Node $arguments -TimeoutMs 120000
+    # A full read-only integrity/semantic check on a large existing store can
+    # take minutes. Keep initialization and migration on their existing bound.
+    $timeout=if($Initialize -or $Migrate){120000}else{1200000}
+    $result=Invoke-CleanNode $Node $arguments -TimeoutMs $timeout
     $parsed=Read-CliEnvelope $result 'install.database' @() ($Initialize -or $Migrate)
     $reported=if($parsed.Envelope -and $parsed.Envelope['error']){$parsed.Envelope.error}else{$null}
     $jsonOptions=[Text.Json.JsonSerializerOptions]::new();$jsonOptions.MaxDepth=1024
