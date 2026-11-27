@@ -61,6 +61,13 @@ test("only a validated existing-store upgrade can leave cold history offline", a
   assert.deepEqual(await readFile(f.database), before);
   assert.equal(existsSync(f.migrationRequestPath), false);
   assert.equal(existsSync(f.backupPath), false);
+  const manifest = path.join(f.root, "missing-manifest.json");
+  for (const invalidManifest of ["{", "null", '{"format":"isolated-lean-candidate-v1"}']) {
+    await writeFile(manifest, invalidManifest);
+    await assert.rejects(prepareInstallDatabase({ ...f, allowOfflineHistory: true }), { code: "record_content_invalid" });
+    assert.deepEqual(await readFile(f.database), before);
+  }
+  await rm(manifest);
   insert("invalid:current", "note", '{"state":"known","value":{}}');
   const mixed = await readFile(f.database);
   await assert.rejects(prepareInstallDatabase({ ...f, allowOfflineHistory: true }),

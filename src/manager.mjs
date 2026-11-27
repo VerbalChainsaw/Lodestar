@@ -175,6 +175,7 @@ async function saveJournal(selection, request, { operation = "put", cwd = null,
     throw new Error("Unsupported journal operation or missing project context.");
   }
   const folder = path.join(journalRoot(selection), request.request_id);
+  const staging = folder + "." + randomUUID() + ".preparing";
   const requestBytes = Buffer.from(`${JSON.stringify(request)}\n`, "utf8");
   const context = { config_path: selection.configPath, generation: selection.generation, fingerprint: selection.fingerprint,
     runtime_fingerprint: selection.runtimeFingerprint, request_sha256: sha256(requestBytes),
@@ -184,12 +185,15 @@ async function saveJournal(selection, request, { operation = "put", cwd = null,
     operation, cwd, project_id: projectId };
   try {
     await mkdir(journalRoot(selection), { recursive: true });
-    await mkdir(folder, { recursive: false });
-    await writeFile(path.join(folder, "request.json"), requestBytes, { flag: "wx", flush: true });
-    await writeFile(path.join(folder, "context.json"), `${JSON.stringify(context)}\n`, { flag: "wx", flush: true });
+    try { await stat(folder); throw new Error("The exact request is already saved; inspect Recovery before retrying."); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    await mkdir(staging, { recursive: false });
+    await writeFile(path.join(staging, "request.json"), requestBytes, { flag: "wx", flush: true });
+    await writeFile(path.join(staging, "context.json"), `${JSON.stringify(context)}\n`, { flag: "wx", flush: true });
+    await rename(staging, folder);
   } catch (error) {
     throw new Error(`Journal preparation failed (${error.code ?? "storage_error"}): ${error.message}. ` +
-      `No write was dispatched for this attempt. Preserve any exact bytes in ${folder}. ` +
+      `No write was dispatched for this attempt. Preserve any exact bytes in ${staging}. ` +
       "Action: Correct disk space, directory permissions or storage errors before preparing another write. " +
       "Inspect existing saved requests and receipts before retrying an older attempt.", { cause: error });
   }
@@ -685,8 +689,13 @@ export async function runManager({ selection, io = process, ask: injectedAsk = n
       for (const error of shared.errors) out(`Recovery ${error.code}: ${error.message}. Action: ${error.action}`);
     } catch (error) { out(`Shared recovery could not be inspected: ${error.message}. Action: Preserve the journals; correct the selected runtime/storage and run recovery list before replay.`); }
     let names;
-    try { names = (await readdir(journalRoot(selection), { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort(); }
+    try {
+      const directories = (await readdir(journalRoot(selection), { withFileTypes: true }))
+        .filter(entry => entry.isDirectory()).map(entry => entry.name);
+      names = directories.filter(name => /^ll-[0-9a-f-]{36}$/iu.test(name)).sort();
+      const preparing = directories.filter(name => /^ll-[0-9a-f-]{36}\.[0-9a-f-]{36}\.preparing$/iu.test(name));
+      if (preparing.length) out("Unpublished journal preparation remains on disk for inspection. It was not dispatched and cannot be replayed.");
+    }
     catch (error) {
       if (error.code === "ENOENT") names = [];
       else {

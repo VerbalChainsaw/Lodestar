@@ -69,3 +69,14 @@ test('same-user metadata forgery is outside generation checks; explicit full ver
  assert.notEqual(verify.status,0);
  assert.match(verify.stderr+verify.stdout,/Restored bytes differ from verified snapshot; bytes retained/);
 });
+
+test('malformed archive and receipt evidence is not mistaken for offline history',t=>{
+ const {cache,manifest,row}=fixture(t);
+ writeFileSync(cache+'.receipt.json','{');
+ assert.throws(()=>decodeReceiptRow(row),{code:'database_integrity'});
+ rmSync(cache+'.receipt.json');
+ assert.throws(()=>decodeReceiptRow(row),{code:'archive_restore_required'});
+ writeFileSync(manifest,Buffer.from([0xff]));
+ assert.throws(()=>decodeReceiptRow(row),{code:'database_integrity'});
+ assert.throws(()=>decodeReceiptRow({...row,content_json:'{'}),{code:'database_integrity'});
+});

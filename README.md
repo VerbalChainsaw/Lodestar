@@ -6,12 +6,12 @@
 
 **[Explore the splash page](https://verbalchainsaw.github.io/Lodestar/) · [Published 3.0.0 downloads](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0) · [Installation guide](docs/installation.md)**
 
-[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [3.0.4 release notes](docs/releases/v3.0.4.md) · [FAQ](Q&A.md)
+[Operator recipes](docs/operator-recipes.md) · [Reference](docs/README.md) · [3.0.5 release notes](docs/releases/v3.0.5.md) · [FAQ](Q&A.md)
 
-This checkout targets **Lodestar 3.0.4**, paired with native Codex adapter
-**1.4.9**. It reduces routine hook activity, adds a bounded readback for
+This checkout targets **Lodestar 3.0.5**, paired with native Codex adapter
+**1.4.10**. It reduces routine hook activity, adds a bounded readback for
 compaction checkpoints and keeps all checked Lodestar tools on one native server.
-See the [release notes](docs/releases/v3.0.4.md). Check GitHub Releases for
+See the [release notes](docs/releases/v3.0.5.md). Check GitHub Releases for
 published assets and the matching checksum inventory. If this version has not been published to npm or GitHub, use only the verified local candidate artifacts.
 
 Lodestar keeps project context, decisions, evidence, and unfinished work in one
@@ -93,8 +93,8 @@ check is evidence at read time; it does not prove the truth of a saved claim.
 
 The Windows package requires **Node.js 24.15.0 or newer**, **.NET 10
 Desktop Runtime (x64)** and **PowerShell 7**. For the local candidate, use the
-locally built `Lodestar-3.0.4-win-x64.zip` and its matching SHA-256 inventory;
-see [local candidate installation](docs/installation.md#local-304-candidate).
+locally built `Lodestar-3.0.5-win-x64.zip` and its matching SHA-256 inventory;
+see [local candidate installation](docs/installation.md#local-305-candidate).
 The [published 3.0.0 release](https://github.com/VerbalChainsaw/Lodestar/releases/tag/v3.0.0)
 remains available separately. Verify and extract the complete archive. Run `Install.cmd`,
 then open Loader or Manager from the Start Menu.
@@ -108,7 +108,7 @@ a user-local install without Windows or WSL. The general npm route below uses
 the verified absolute path to the exact local candidate tarball:
 
 ```text
-npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.4.tgz"
+npm install --global --ignore-scripts "<candidate-directory>/lodestar-agent-context-3.0.5.tgz"
 lodestar setup --target all
 lodestar setup --target all --apply
 lodestar init

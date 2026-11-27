@@ -1,6 +1,6 @@
 {
   "name": "lodestar-agent-context",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "Local contract-5 project context, evidence, decisions, work, and continuity",
   "type": "module",
   "bin": {
@@ -38,6 +38,7 @@
     "docs/releases/v3.0.2.md",
     "docs/releases/v3.0.3.md",
     "docs/releases/v3.0.4.md",
+    "docs/releases/v3.0.5.md",
     "docs/installation.md",
     "docs/client-deployment.md",
     "docs/intent-evidence.md",
