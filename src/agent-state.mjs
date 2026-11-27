@@ -1,3 +1,5 @@
+import { statSync } from "node:fs";
+
 import { AGENT_BOOTSTRAP, checkRecordSources, nativeInstructionSources, requiredSourceBundle } from "./bootstrap.mjs";
 import { initializeDatabase, normalizeDatabaseBusyError, openDiagnosticDatabase, openReadDatabase,
   openWriteDatabase, readMetadata } from "./database.mjs";
@@ -317,9 +319,24 @@ export async function dispatch(command, { options, positionals }, database, io) 
   }, { read: true });
   if (command === "start") {
     const identity = callerIdentity(options);
-    const result = await withDatabase(openReadDatabase, database, (db) => withProjectBoundary(db,
-      cwd(options), identity, (project) => startProjection(db, project, identity,
-        { topic: options["--topic"], compact: options["--compact"] === true })), { read: true });
+    const requested = cwd(options);
+    const directory = resolveInputPath(requested, { name: "cwd" });
+    const result = await withDatabase(openReadDatabase, database, (db) => {
+      try {
+        if (!statSync(directory).isDirectory()) {
+          throw Object.assign(new Error("Not a directory"), { code: "ENOTDIR" });
+        }
+      } catch (error) {
+        throw lodestarError("invalid_path", "The project cwd must name an existing, accessible directory.", {
+          identifiers: { cwd: requested, cause_code: error.code ?? null,
+            session: identity.session, actor: identity.actor },
+          action: "Choose an existing directory and retry.",
+          cause: error,
+        });
+      }
+      return withProjectBoundary(db, directory, identity, (project) => startProjection(db, project, identity,
+        { topic: options["--topic"], compact: options["--compact"] === true }));
+    }, { read: true });
     const hydrated = await hydrateStart(result, identity, options);
     return options["--compact"] ? compactStart(hydrated, options) : hydrated;
   }
