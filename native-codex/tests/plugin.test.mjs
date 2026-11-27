@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { handleHook } from '../scripts/lodestar-hook.mjs';
-import { authorizePrompt, attestTool, executeWork, executeHandoff, recordTail, captureNotes, startupContext, extractNotes, parseHandoffCommand, canonical, sessionRecordId } from '../scripts/lodestar-runtime.mjs';
+import { authorizePrompt, attestTool, executeWork, executeHandoff, recordTail, captureNotes, extractNotes, parseHandoffCommand, canonical, sessionRecordId } from '../scripts/lodestar-runtime.mjs';
 const entry=process.env.LODESTAR_ENTRY;
 assert.ok(entry,'Set LODESTAR_ENTRY to the installed package entry for real CLI integration');
 const root=await mkdtemp(path.join(os.tmpdir(),'lodestar-plugin-test-'));
@@ -57,12 +57,89 @@ test('handoff lifecycle preserves packet and tails only while session armed',asy
  r=await invoke('handoff','now',{packet:{...packet,nextMove:'Transfer now'}});assert.equal(r.result.record.data.state,'open');assert.equal(r.result.record.data.checkpoint.current_state,'Transfer now');
  r=await invoke('handoff','disarm');assert.equal(r.result.record.data.state,'cancelled');assert.equal(await recordTail({...host,turn_id:'later'},'assistant','No reopen',opts),false);
 });
-test('pending notes deduplicate/max three, redact, quarantine; startup complete markers',async()=>{
+test('passive tail reuses its checked read and stays nonblocking when unavailable',async()=>{
+ const observed=path.join(root,'tail-cli.log'), preload=path.join(root,'tail-observer.mjs');
+ await writeFile(preload,`import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(observed)}, JSON.stringify(process.argv.slice(2,4))+'\\n');`);
+ const repoEnv={...env,NODE_OPTIONS:`--import=${pathToFileURL(preload).href}`};
+ const measured={...opts,env:repoEnv};
+ const readCalls=async()=> (await readFile(observed,'utf8')).trim().split('\n').map(line=>JSON.parse(line)[0]);
+ await writeFile(observed,'');
+ assert.equal(await recordTail({...host,session_id:'tail-probe'},'user','Ordinary text',measured),false);
+ assert.equal((await readCalls()).length,1);
+ const session_id='measured-armed ';
+ await invoke('handoff','arm',{packet},{session_id});
+ await writeFile(observed,'');
+ const active={...host,session_id,turn_id:'tail-measured-after-restart'};
+ const transport=await import(pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')));
+ const exact=(cwd,session,agent='codex')=>transport.runInstalledLodestar(['handoff','status','--session-only',
+   '--cwd',cwd,'--session',session,'--agent',agent,'--harness','codex'],{env});
+ assert.deepEqual((await exact(root,session_id)).data,{eligible:true});
+ assert.deepEqual((await exact(root,'unarmed-peer')).data,{eligible:false});
+ const other=path.join(root,'other-checkout');
+ await mkdir(other);
+ assert.deepEqual((await exact(other,session_id)).data,{eligible:false});
+ await assert.rejects(exact(root,session_id,'other'),e=>e.envelope.error.code==='identity_required');
+ assert.equal(await recordTail(active,'assistant','Authorized capture',measured),true);
+ assert.equal((await readCalls()).length,4);
+ const legacyRoot=path.join(root,'legacy-core');
+ const legacyEntry=path.join(legacyRoot,'lodestar.mjs');
+ const legacyTransport=path.join(legacyRoot,'codex-plugin/scripts');
+ await mkdir(legacyTransport,{recursive:true});
+ await mkdir(path.join(legacyRoot,'src'));
+ await writeFile(legacyEntry,'// explicit discovery fixture');
+ const actualTransport=pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')).href;
+ const actualOperator=pathToFileURL(path.join(path.dirname(entry),'src/operator-actions.mjs')).href;
+ await writeFile(path.join(legacyRoot,'src/operator-actions.mjs'),`export * from ${JSON.stringify(actualOperator)};`);
+ await writeFile(path.join(legacyTransport,'lodestar-runtime.mjs'),`
+ export * from ${JSON.stringify(actualTransport)};
+ import { runInstalledLodestar as live } from ${JSON.stringify(actualTransport)};
+ export async function runInstalledLodestar(args, opts) {
+   if(args.includes('--session-only')) {
+      const code=opts.env.FIXTURE_ELIGIBILITY_ERROR;
+      throw Object.assign(new Error(code), {envelope:{error:{code,
+        identifiers:{command:'handoff',option:'--session-only'}}}});
+   }
+   return live(args,{...opts,env:{...opts.env,LODESTAR_ENTRY:${JSON.stringify(entry)}}});
+ }
+ `);
+ const legacy={...opts,env:{...repoEnv,LODESTAR_ENTRY:legacyEntry,FIXTURE_ELIGIBILITY_ERROR:'unknown_option'}};
+ await writeFile(observed,'');
+ assert.equal(await recordTail({...active,turn_id:'legacy-open'},'assistant','Legacy authorized capture',legacy),true);
+ assert.equal((await readCalls()).length,3);
+ await writeFile(observed,'');
+ await assert.rejects(recordTail(active,'assistant','Authority conflict', {
+  ...legacy,env:{...legacy.env,FIXTURE_ELIGIBILITY_ERROR:'handoff_conflict'}
+ }),/handoff_conflict/);
+ assert.equal(await readFile(observed,'utf8'),'');
+ await invoke('handoff','disarm',{},{session_id});
+ assert.deepEqual((await exact(root,session_id)).data,{eligible:false});
+ const failed=await handleHook({...active,hook_event_name:'Stop',last_assistant_message:'Offline'},data,{env:{...repoEnv,LODESTAR_DB:path.join(root,'absent.db')}});
+ assert.equal(failed.continue,true);
+ assert.deepEqual(failed,{continue:true}, 'Ordinary Stop must not access an unavailable database');
+});
+test('ordinary prompt and Stop can leave an armed handoff unchanged',async()=>{
+ const session_id='no-raw-tail';
+ await invoke('handoff','arm',{packet},{session_id});
+ const transport=await import(pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')));
+ const read=()=>transport.runInstalledLodestar(['start','--cwd',root,'--session',session_id,'--agent','codex','--harness','codex'],{env});
+ const before=await read();
+ const offline={env:{...env,LODESTAR_DB:path.join(root,'no-routine-db.db')}};
+ assert.deepEqual(await handleHook({...host,session_id,hook_event_name:'UserPromptSubmit',prompt:'Synthetic ordinary user turn'},data,offline),{continue:true});
+ assert.deepEqual(await handleHook({...host,session_id,hook_event_name:'Stop',last_assistant_message:'Synthetic ordinary assistant turn'},data,offline),{continue:true});
+ assert.equal((await read()).revision,before.revision);
+});
+test('pending notes deduplicate/max three, redact, quarantine; route-only startup without a database',async()=>{
  const text='LODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: two\nLODESTAR NOTE: three\nLODESTAR NOTE: four';
  assert.equal(extractNotes(text).length,3);assert.equal(await captureNotes(host,text,opts),3);assert.equal(await captureNotes(host,text,opts),3);
  const transport=await import(pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')));
  const pending=await transport.runInstalledLodestar(['pending','list','--cwd',root],{env});assert.equal(pending.data.records.length,3);assert.ok(pending.data.records.every(r=>r.semantics.lifecycle==='unresolved'&&r.semantics.context_role==='on_demand'));
- const context=await startupContext(host,opts);assert.ok(context.startsWith('Lodestar startup context'));assert.ok(context.endsWith('stop before mutation.'));assert.ok(context.includes('"required_complete":true'));
+ const offline={env:{...env,LODESTAR_DB:path.join(root,'absent-startup.db')}};
+ for(const source of ['startup','compact']){
+  const result=await handleHook({...host,hook_event_name:'SessionStart',source},data,offline);
+  assert.equal(result.continue,true);
+  assert.match(result.hookSpecificOutput.additionalContext,/^Lodestar startup routing \(v2\)/);
+  assert.match(result.hookSpecificOutput.additionalContext,/contains no work records or write basis/);
+ }
 });
 test('journal keeps exact requests and confirmed replay avoids duplicate dispatch',async()=>{
  const h={...host,turn_id:'recovery',tool_use_id:'same-logical-call',tool_name:'lodestar_work_start',tool_input:{report:'Recovery'}}, token=await attestTool(h,data);
@@ -92,7 +169,7 @@ test('read revision fencing and optional hook diagnostics keep failures visible'
  await invoke('work','start',{report:'Revision change for read fencing'},{turn_id:'read-fence'});
  await assert.rejects(runtime.runInstalledLodestar(['get','--at-revision',String(before.revision),'--',sessionRecordId('work',before.data.project,{sessionId:host.session_id})],{env}),e=>e.toolResult.error.code==='read_revision_conflict');
  const output=await handleHook({hook_event_name:'Stop',last_assistant_message:'LODESTAR NOTE: requires real host identity'},data);
- assert.equal(output.continue,true);assert.equal(output.captureErrors.length,2);assert.match(output.systemMessage,/capture failed/);
+ assert.equal(output.continue,true);assert.equal(output.captureErrors.length,1);assert.match(output.systemMessage,/capture failed/);
 });
 
 test('handoff now recovers unknown second phase before any new checkpoint',async()=>{

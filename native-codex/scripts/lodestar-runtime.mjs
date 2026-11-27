@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertJsonValue } from "./lodestar-json.mjs";
+import { assertJsonValue, parseNativeJson } from "./lodestar-json.mjs";
 
 export const HANDOFF_COMMANDS = Object.freeze([
   "arm", "status", "checkpoint", "now", "disarm",
@@ -19,10 +19,6 @@ const READ_ONLY_COMMANDS = new Set(["status"]);
 const AUTH_TTL_MS = 10 * 60_000;
 const OUTPUT_LIMIT = 1024 * 1024;
 const TIMEOUT_MS = 20_000;
-export const STARTUP_CONTEXT_PREFIX =
-  "Lodestar startup context (v1; incomplete without the closing marker):\n";
-export const STARTUP_CONTEXT_SUFFIX =
-  "\nLodestar startup context complete. If this marker is missing, stop before mutation.";
 export const HANDOFF_ENTRY_KEY_PATTERN = "^[a-z0-9][a-z0-9.-]*$";
 export const HANDOFF_PACKET_SCHEMA = Object.freeze({
   type: "object",
@@ -268,6 +264,55 @@ function regularFile(file) {
   catch (error) { if (["ENOENT", "ENOTDIR"].includes(error.code)) return false; throw error; }
 }
 
+// Operator-owned host data only, never a project file or a hook argument.
+function readRuntimeBinding(dataDir, env) {
+  if (!dataDir) return null;
+  const file = path.join(dataDir, "runtime-binding.json");
+  let info;
+  try { info = lstatSync(file); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
+  try {
+    if (!info.isFile() || info.size < 1 || info.size > 4096) throw new Error("Expected a small regular file");
+    const config = parseNativeJson(readFileSync(file, "utf8"));
+    const fields = ["schema", "node", "entry", "version", "entry_sha256"];
+    if (!config || Object.keys(config).length !== fields.length ||
+        !fields.every((field) => Object.hasOwn(config, field)) ||
+        config.schema !== 1 || typeof config.version !== "string" ||
+        !/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/iu.test(config.version) ||
+        typeof config.entry_sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(config.entry_sha256)) {
+      throw new Error("Unsupported binding format");
+    }
+    const absoluteLocal = (value) => typeof value === "string" && value.length > 0 &&
+      (process.platform === "win32" ? /^[a-z]:[\\/]/iu.test(value) : value.startsWith("/") && !value.startsWith("//"));
+    if (!absoluteLocal(config.node) || !absoluteLocal(config.entry)) throw new Error("Absolute local paths required");
+    const command = realpathSync(config.node), entry = realpathSync(config.entry);
+    if (!absoluteLocal(command) || !absoluteLocal(entry) ||
+        !regularFile(command) || !regularFile(entry) || path.basename(entry) !== "lodestar.mjs") {
+      throw new Error("The selected executable or package entry is not a regular file");
+    }
+    const manifest = JSON.parse(readFileSync(path.join(path.dirname(entry), "package.json"), "utf8"));
+    if (manifest.name !== "lodestar-agent-context" || manifest.version !== config.version ||
+        createHash("sha256").update(readFileSync(entry)).digest("hex") !== config.entry_sha256) {
+      throw new Error("Selected package does not match the recorded version and entry digest");
+    }
+    if ((env.LODESTAR_NODE || env.LODESTAR_ENTRY) &&
+        (!env.LODESTAR_NODE || !env.LODESTAR_ENTRY ||
+          realpathSync(env.LODESTAR_NODE) !== command || realpathSync(env.LODESTAR_ENTRY) !== entry)) {
+      throw new Error("Explicit runtime selection conflicts with the installed binding");
+    }
+    return { command, args: [entry] };
+  } catch (error) {
+    throw new Error(`Lodestar runtime binding is invalid: ${error.message}`);
+  }
+}
+
+export function boundRuntimeOptions(dataDir, env = process.env) {
+  let launch;
+  // Pin once per hook or MCP process, but do no work during hint-only startup.
+  const resolveRuntime = () => launch ??= readRuntimeBinding(dataDir, env) ?? resolveLaunch(env);
+  return { env, resolveRuntime };
+}
+
 function resolveLaunch(env = process.env) {
   if (env.LODESTAR_NODE && env.LODESTAR_ENTRY) {
     return { command: env.LODESTAR_NODE, args: [env.LODESTAR_ENTRY] };
@@ -304,13 +349,24 @@ export function parseEnvelope(text) {
 }
 
 async function installed(options = {}) {
-  const launch = resolveLaunch(options.env ?? process.env);
+  const launch = options.resolveRuntime?.() ?? resolveLaunch(options.env ?? process.env);
   const entry = launch.args[0];
   if (!entry) throw new Error("A discoverable installed Lodestar package entry is required");
   const root = path.dirname(entry);
   const transport = await import(pathToFileURL(path.join(root, "codex-plugin/scripts/lodestar-runtime.mjs")));
   return { ...transport, root, launch };
 }
+export async function coreMcpBinding(env = process.env, resolveRuntime) {
+  const launch = resolveRuntime?.() ?? resolveLaunch(env);
+  if (!launch.args[0]) throw new Error("A discoverable installed Lodestar package entry is required");
+  const module = await import(pathToFileURL(path.join(path.dirname(launch.args[0]), "codex-plugin/scripts/lodestar-mcp.mjs")));
+  if (!Array.isArray(module.NATIVE_TOOLS) || typeof module.callNativeTool !== "function") {
+    throw new Error("The installed core does not expose typed Lodestar MCP operations");
+  }
+  const bound = { ...env, LODESTAR_NODE: launch.command, LODESTAR_ENTRY: launch.args[0] };
+  return { tools: module.NATIVE_TOOLS, call: (name, args) => module.callNativeTool(name, args, { env: bound }) };
+}
+
 async function runLodestar(args, input = "", options = {}) {
   const runtime = await installed(options);
   // Carry the selected installation into the transport without changing the host environment.
@@ -329,7 +385,7 @@ const hookHost = (input, event) => {
 };
 export const sessionRecordId = (family, project, host) => 
   `codex-plugin:${family}:${key(canonical([project.scope, project.checkout_root, host.sessionId])).slice(0, 40)}`;
-async function context(host, options) {
+export async function readMutationContext(host, options) {
   const result = await runLodestar(["start", ...identityArgs(host)], "", options);
   if (result.more !== false || result.data?.complete !== true || result.data.required_complete !== true) {
     throw new Error("Full startup context is incomplete; mutation is blocked");
@@ -366,7 +422,7 @@ async function unresolvedRequests(host, dataDir, family) {
   }
   return pending;
 }
-async function mutateOwned(operation, host, dataDir, buildInput, options = {}, suffix = operation) {
+async function mutateOwned(operation, host, dataDir, buildInput, options = {}, suffix = operation, observed = null) {
   const requestId = `codex-plugin:${key(canonical([host.sessionId, host.turnId, host.toolUseId, suffix]))}`;
   let journal = path.join(dataDir, "requests", `${key(requestId)}.json`);
   let saved;
@@ -393,11 +449,11 @@ async function mutateOwned(operation, host, dataDir, buildInput, options = {}, s
     throw new Error("Recovery journal identity mismatch");
   }
   if (!saved) {
-    const start = await context(host, options);
+    const start = observed?.start ?? await readMutationContext(host, options);
     const family = operation.split(".")[0];
     const id = family === "pending" ? `codex-plugin:pending:${key(requestId)}`
       : sessionRecordId(family, start.data.project, host);
-    const exact = await exactRecord(id, host, options, start.revision);
+    const exact = observed?.exact ?? await exactRecord(id, host, options, start.revision);
     const record = exact.ok ? exact.data : null;
     if (family !== "pending") verifyOwner(record, family, start, host);
     const { combineReadBases } = await import(pathToFileURL(path.join((await installed(options)).root, "src/operator-actions.mjs")));
@@ -516,7 +572,19 @@ export async function executeHandoff(toolName, rawInput, dataDir, options = {}) 
 export async function recordTail(input, role, text, options = {}) {
   if (typeof text !== "string" || !text.trim()) return false;
   const host = hookHost(input, `tail:${role}`);
-  const start = await context(host, options);
+  try {
+    const probe = await runLodestar(["handoff", "status", "--session-only", ...identityArgs(host)], "", options);
+    if (probe.more !== false || typeof probe.data?.eligible !== "boolean") {
+      throw new Error("Exact handoff eligibility was not established");
+    }
+    if (!probe.data.eligible) return false;
+  } catch (error) {
+    const detail = error.envelope?.error;
+    if (detail?.code !== "unknown_option" || detail.identifiers?.command !== "handoff" ||
+        detail.identifiers?.option !== "--session-only") throw error;
+    // A specifically older core does not know this option: keep the checked legacy path.
+  }
+  const start = await readMutationContext(host, options);
   const id = sessionRecordId("handoff", start.data.project, host);
   const read = await exactRecord(id, host, options, start.revision);
   if (!read.ok) return false;
@@ -529,7 +597,7 @@ export async function recordTail(input, role, text, options = {}) {
     const checkpoint = structuredClone(record.data.checkpoint);
     checkpoint.references.push({ kind: "conversation-tail", role, turn: host.turnId, text: redact(text).value });
     return { id: target, checkpoint };
-  }, options, `tail:${role}:${digest(text)}`);
+  }, options, `tail:${role}:${digest(text)}`, { start, exact: read });
   return true;
 }
 
@@ -564,11 +632,16 @@ export async function captureNotes(input, text, options = {}) {
   }
   return captured;
 }
-export async function startupContext(input, options = {}) {
+export async function startupContext(input) {
   for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
-  const host = { sessionId: input.session_id, cwd: input.cwd };
-  const envelope = await context(host, options);
-  return `${STARTUP_CONTEXT_PREFIX}${canonical(envelope.data)}${STARTUP_CONTEXT_SUFFIX}`;
+  // A startup hint is a route, not a full project read or a mutation basis.
+  // Never fetch or serialize the ledger, catalog, or instruction bodies here.
+  return "Lodestar startup routing (v2): substantive project work uses the current native project instructions and Lodestar. " +
+    "Read only the relevant current work or handoff with lodestar_work_status / lodestar_handoff_status or the installed Lodestar CLI. " +
+    "On a new project, use lodestar start --cwd <current checkout> --compact for orientation if supported; read exact required records/instructions separately. " +
+    "This message contains no work records or write basis. Recover the current owner and stops, and obtain a current checked write basis before any Lodestar mutation. " +
+    "At a material decision, verified milestone, blocker, handoff, or completion, update the existing record once with the change, proof and next action. " +
+    "Skip chat, routine progress, unchanged state and transcript text. Confirm the write receipt before claiming a checkpoint.";
 }
 
 // Native local-only lifecycle adapter. The exact project/session binding is opt-in;
@@ -603,7 +676,7 @@ const compactionOptions = (binding, options) => binding.database
   : options;
 async function compactionRead(input, binding, options) {
   const host = { sessionId: input.session_id, cwd: input.cwd };
-  const start = await context(host, options);
+  const start = await readMutationContext(host, options);
   const check = await runLodestar(["work", "check", "--cwd", host.cwd,
     "--at-revision", String(start.revision), "--", binding.intent_record_id], "", options);
   if (check.more !== false || check.data?.complete !== true) {
@@ -632,6 +705,29 @@ async function replayCompactionPending(host, dataDir, options) {
   await mutateOwned(saved.operation, saved.host, dataDir,
     () => { throw new Error("Exact replay must never build a new request"); }, options, saved.suffix);
 }
+function compactRecoveryMarker(input, dataDir) {
+  for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
+  return path.join(dataDir, "compact-recovery", `${key(canonical([path.resolve(input.cwd), input.session_id]))}.pending`);
+}
+
+async function markCompactRecovery(input, dataDir) {
+  const file = compactRecoveryMarker(input, dataDir);
+  await mkdir(path.dirname(file), { recursive: true });
+  try { await (await open(file, "wx", 0o600)).close(); }
+  catch (error) { if (error.code !== "EEXIST") throw error; }
+}
+
+export async function recoverCompactForHook(input, dataDir, options = {}, { pendingOnly = false } = {}) {
+  const marker = dataDir && compactRecoveryMarker(input, dataDir);
+  if (pendingOnly && (!marker || !existsSync(marker))) return null;
+  const context = await compactRecoveryContext(input, dataDir, options);
+  if (context !== null && marker) {
+    try { await unlink(marker); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  return context;
+}
+
 export async function checkpointForCompaction(input, dataDir, options = {}) {
   const binding = await compactionBinding(input);
   if (!binding) return { bound: false };
@@ -652,6 +748,7 @@ export async function checkpointForCompaction(input, dataDir, options = {}) {
     const previous = read.exact.ok ? read.exact.data.data.checkpoint.references : [];
     if (previous.some((reference) => reference.kind === "lodestar-work-check"
         && reference.semantic_sha256 === read.semantic)) {
+      await markCompactRecovery(input, dataDir);
       return { bound: true, changed: false, handoff_id: read.id, revision: read.exact.data.revision };
     }
     const requestHost = { ...host, argsDigest: read.semantic };
@@ -668,7 +765,8 @@ export async function checkpointForCompaction(input, dataDir, options = {}) {
             semantic_sha256: read.semantic, projection: redact(read.projection).value }],
       } };
     }, { ...options, basisReads: [read.check] },
-    `compact:${read.semantic}:${read.exact.ok ? read.exact.data.revision : "absent"}`);
+    `compact:${read.semantic}:${read.exact.ok ? read.exact.data.revision : "absent"}`, { start: read.start });
+    await markCompactRecovery(input, dataDir);
     return { bound: true, changed: true, handoff_id: read.id,
       revision: result.data.record.revision, receipt: result.request };
   } finally { await handle.close(); await unlink(lock); }
@@ -682,7 +780,7 @@ export async function compactRecoveryContext(input, dataDir, options = {}) {
   const status = read.exact.ok ? read.exact.data.data.state : "not_saved";
   const saved = read.exact.ok ? read.exact.data.data.checkpoint.references
     .find((reference) => reference.kind === "lodestar-work-check") : null;
-  const launch = resolveLaunch(options.env ?? process.env);
+  const launch = options.resolveRuntime?.() ?? resolveLaunch(options.env ?? process.env);
   const context = { version: 1, source: "current public Lodestar reads; supplied results are not test proof",
     checkpoint_status: status, pending_requests: pending.map(({ file }) => file),
     saved_checkpoint_matches_current: saved?.semantic_sha256 === read.semantic,
@@ -692,7 +790,7 @@ export async function compactRecoveryContext(input, dataDir, options = {}) {
       saved_handoff_get_args: ["get", "--", read.id] },
     must_read_before_action: status !== "open" || pending.length > 0
       || read.projection.continuity?.complete !== true,
-    current: read.projection };
+    current: redact(read.projection).value };
   const prefix = "Lodestar compact recovery (v1):\n";
   let output = prefix + canonical(context);
   if (output.length > COMPACT_LIMIT) {

@@ -46,6 +46,12 @@ jobs:
         with:
           node-version: 24.15.0
       - run: npm test
+      - name: Exercise cold archive recovery on disposable fixtures
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq "Windows") { python -B test/restore-archive.test.py }
+          else { python3 -B test/restore-archive.test.py }
+          exit $LASTEXITCODE
       - run: npm run pack:check
       - run: npm pack --json
       - name: Resolve package artifact
@@ -54,7 +60,11 @@ jobs:
           $version = node -p "require('./package.json').version"
           "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
       - run: npm install --ignore-scripts --no-audit --no-fund --prefix .package-smoke "./${{ env.PACKAGE }}"
+      - name: Exercise the packed executable (Linux launcher)
+        if: runner.os == 'Linux'
+        run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs .package-smoke/node_modules/.bin/lodestar
       - name: Exercise the packed executable
+        if: runner.os != 'Linux'
         run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
 
   desktop:
@@ -131,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           npm install --ignore-scripts --no-audit --no-fund --prefix .release-smoke "./${PACKAGE}"
-          node scripts/smoke-packed-package.mjs .release-smoke/node_modules/lodestar-agent-context/lodestar.mjs
+          node scripts/smoke-packed-package.mjs .release-smoke/node_modules/lodestar-agent-context/lodestar.mjs .release-smoke/node_modules/.bin/lodestar
       - name: Build and smoke paired native Codex archive
         shell: bash
         run: |

@@ -74,6 +74,25 @@ export function normalizedForRows(db, rows) {
   return { records, record_errors };
 }
 
+// Filter by indexed scope/type before SQLite reads large record payloads.
+// Startup and continuity have different downstream ranking contracts; keep
+// those explicit while sharing candidate eligibility and primary-key lookup.
+export function orientationRows(db, scopes, { rejectionFirst = false, limit = null } = {}) {
+  const placeholders = scopes.map(() => "?").join(",");
+  const ranking = rejectionFirst ? "CASE WHEN type='rejection' THEN 0 ELSE 1 END," : "";
+  const sql = "WITH eligible AS MATERIALIZED ("
+    + "SELECT id FROM records INDEXED BY records_scope_type_id WHERE scope IN (" + placeholders + ",'global') "
+    + "AND type NOT IN ('mutation-receipt','migration-source','startup-snapshot','pending','decision-event','work-event','handoff-packet')) "
+    + "SELECT r.* FROM eligible e CROSS JOIN records r ON r.id=e.id WHERE (scope IN ("
+    + placeholders + ") OR (scope='global' AND json_extract(content_json,'$._lodestar.semantics.applicability.project') IN ("
+    + placeholders + "))) "
+    + "AND json_extract(content_json,'$._lodestar.semantics.context_role')='orientation' "
+    + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') IN ('current','unresolved') "
+    + "ORDER BY " + ranking + "json_extract(content_json,'$._lodestar.priority') DESC,r.id"
+    + (limit === null ? "" : " LIMIT ?");
+  return db.prepare(sql).all(...scopes, ...scopes, ...scopes, ...(limit === null ? [] : [limit]));
+}
+
 export function findRecords(
   db,
   queryValue,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.3 - 2026-11-27
+
+- Reconcile and test the latest core, offline storage observer, and one-shot chat-evidence review without enabling background ingestion.
+- Pair with native Codex adapter 1.4.9: no automatic transcript tails, bounded recovery for changed and explicitly bound pre-compaction work, and one server for native and checked core tools.
+- Preserve contract-5 checks, schema compatibility, and exact receipt recovery. No automatic database migration or history deletion.
+
+See the [release notes](docs/releases/v3.0.3.md).
+
 ## 3.0.2 - 2026-10-29
 
 - Lean schema-6 receipt storage with explicit archive/recovery boundaries.

@@ -12,7 +12,8 @@ export function workStatus(db, project, history = false, limit = null, offset = 
   const scopes = [...new Set([project.scope, ...(project.historical_scopes ?? [])])];
   const result = normalizedRowsResult(db, "SELECT id FROM records WHERE scope IN ("
     + scopes.map(() => "?").join(",") + ") AND "
-    + (history ? "type IN ('work','work-event') " : "type='work' AND json_extract(content_json,'$.value.status')='open' ")
+    + (history ? "type IN ('work','work-event') " : "type='work' AND json_extract(content_json,'$.value.status')='open' "
+      + "AND COALESCE(json_extract(content_json,'$._lodestar.semantics.lifecycle'),'current') NOT IN ('historical','superseded') ")
     + "ORDER BY json_extract(content_json,'$._lodestar.revision') DESC,id", ...scopes);
   const selected = limit === null ? result.records : result.records.slice(offset, offset + limit);
   return { advisory: true, notice: "Work reports describe observed progress; they confer no project lock or ownership.",

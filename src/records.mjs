@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { encodeReceiptStorage, decodeReceiptStorage, decodeReceiptRow, isRetiredReceipt } from "./receipt-storage.mjs";
+import { encodeReceiptStorage, decodeReceiptStorage, decodeReceiptRow, isExternalReceiptStorage, isRetiredReceipt } from "./receipt-storage.mjs";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { inspectLocalSourceSync } from "./bootstrap.mjs";
@@ -777,13 +777,30 @@ function targetRevision(db, target, decisionHeads) {
   return decisionHeads.get(target.scope).get(target.key) ?? null;
 }
 
-export function writeBasis(db, {
+export function writeBasis(db, options) {
+  return writeBasisWithBinding(db, options, resolveProjectScope);
+}
+
+// Use only within one synchronous, admitted read transaction; do not retain
+// the reader beyond it. No target revision or metadata is reused, and outside
+// a transaction no binding is memoized.
+export function projectionWriteBasisReader(db) {
+  const bindings = new Map();
+  return (options) => writeBasisWithBinding(db, options, (connection, projectScope, checkout) => {
+    if (!connection.isTransaction) return resolveProjectScope(connection, projectScope, checkout);
+    const key = JSON.stringify([projectScope, checkout]);
+    if (!bindings.has(key)) bindings.set(key, resolveProjectScope(connection, projectScope, checkout));
+    return bindings.get(key);
+  });
+}
+
+function writeBasisWithBinding(db, {
   projectScope = null,
   checkout = null,
   targets = [],
-} = {}) {
+} = {}, resolveBinding) {
   const metadata = readMetadata(db);
-  const binding = resolveProjectScope(db, projectScope, checkout);
+  const binding = resolveBinding(db, projectScope, checkout);
   const distinct = [...new Map([...targets, ...(binding?.binding_preconditions ?? []).map(({ target }) => target)].map((target, index) => {
     const normalized = normalizedTarget(target, `targets[${index}]`);
     return [targetKey(normalized), normalized];
@@ -810,17 +827,39 @@ function receiptId(request) {
     ])).digest("hex")}`;
 }
 
-function storedReceipt(db, id, expected = null) {
-  const row = rawRecordById(db, id);
-  if (!row) return null;
-  const record = parseStoredContent(row.content_json, { id });
+function receiptContent(row) {
+  const content = parseStoredContent(row.content_json, { id: row.id });
   if (row.type !== "mutation-receipt") {
     throw lodestarError("database_integrity", "A mutation receipt ID is owned by another record type.", {
-      identifiers: { id, type: row.type },
+      identifiers: { id: row.id, type: row.type },
     });
   }
-  return validateStoredReceipt(record, { id,
-    databaseInstanceId: readMetadata(db).database_instance_id, expected });
+  return content;
+}
+
+function receiptValue(row, content, databaseInstanceId, expected = null) {
+  return validateStoredReceipt(content, { id: row.id, databaseInstanceId, expected });
+}
+
+const sameReceiptRow = (left, right) => right !== null &&
+  ["id", "type", "name", "scope", "content_json", "created_at", "updated_at"]
+    .every(field => left[field] === right[field]);
+const receiptPreparations = new WeakMap();
+
+function nestedArchiveReplay(id) {
+  throw lodestarError("invalid_transaction", "An archived request cannot be replayed inside an existing transaction.", {
+    identifiers: { receipt_id: id },
+    action: "Finish the outer transaction and reconcile the exact request without holding a writer reservation.",
+  });
+}
+
+function changedReceipt(id) {
+  // This invocation wrote nothing; the observed historical request is unresolved.
+  // Keep the journal rather than treating its outcome as a known rejection.
+  throw lodestarError("revision_conflict", "The observed request receipt changed before replay admission.", {
+    identifiers: { receipt_id: id, committed: "unknown" },
+    action: "Inspect the exact saved request and current receipt. Do not submit this request as new work.",
+  });
 }
 
 export function mutate(db, operation, value, callback, {
@@ -830,16 +869,30 @@ export function mutate(db, operation, value, callback, {
   actor = null,
   project = null,
   resolveBinding = false,
+  receiptPreparation = null,
 } = {}) {
   validateIdentifier(operation, "operation");
   if (typeof callback !== "function" || callback.constructor?.name === "AsyncFunction") {
     invalidMutation("Mutation callbacks must be synchronous.");
   }
   const request = normalizeMutationRequest(value, { actor });
-  const payloadHash = createHash("sha256")
-    .update(canonicalStringify([operation, request])).digest("hex");
+  const requestKey = canonicalStringify([operation, request]);
+  const payloadHash = createHash("sha256").update(requestKey).digest("hex");
   const id = receiptId(request);
-  return admittedTransaction(db, () => {
+  const expected = { request_id: request.request_id,
+    database_epoch: request.database_epoch, operation, payload_sha256: payloadHash };
+  const nested = db.isTransaction;
+  let prepared = receiptPreparations.get(receiptPreparation) ?? null;
+  receiptPreparations.delete(receiptPreparation);
+  if (prepared && (prepared.db !== db || prepared.row.id !== id)) prepared = null;
+  // Options (for example a fallback actor) may change the normalized payload
+  // without changing its receipt ID. The observed row still fences execution,
+  // but the prepared decode is usable only for its exact normalized request.
+  if (prepared && prepared.requestKey !== requestKey) {
+    prepared = { row: prepared.row, instance: prepared.instance, external: prepared.external };
+  }
+  let deferred = null;
+  const admit = () => admittedTransaction(db, () => {
     assertSupportedSchema(db, database);
     const metadata = readMetadata(db, database);
     const revisionBefore = currentRevision(db);
@@ -857,8 +910,21 @@ export function mutate(db, operation, value, callback, {
         action: "Refresh the record after recovery and submit a new logical request.",
       });
     }
-    const receipt = storedReceipt(db, id, { request_id: request.request_id,
-      database_epoch: request.database_epoch, operation, payload_sha256: payloadHash });
+    const row = rawRecordById(db, id);
+    if (prepared && (!sameReceiptRow(prepared.row, row)
+      || prepared.instance !== metadata.database_instance_id)) changedReceipt(id);
+    let receipt = null;
+    if (row && (prepared ? prepared.external : isExternalReceiptStorage(row.content_json))) {
+      if (nested) nestedArchiveReplay(id);
+      if (!prepared || (!prepared.content && !prepared.value && !prepared.error)) {
+        deferred = { row, instance: metadata.database_instance_id, external: true };
+        return;
+      }
+      if (prepared.error) throw prepared.error;
+      receipt = prepared.value ?? receiptValue(row, prepared.content, prepared.instance, expected);
+    } else if (row) {
+      receipt = receiptValue(row, receiptContent(row), metadata.database_instance_id, expected);
+    }
     if (receipt) {
       if (receipt.payload_sha256 !== payloadHash) {
         throw lodestarError("request_conflict", "The request ID was already accepted with different input.", {
@@ -969,6 +1035,17 @@ export function mutate(db, operation, value, callback, {
       revision,
     };
   }, database);
+  const result = admit();
+  if (!deferred) return result;
+  // The first admission completed normally and made no changes. Capture the
+  // decoder result outside it; publish even a failure only after the fence.
+  prepared = deferred;
+  try {
+    prepared.value = receiptValue(prepared.row, receiptContent(prepared.row), prepared.instance, expected);
+  } catch (error) {
+    prepared.error = error;
+  }
+  return admit();
 }
 
 export function writeRecordSnapshot(db, value, {
@@ -1101,11 +1178,23 @@ function updateRecordValue(current, input) {
   });
 }
 
-export function preparePutEvidence(db, input, value) {
+export function preparePutEvidence(db, input, value, operation = null) {
   const request = normalizeMutationRequest(value);
   // Replay is settled under admission before applying any input. Its original
   // result remains available even if the source has since moved or disappeared.
-  if (storedReceipt(db, receiptId(request))) return {};
+  const row = rawRecordById(db, receiptId(request));
+  if (row) {
+    const external = isExternalReceiptStorage(row.content_json);
+    if (external && db.isTransaction) nestedArchiveReplay(row.id);
+    const content = receiptContent(row);
+    const instance = readMetadata(db).database_instance_id;
+    receiptValue(row, content, instance);
+    const prepared = {};
+    if (operation !== null) receiptPreparations.set(prepared, { db,
+      requestKey: canonicalStringify([operation, request]), row, instance, external,
+      ...(external ? { content } : {}) });
+    return prepared;
+  }
   const projectRoots = prepareProjectRoots(db, input);
   const current = input.mode === "update" ? normalizeRecord(getRecordById(db, input.id)) : null;
   const record = current ? updateRecordValue(current, input) : internalRecord(input.record);
@@ -1157,7 +1246,7 @@ export function putRecord(db, value, options = {}) {
   }
   const id = mode === "update" ? input.id : input?.record?.id;
   validateIdentifier(id, "input.id");
-  const prepared = preparePutEvidence(db, input, value);
+  const prepared = preparePutEvidence(db, input, value, "put");
   return mutate(db, "put", value, ({ request, revision, timestamp }) => {
     const data = applyPutInput(db, input, { revision, timestamp, ...prepared });
     // Non-blocking rediscovery interception for direct put create/update only
@@ -1167,7 +1256,7 @@ export function putRecord(db, value, options = {}) {
       ? [] : rejectionAdvisories(db, data, request.project_scope ?? null, request.checkout ?? null);
     return { data, changed_ids: data.revision === revision ? [id] : [],
       ...(next.length ? { next } : {}) };
-  }, { ...options, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
+  }, { ...options, receiptPreparation: prepared, resolveBinding: true, requiredTargets: [{ kind: "record", id }] });
 }
 
 function rejectionAdvisories(db, record, projectScope, requestCheckout) {

@@ -23,6 +23,12 @@ jobs:
         with:
           node-version: 24.15.0
       - run: npm test
+      - name: Exercise cold archive recovery on disposable fixtures
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq "Windows") { python -B test/restore-archive.test.py }
+          else { python3 -B test/restore-archive.test.py }
+          exit $LASTEXITCODE
       - name: Build the static site
         run: node scripts/build-site.mjs .site-smoke
       - run: npm run pack:check
@@ -33,7 +39,11 @@ jobs:
           $version = node -p "require('./package.json').version"
           "PACKAGE=lodestar-agent-context-$version.tgz" >> $env:GITHUB_ENV
       - run: npm install --ignore-scripts --no-audit --no-fund --prefix .package-smoke "./${{ env.PACKAGE }}"
+      - name: Exercise the packed executable (Linux launcher)
+        if: runner.os == 'Linux'
+        run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs .package-smoke/node_modules/.bin/lodestar
       - name: Exercise the packed executable
+        if: runner.os != 'Linux'
         run: node scripts/smoke-packed-package.mjs .package-smoke/node_modules/lodestar-agent-context/lodestar.mjs
       - name: Package the independent native Codex adapter
         if: runner.os == 'Windows'

@@ -88,6 +88,15 @@ export function decodeReceiptRow(row){
   }
   return {...row,content_json:decodeReceiptStorage(row.content_json,{id:row.id,allowRetired:true})};
 }
+// Classify without reading the archive. Malformed JSON stays on its normal
+// validation path; a recognized external codec never reaches inline decoding.
+export function isExternalReceiptStorage(text){
+  if(!text.includes('"_lodestar_storage"'))return false;
+  try {
+    const s=JSON.parse(text)?._lodestar_storage;
+    return s?.format===FORMAT&&(s.codec==='archive'||s.codec==='archive-pointer');
+  } catch {return false;}
+}
 export function decodeReceiptStorage(text,{id=null,allowRetired=false}={}){
   // Avoid a second parse of the large legacy receipts which do not have this encoding.
   if(!text.includes('"_lodestar_storage"'))return text;

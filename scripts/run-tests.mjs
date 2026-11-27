@@ -9,7 +9,8 @@ import { pathToFileURL } from "node:url";
 // Includes child startup, all cases, and teardown. Healthy Windows CLI journeys
 // take about two minutes per file; this is a finite diagnostic ceiling.
 export async function runOwnedTests({ files, deadlineMs = 300000 } = {}) {
-  files ??= globSync("test/*.test.mjs", { exclude: (name) => name === "node_modules" }).sort();
+  files ??= globSync(["test/*.test.mjs", "tools/chat-evidence/review.test.mjs"],
+    { exclude: (name) => name === "node_modules" }).sort();
   files = files.map((file) => path.resolve(file));
   if (files.length === 0) throw new Error("No owned test/*.test.mjs files selected.");
   const selected = new Set(files), active = new Map();

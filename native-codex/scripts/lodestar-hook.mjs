@@ -2,8 +2,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  authorizePrompt, attestTool, captureNotes, recordTail, startupContext,
-  checkpointForCompaction, compactRecoveryContext,
+  authorizePrompt, attestTool, captureNotes, startupContext,
+  checkpointForCompaction, recoverCompactForHook, boundRuntimeOptions,
 } from "./lodestar-runtime.mjs";
 import { resolvePluginData } from "./lodestar-mcp.mjs";
 import { assertJsonValue, readHookJson } from "./lodestar-json.mjs";
@@ -31,7 +31,7 @@ export async function handleHook(input, dataDir, options = {}) {
   }
   if (input.hook_event_name === "SessionStart" && input.source === "compact") {
     try {
-      const additionalContext = await compactRecoveryContext(input, dataDir, options);
+      const additionalContext = await recoverCompactForHook(input, dataDir, options);
       if (additionalContext !== null) return { continue: true,
         hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } };
     } catch (error) { return { continue: false, stopReason: "lodestar_compact_recovery_failed",
@@ -39,11 +39,14 @@ export async function handleHook(input, dataDir, options = {}) {
   }
   if (input.hook_event_name === "UserPromptSubmit") {
     const authorization = await authorizePrompt(input, dataDir);
-    if (authorization) return { continue: true, hookSpecificOutput: {
-      hookEventName: "UserPromptSubmit", additionalContext: authorization.additionalContext } };
     const errors = [];
-    await optionalCapture(() => recordTail(input, "user", input.prompt, { dataDir }), "user tail", errors);
-    return captureResult(errors);
+    let recovered;
+    await optionalCapture(async () => {
+      recovered = await recoverCompactForHook(input, dataDir, options, { pendingOnly: true });
+    }, "compact recovery", errors);
+    const additionalContext = [authorization?.additionalContext, recovered].filter(Boolean).join("\n\n");
+    return { ...captureResult(errors), ...(additionalContext ? { hookSpecificOutput: {
+      hookEventName: "UserPromptSubmit", additionalContext } } : {}) };
   }
   if (input.hook_event_name === "PreToolUse") {
     const result = await attestTool(input, dataDir);
@@ -59,8 +62,7 @@ export async function handleHook(input, dataDir, options = {}) {
   if (input.hook_event_name === "Stop") {
     const message = input.last_assistant_message ?? "";
     const errors = [];
-    await optionalCapture(() => recordTail(input, "assistant", message, { dataDir }), "assistant tail", errors);
-    await optionalCapture(() => captureNotes(input, message, { dataDir }), "pending notes", errors);
+    await optionalCapture(() => captureNotes(input, message, { ...options, dataDir }), "pending notes", errors);
     return captureResult(errors);
   }
   return { continue: true };
@@ -72,5 +74,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === script) {
     process.stdout.write(JSON.stringify({ continue: false, stopReason: "lodestar_invalid_input",
       systemMessage: `Lodestar hook input rejected: ${error.message}` }));
   }
-  if (inputReady) process.stdout.write(JSON.stringify(await handleHook(input, resolvePluginData())));
+  if (inputReady) {
+    const dataDir = resolvePluginData();
+    process.stdout.write(JSON.stringify(await handleHook(input, dataDir, boundRuntimeOptions(dataDir))));
+  }
 }

@@ -5,6 +5,27 @@ is explicit. Work status describes saved records; it does not observe live agent
 Use **Connection** to check the selected Node executable, CLI and database before
 making a correction. Keep those exact selections during uncertain-save recovery.
 
+## Find current and historical work reports
+
+Lodestar keeps current and historical work reports in the same database.
+Open **Lodestar → Loader** from the Windows Start menu, select the project,
+then open **Work & handoff**. **Work status** shows saved current open reports;
+**Work history** retains past reports and outcomes. In the terminal Manager,
+select the project, choose **Work**, then **Current status** or **Full history**.
+Both interfaces use the database selected in **Connection**; they do not create
+a separate board or datastore.
+
+Status, startup work context and Attention omit records explicitly marked
+historical or superseded. History preserves those records. A current work report
+in a mapped historical project scope remains eligible: the record's lifecycle
+and its project's former scope are separate facts.
+
+An open report describes recorded work, not a running process. Check its last
+observation and reconcile the actual execution owner before reporting activity
+or correcting obsolete work. Use **Attention** and an exact intent's `work check`
+for requested outcomes, evidence and unresolved requirements. Delivery or inbox
+activity does not replace those canonical records or prove execution.
+
 ## Ask for the answer you need
 
 Loader's Commands search and Manager's **f** action finder use the installed

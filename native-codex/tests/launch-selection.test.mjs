@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -10,7 +11,7 @@ const entry = process.env.LODESTAR_ENTRY;
 assert.ok(entry, 'Set LODESTAR_ENTRY to the installed package entry for real transport integration');
 const adapter = fileURLToPath(new URL('../scripts/lodestar-runtime.mjs', import.meta.url));
 const transport = pathToFileURL(path.join(path.dirname(entry), 'codex-plugin/scripts/lodestar-runtime.mjs')).href;
-const { startupContext, STARTUP_CONTEXT_PREFIX, STARTUP_CONTEXT_SUFFIX } = await import(pathToFileURL(adapter));
+const { readMutationContext } = await import(pathToFileURL(adapter));
 
 test('Windows discovery orders numeric Node versions and preserves custom-name fallback',
   { skip: process.platform !== 'win32' }, async (t) => {
@@ -40,8 +41,7 @@ test('Windows discovery orders numeric Node versions and preserves custom-name f
       const env = { ...process.env, USERPROFILE: root, HOME: root };
       delete env.LODESTAR_NODE;
       delete env.LODESTAR_ENTRY;
-      const text = await startupContext({ session_id: 'version-order', cwd: root }, { env });
-      const observed = JSON.parse(text.slice(STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length));
+      const { data: observed } = await readMutationContext({ sessionId: 'version-order', cwd: root }, { env });
       assert.equal(path.basename(path.dirname(observed.executable)), expected);
       assert.equal(observed.entry, path.join(path.dirname(observed.executable), 'node_modules/lodestar-agent-context/lodestar.mjs'));
     }
@@ -69,8 +69,7 @@ test('Windows discovery skips directory executables and CLI entries',
     const env = { ...process.env, USERPROFILE: root, HOME: root };
     delete env.LODESTAR_NODE;
     delete env.LODESTAR_ENTRY;
-    const output = await startupContext({ session_id: 'invalid-runtime', cwd: root }, { env });
-    const data = JSON.parse(output.slice(STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length));
+    const { data } = await readMutationContext({ sessionId: 'invalid-runtime', cwd: root }, { env });
     assert.equal(path.basename(path.dirname(data.executable)), 'node-v24.15.0-win-x64');
   });
 
@@ -103,16 +102,15 @@ test('Windows discovery carries the selected executable and entry into the actua
     const runner = path.join(root, 'runner.mjs');
     await writeFile(runner, `
       import assert from 'node:assert/strict';
-      import { startupContext, STARTUP_CONTEXT_PREFIX, STARTUP_CONTEXT_SUFFIX } from ${JSON.stringify(pathToFileURL(adapter).href)};
+      import { readMutationContext } from ${JSON.stringify(pathToFileURL(adapter).href)};
       const before = { ...process.env };
-      const host = { session_id: 'launch-fixture', cwd: ${JSON.stringify(root)} };
-      const unpack = (text) => JSON.parse(text.slice(STARTUP_CONTEXT_PREFIX.length, -STARTUP_CONTEXT_SUFFIX.length));
-      const discovered = unpack(await startupContext(host));
+      const host = { sessionId: 'launch-fixture', cwd: ${JSON.stringify(root)} };
+      const { data: discovered } = await readMutationContext(host);
       const override = Object.freeze({ ...process.env, LODESTAR_NODE: ${JSON.stringify(overriddenNode)},
         LODESTAR_ENTRY: ${JSON.stringify(overriddenEntry)}, LODESTAR_DB: 'explicit-isolated-db',
         LODESTAR_FIXTURE_MARKER: 'explicit-marker' });
       const overrideBefore = { ...override };
-      const explicit = unpack(await startupContext(host, { env: override }));
+      const { data: explicit } = await readMutationContext(host, { env: override });
       assert.deepEqual({ ...process.env }, before, 'parent process environment must remain unchanged');
       assert.deepEqual(override, overrideBefore, 'caller environment must remain unchanged');
       console.log(JSON.stringify({ parent: process.execPath, discovered, explicit }));
@@ -138,3 +136,78 @@ test('Windows discovery carries the selected executable and entry into the actua
       assert.equal(observed.marker, marker);
     }
   });
+
+
+test('one host binding chooses the exact runtime in hook, MCP and direct CLI fixtures', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'lodestar-shared-binding-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const dataDir = path.join(root, 'plugin-data');
+  const core = path.join(root, 'selected-core');
+  const cli = path.join(core, 'lodestar.mjs');
+  const cliSource = `console.log(JSON.stringify({selected: "exact-local-core", entry: process.argv[1], node: process.execPath}));`;
+  const config = { schema: 1, node: process.execPath, entry: cli, version: '3.0.3',
+    entry_sha256: createHash('sha256').update(cliSource).digest('hex') };
+  const fixture = path.join(core, 'codex-plugin/scripts');
+  await mkdir(dataDir);
+  await mkdir(fixture, { recursive: true });
+  await mkdir(path.join(root, '.omx'));
+  await writeFile(cli, cliSource);
+  await writeFile(path.join(core, 'package.json'), JSON.stringify({ name: 'lodestar-agent-context', version: config.version }));
+  await writeFile(path.join(dataDir, 'runtime-binding.json'), JSON.stringify(config));
+  await writeFile(path.join(root, '.omx/lodestar-compaction.json'), JSON.stringify({
+    version: 1, session_id: 'fixture', project_root: root, intent_record_id: 'fixture-intent',
+  }));
+  await writeFile(path.join(fixture, 'lodestar-runtime.mjs'), `export async function runInstalledLodestar(args, {env}) {
+    if (args[0] === 'start') throw new Error('selected hook runtime: ' + env.LODESTAR_ENTRY);
+    throw new Error('Unexpected fixture command');
+  }`);
+  await writeFile(path.join(fixture, 'lodestar-mcp.mjs'), `export const NATIVE_TOOLS = [{name:'lodestar_describe'}];
+    export async function callNativeTool(name, args, {env}) { return {entry:env.LODESTAR_ENTRY,node:env.LODESTAR_NODE}; }`);
+  const env = { ...process.env, PLUGIN_DATA: dataDir, HOME: root, USERPROFILE: root,
+    LODESTAR_DB: path.join(root, 'never-live.sqlite') };
+  delete env.LODESTAR_NODE;
+  delete env.LODESTAR_ENTRY;
+  const run = (script, input, execPath = process.execPath) => {
+    const child = spawnSync(execPath, [script], { input, env, encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+    assert.equal(child.status, 0, child.stderr || child.error?.message);
+    return JSON.parse(child.stdout.trim());
+  };
+  const hook = fileURLToPath(new URL('../scripts/lodestar-hook.mjs', import.meta.url));
+  const mcp = fileURLToPath(new URL('../scripts/lodestar-mcp.mjs', import.meta.url));
+  const startup = run(hook, JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup',
+    session_id: 'fixture', cwd: root }));
+  assert.match(startup.hookSpecificOutput.additionalContext, /Lodestar startup routing/);
+  const checkpoint = run(hook, JSON.stringify({ hook_event_name: 'PreCompact',
+    session_id: 'fixture', turn_id: 'fixture-turn', cwd: root }));
+  assert.equal(checkpoint.continue, false);
+  assert.ok(checkpoint.systemMessage.includes('selected hook runtime: ' + cli), checkpoint.systemMessage);
+  const query = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+    params: { name: 'lodestar_describe', arguments: {} } }) + '\n';
+  const expectedNode = await realpath(process.execPath), expectedEntry = await realpath(cli);
+  // Windows can report the same NTFS file under a short or long path. Verify
+  // identity rather than spelling, without accepting a copy of the runtime.
+  const identity = async (file) => {
+    const { dev, ino } = await stat(file, { bigint: true });
+    assert.notEqual(ino, 0n, 'the fixture requires a usable file identity');
+    return { dev, ino };
+  };
+  const identifyRuntime = async ({ node, entry, ...rest }) => ({
+    ...rest, node: await identity(node), entry: await identity(entry),
+  });
+  const expected = await identifyRuntime({ node: expectedNode, entry: expectedEntry });
+  assert.deepEqual(await identifyRuntime(run(mcp, query).result.structuredContent), expected);
+  assert.deepEqual(await identifyRuntime(run(expectedEntry, '', expectedNode)), { selected: 'exact-local-core', ...expected });
+
+  const { boundRuntimeOptions } = await import(pathToFileURL(adapter));
+  const old = boundRuntimeOptions(dataDir, env);
+  const original = old.resolveRuntime();
+  await writeFile(path.join(dataDir, 'runtime-binding.json'), JSON.stringify({ ...config, version: '0.0.0' }));
+  assert.equal(old.resolveRuntime(), original, 'running process must not switch while writing');
+  assert.throws(() => boundRuntimeOptions(dataDir, env).resolveRuntime(), /version and entry digest/);
+  const failure = run(mcp, query);
+  assert.match(failure.error.message, /version and entry digest/);
+  await writeFile(path.join(dataDir, 'runtime-binding.json'), JSON.stringify(config));
+  assert.throws(() => boundRuntimeOptions(dataDir, { ...env, LODESTAR_ENTRY: cli }).resolveRuntime(), /conflicts/);
+  await writeFile(path.join(dataDir, 'runtime-binding.json'), JSON.stringify({ ...config, entry: 'lodestar.mjs' }));
+  assert.throws(() => boundRuntimeOptions(dataDir, env).resolveRuntime(), /Absolute local paths/);
+});

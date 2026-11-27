@@ -14,6 +14,14 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'OutputDirectory must be new; release artifacts are never overwritten.' }
 $version = (Get-Content -LiteralPath (Join-Path $source 'package.json') -Raw | ConvertFrom-Json).version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected a stable semantic package version.' }
+$loaderVersion = "$version.0"
+$loaderProject = [xml](Get-Content -LiteralPath (Join-Path $source 'desktop/Lodestar.Loader/Lodestar.Loader.csproj') -Raw)
+$loaderManifest = [xml](Get-Content -LiteralPath (Join-Path $source 'desktop/Lodestar.Loader/app.manifest') -Raw)
+$loaderProperties = $loaderProject.Project.PropertyGroup
+if ($loaderProperties.Version -cne $version -or $loaderProperties.AssemblyVersion -cne $loaderVersion -or
+    $loaderProperties.FileVersion -cne $loaderVersion -or $loaderManifest.assembly.assemblyIdentity.version -cne $loaderVersion) {
+    throw "Loader source version does not match release package version $version."
+}
 Import-Module (Join-Path $PSScriptRoot 'BundleTools.psm1') -Force -DisableNameChecking
 $work = Join-Path ([IO.Path]::GetTempPath()) ('lodestar-release-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($work) | Out-Null
@@ -24,6 +32,13 @@ $bundle = Join-Path $work "Lodestar-$version-win-x64"
 & (Join-Path $PSScriptRoot 'Build-Portable.ps1') -Destination $bundle -SourceRoot $source -NodePath $NodePath -DatabasePath $database
 if (-not (Test-Path -LiteralPath (Join-Path $bundle 'Lodestar.Loader.exe'))) { throw 'Portable build did not produce an application.' }
 Test-Bundle $bundle | Out-Null
+foreach ($name in @('Lodestar.Loader.exe', 'Lodestar.Loader.dll')) {
+    $binary = Join-Path $bundle $name
+    $actualVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($binary).FileVersion
+    if ($actualVersion -cne $loaderVersion) {
+        throw "$name file version $actualVersion does not match release version $loaderVersion."
+    }
+}
 # These are generated files in this invocation's new bundle, never a user installation.
 [IO.File]::Delete((Assert-Child $bundle (Join-Path $bundle 'interfaces.json')))
 [IO.File]::Delete((Assert-Child $bundle (Join-Path $bundle 'Lodestar.Loader.pdb')))

@@ -1,6 +1,7 @@
 # Lodestar schema and contract 5
 
-Schema 5 stores all durable state in five strict, without-rowid tables:
+The current storage schema is 6; existing schema-5 stores remain readable and
+writable. Both use the same five strict, without-rowid tables:
 
 ```text
 metadata(key, value)
@@ -12,7 +13,9 @@ sources(record_id, origin, freshness, metadata_json)
 
 The exact DDL and writer triggers live in `src/schema.mjs`. Metadata contains
 `schema_version`, `database_instance_id`, `database_epoch`, `database_revision`, and
-`created_at`.
+`created_at`. Schema 6 adds losslessly compressed receipt records and explicit
+cold-history references without changing contract-5 requests. See [lean storage](lean-storage.md)
+for the storage and recovery contract.
 
 ## Read model
 
@@ -92,7 +95,7 @@ mapping reads fail explicitly; raw reads remain available and no history is rewr
 
 Schema triggers call the connection-scoped `lodestar_write_contract()` guard on every
 state-table insert, update, and delete. A retained old connection or prepared statement
-cannot write after schema-5 activation.
+cannot write after activation of a newer schema fence.
 
 ## Ordering and history
 
@@ -115,7 +118,8 @@ exact replay of an already completed migration uses its retained provenance.
 `doctor --migration-preflight` returns the source observation inside the normal
 contract-5 envelope. The migration request contains `{v,request_id,preflight,backup}`;
 `backup` carries the restore-inspected backup path, logical digest, and schema
-fingerprint. `init --migrate --file <request.json>` is the only conversion command.
+fingerprint. `init --migrate --file <request.json>` runs that schema-4-to-5 conversion;
+it does not convert schema 5 to 6.
 
 For current content owners, write preparation reopens the declared local/package
 source and requires the exact fingerprint and byte count. A `source_root` locator

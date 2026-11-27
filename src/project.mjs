@@ -202,7 +202,8 @@ export function validateProjectBindings(db, id, prepared = null) {
       action: "Correct the named project records, then retry the binding mutation." });
   if (prepared) {
     const expectedPeers = prepared.peers.map(({ id: peerId }) => peerId).sort();
-    const currentPeers = db.prepare("SELECT id FROM records WHERE type='project' AND id<>? ORDER BY id")
+    // Compare project keys without walking records with unrelated payloads.
+    const currentPeers = db.prepare("SELECT id FROM records INDEXED BY records_scope_type_id WHERE type='project' AND id<>? ORDER BY id")
       .all(id).map(({ id: peerId }) => peerId);
     if (canonicalStringify(currentPeers) !== canonicalStringify(expectedPeers)) {
       throw lodestarError("project_binding_conflict",
@@ -418,8 +419,9 @@ export const normalizedRows = (db, sql, ...values) => normalizedRowsResult(db, s
 
 // Capture database evidence in the read transaction; inspect catalog bytes only
 // after releasing it. Preview requests reuse this exact observed write basis.
-export function catalogProjection(db, project, configuration) {
+export function catalogProjection(db, project, configuration, { details = true } = {}) {
   const projects = projectRecords(db), records = projects.records;
+  if (!details) return { record_errors: projects.record_errors };
   const id = records.find((record) => record.id === project.id || record.id === project.scope)?.id ?? project.scope;
   return { project, id, records, record_errors: projects.record_errors,
     alias_owners: db.prepare("SELECT alias,record_id FROM aliases").all(),
