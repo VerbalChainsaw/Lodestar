@@ -115,7 +115,18 @@ test('passive tail reuses its checked read and stays nonblocking when unavailabl
  assert.deepEqual((await exact(root,session_id)).data,{eligible:false});
  const failed=await handleHook({...active,hook_event_name:'Stop',last_assistant_message:'Offline'},data,{env:{...repoEnv,LODESTAR_DB:path.join(root,'absent.db')}});
  assert.equal(failed.continue,true);
- assert.match(failed.systemMessage,/optional capture failed/);
+ assert.deepEqual(failed,{continue:true}, 'Ordinary Stop must not access an unavailable database');
+});
+test('ordinary prompt and Stop can leave an armed handoff unchanged',async()=>{
+ const session_id='no-raw-tail';
+ await invoke('handoff','arm',{packet},{session_id});
+ const transport=await import(pathToFileURL(path.join(path.dirname(entry),'codex-plugin/scripts/lodestar-runtime.mjs')));
+ const read=()=>transport.runInstalledLodestar(['start','--cwd',root,'--session',session_id,'--agent','codex','--harness','codex'],{env});
+ const before=await read();
+ const offline={env:{...env,LODESTAR_DB:path.join(root,'no-routine-db.db')}};
+ assert.deepEqual(await handleHook({...host,session_id,hook_event_name:'UserPromptSubmit',prompt:'Synthetic ordinary user turn'},data,offline),{continue:true});
+ assert.deepEqual(await handleHook({...host,session_id,hook_event_name:'Stop',last_assistant_message:'Synthetic ordinary assistant turn'},data,offline),{continue:true});
+ assert.equal((await read()).revision,before.revision);
 });
 test('pending notes deduplicate/max three, redact, quarantine; route-only startup without a database',async()=>{
  const text='LODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: one API_KEY=private\nLODESTAR NOTE: two\nLODESTAR NOTE: three\nLODESTAR NOTE: four';
@@ -158,7 +169,7 @@ test('read revision fencing and optional hook diagnostics keep failures visible'
  await invoke('work','start',{report:'Revision change for read fencing'},{turn_id:'read-fence'});
  await assert.rejects(runtime.runInstalledLodestar(['get','--at-revision',String(before.revision),'--',sessionRecordId('work',before.data.project,{sessionId:host.session_id})],{env}),e=>e.toolResult.error.code==='read_revision_conflict');
  const output=await handleHook({hook_event_name:'Stop',last_assistant_message:'LODESTAR NOTE: requires real host identity'},data);
- assert.equal(output.continue,true);assert.equal(output.captureErrors.length,2);assert.match(output.systemMessage,/capture failed/);
+ assert.equal(output.continue,true);assert.equal(output.captureErrors.length,1);assert.match(output.systemMessage,/capture failed/);
 });
 
 test('handoff now recovers unknown second phase before any new checkpoint',async()=>{

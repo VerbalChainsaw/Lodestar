@@ -103,6 +103,29 @@ test('hook/core process integration: checkpoint and fresh-process recovery prese
   assert(text.includes('Completion requires actual local context rebuild evidence'));
   assert(text.includes('"ready_to_review":false')); assert(text.length <= 7000);
   assert.equal((await start(f)).revision, before, 'Recovery reads cannot checkpoint or edit records');
+  const afterRecovery = await handleHook({ ...f.host, hook_event_name: 'UserPromptSubmit',
+    prompt: 'Continue after successful compact-start' }, f.data, f.options);
+  assert.deepEqual(afterRecovery, { continue: true }, 'Compact-start already delivered the context');
+
+});
+test('next prompt recovers a missed compact-start once, with zero database writes', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await pre(f)).continue, true);
+  const before = (await start(f)).revision;
+  const submit = (extra = {}, options = f.options) => handleHook({
+    ...f.host, hook_event_name: 'UserPromptSubmit', prompt: 'Continue the synthetic work', ...extra,
+  }, f.data, options);
+  assert.deepEqual(await submit({ session_id: 'other-session' }), { continue: true });
+  const unavailable = await submit({}, { ...f.options,
+    env: { ...f.env, LODESTAR_ENTRY: path.join(f.root, 'fake-missing-core.mjs') } });
+  assert.match(unavailable.systemMessage, /compact recovery/);
+  const recovered = await submit();
+  assert.equal(recovered.continue, true, recovered.systemMessage);
+  assert.equal(recovered.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.match(recovered.hookSpecificOutput.additionalContext, /Preserve the synthetic goal/);
+  assert.match(recovered.hookSpecificOutput.additionalContext, /Local-only Codex can deliver/);
+  assert.deepEqual(await submit(), { continue: true });
+  assert.equal((await start(f)).revision, before);
 });
 test('unbound and wrong-session events do nothing; invalid matching binding stops before compaction', async (t) => {
   const f = await fixture(t), before = (await start(f)).revision;

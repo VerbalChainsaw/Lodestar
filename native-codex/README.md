@@ -4,7 +4,7 @@ This optional adapter supplies a Codex startup routing hint, host-bound work
 and handoff tools, pending-note capture, and opt-in compaction continuity. It uses
 the separately installed Lodestar core through that core's maintained transport.
 
-The adapter and core have independent versions. Adapter 1.4.8 targets Lodestar
+The adapter and core have independent versions. Adapter 1.4.9 targets Lodestar
 core 3.0.2. CI qualifies the native archive against the exact packed core from
 the same source revision on Windows. The core package's optional generic MCP plugin does
 not provide these native hooks; replacing this adapter with it would remove
@@ -15,11 +15,30 @@ database. For substantive project work, follow the current project instructions
 and use one scoped orientation or an exact work/handoff read as relevant. A
 startup hint alone does not establish verified use or a write basis.
 
-Passive conversation-tail capture checks only the current Codex session and
-checkout with `lodestar handoff status --session-only`. An unarmed or terminal
-handoff needs no context load. An open one still uses the checked read and write
-path. Older cores without this option retain that legacy path; storage or
-ownership problems remain visible nonblocking capture diagnostics.
+### What each hook should do
+
+| Hook | Use it for | Routine cost |
+| --- | --- | --- |
+| SessionStart | Give one short instruction to read the owning record for substantive work. After compact, recover the exact bound work, not a transcript. | No project database read on ordinary startup. |
+| UserPromptSubmit | Keep exact handoff command authorization; recover a pending compact checkpoint once if the compact-start event did not deliver it. | No routine project database call or raw message capture. |
+| PreToolUse | Bind the existing continuity tool call to its real session, turn, checkout and arguments. | Only matches named Lodestar tools; no project database mutation. |
+| PreCompact | Save one checked checkpoint for a changed semantic work projection, only with an exact opt-in binding. | No database call when unbound; no new receipt when unchanged. |
+| Stop | Keep the explicit pending-note opt-in. Pre-existing or quoted marker text is not proof that a note belongs in the ledger. | No database call without an explicit note marker. No transcript tail capture. |
+
+For substantive work or a resume, read the existing exact work/handoff record
+once. At a material decision, verified milestone, blocker, handoff, or final
+completion, update the existing record with the change, evidence and next
+action. Read the checked write basis and verify the receipt. No automatic
+status writes for ordinary turns, repeated narration or unchanged state.
+Prefer a short evidence locator or digest to copied dialogue. A pending note
+is for review; it is not authoritative project status.
+
+Compaction writes a content-free local pending marker for the bound session.
+A successful compact-start recovery normally clears it. If that delivery is
+missed, the next prompt in the same session checks the marker and performs
+the same bounded, read-only recovery. Failed reads leave it available for
+retry. The marker does not establish whether a model subsequently acted on
+the advice; verify that independently from the tool read and resulting work.
 
 ## Runtime selection
 
@@ -88,7 +107,7 @@ payload against an already installed, exact candidate core:
 
 ```text
 node scripts/build-native-codex.mjs <new-output-directory>
-node scripts/smoke-native-codex.mjs <output-directory>/lodestar-native-codex-1.4.8.tgz <packed-core-directory>/lodestar.mjs
+node scripts/smoke-native-codex.mjs <output-directory>/lodestar-native-codex-1.4.9.tgz <packed-core-directory>/lodestar.mjs
 ```
 
 The builder writes the archive and `SHA256SUMS`, refuses existing output artifacts,

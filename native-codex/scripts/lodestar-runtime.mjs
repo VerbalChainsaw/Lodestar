@@ -580,7 +580,8 @@ export async function startupContext(input) {
     "Read only the relevant current work or handoff with lodestar_work_status / lodestar_handoff_status or the installed Lodestar CLI. " +
     "On a new project, use lodestar start --cwd <current checkout> --compact for orientation if supported; read exact required records/instructions separately. " +
     "This message contains no work records or write basis. Recover the current owner and stops, and obtain a current checked write basis before any Lodestar mutation. " +
-    "Do not duplicate records or claim a checkpoint without its receipt.";
+    "At a material decision, verified milestone, blocker, handoff, or completion, update the existing record once with the change, proof and next action. " +
+    "Skip chat, routine progress, unchanged state and transcript text. Confirm the write receipt before claiming a checkpoint.";
 }
 
 // Native local-only lifecycle adapter. The exact project/session binding is opt-in;
@@ -644,6 +645,29 @@ async function replayCompactionPending(host, dataDir, options) {
   await mutateOwned(saved.operation, saved.host, dataDir,
     () => { throw new Error("Exact replay must never build a new request"); }, options, saved.suffix);
 }
+function compactRecoveryMarker(input, dataDir) {
+  for (const field of ["session_id", "cwd"]) safe(input[field], field, 32_768);
+  return path.join(dataDir, "compact-recovery", `${key(canonical([path.resolve(input.cwd), input.session_id]))}.pending`);
+}
+
+async function markCompactRecovery(input, dataDir) {
+  const file = compactRecoveryMarker(input, dataDir);
+  await mkdir(path.dirname(file), { recursive: true });
+  try { await (await open(file, "wx", 0o600)).close(); }
+  catch (error) { if (error.code !== "EEXIST") throw error; }
+}
+
+export async function recoverCompactForHook(input, dataDir, options = {}, { pendingOnly = false } = {}) {
+  const marker = dataDir && compactRecoveryMarker(input, dataDir);
+  if (pendingOnly && (!marker || !existsSync(marker))) return null;
+  const context = await compactRecoveryContext(input, dataDir, options);
+  if (context !== null && marker) {
+    try { await unlink(marker); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  return context;
+}
+
 export async function checkpointForCompaction(input, dataDir, options = {}) {
   const binding = await compactionBinding(input);
   if (!binding) return { bound: false };
@@ -664,6 +688,7 @@ export async function checkpointForCompaction(input, dataDir, options = {}) {
     const previous = read.exact.ok ? read.exact.data.data.checkpoint.references : [];
     if (previous.some((reference) => reference.kind === "lodestar-work-check"
         && reference.semantic_sha256 === read.semantic)) {
+      await markCompactRecovery(input, dataDir);
       return { bound: true, changed: false, handoff_id: read.id, revision: read.exact.data.revision };
     }
     const requestHost = { ...host, argsDigest: read.semantic };
@@ -681,6 +706,7 @@ export async function checkpointForCompaction(input, dataDir, options = {}) {
       } };
     }, { ...options, basisReads: [read.check] },
     `compact:${read.semantic}:${read.exact.ok ? read.exact.data.revision : "absent"}`, { start: read.start });
+    await markCompactRecovery(input, dataDir);
     return { bound: true, changed: true, handoff_id: read.id,
       revision: result.data.record.revision, receipt: result.request };
   } finally { await handle.close(); await unlink(lock); }
@@ -704,7 +730,7 @@ export async function compactRecoveryContext(input, dataDir, options = {}) {
       saved_handoff_get_args: ["get", "--", read.id] },
     must_read_before_action: status !== "open" || pending.length > 0
       || read.projection.continuity?.complete !== true,
-    current: read.projection };
+    current: redact(read.projection).value };
   const prefix = "Lodestar compact recovery (v1):\n";
   let output = prefix + canonical(context);
   if (output.length > COMPACT_LIMIT) {
